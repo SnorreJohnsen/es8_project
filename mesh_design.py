@@ -5,8 +5,12 @@ import math
 def plot_drone_positions(grid_name: str,
                          drone_positions: np.ndarray, 
                          distance: float,
-                         range: float):
-    
+                         range: float,
+                         dim: tuple[float, float],
+                         sample_resolution: tuple[float, float]):
+    x_dim, y_dim = dim
+    x_sample_res, y_sample_res = sample_resolution
+
     fig, ax = plt.subplots()
     ax.set_aspect('equal', 'box') 
 
@@ -23,10 +27,6 @@ def plot_drone_positions(grid_name: str,
     x_pos = drone_positions[:, 0]
     y_pos = drone_positions[:, 1]
     ax.plot(x_pos, y_pos, 'o', color = 'red')
-
-    #for x, y in drone_positions:
-    #    circle = plt.Circle((x, y), range, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
-    #    ax.add_patch(circle)
 
     counts_inside = []
 
@@ -51,15 +51,41 @@ def plot_drone_positions(grid_name: str,
     max_drones_inside = np.max(counts_inside)
     avg_drones_inside = np.mean(counts_inside)
 
+    # Device points in drone area
+    x_device_points = np.linspace(0, x_dim, x_sample_res)
+    y_device_points = np.linspace(0, y_dim, y_sample_res)
+
+    valid_connection_counts = []
+
+    for x_new in x_device_points:
+        for y_new in y_device_points:
+            # Compute distances from device i to all drones
+            distances = np.sqrt(
+            (drone_positions[:, 0] - x_new)**2 +
+            (drone_positions[:, 1] - y_new)**2
+        )
+            
+            # Add connections to valid connection count
+            connections = np.sum(distances <= range)
+            valid_connection_counts.append(connections)
+
+    valid_connection_counts = np.array(valid_connection_counts)
+
+    min_device_connections = np.min(valid_connection_counts)
+    max_device_connections = np.max(valid_connection_counts)
+    avg_device_connections = np.mean(valid_connection_counts)
+
     ax.text(
     0.01, 0.98,  # x, y position in axes coordinates (0 to 1)
-    f"Drone connections: Min = {min_drones_inside}, Max = {max_drones_inside}, Avg = {avg_drones_inside:.2f}",
+    f"Drone connections: Min = {min_drones_inside}, Max = {max_drones_inside}, Avg = {avg_drones_inside:.2f}, Device Connections: Min = {min_device_connections}, Max = {max_device_connections}, Avg = {avg_device_connections:.2f}",
     transform=ax.transAxes,  # coordinates relative to axes
     fontsize=12,
     verticalalignment='top',   # align top of text to y position
     horizontalalignment='left', # align left of text to x position
     bbox=dict(facecolor='white', alpha=1, edgecolor='black')  # optional background box
     )
+
+    
 
 def make_grid_product(x_range, y_range):
     return np.stack(np.meshgrid(x_range, y_range), axis = -1).reshape(-1,2)
@@ -304,24 +330,22 @@ scale_factor = 1
 test_dim = (length*scale_factor, width*scale_factor)
 test_distance = 1000
 test_range = 1000
+sample_rate = (100, 50)
 
 drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = True)
-plot_drone_positions("Hexagonal", drone_pos_hex, distance=test_distance, range=test_range)
+plot_drone_positions("Hexagonal", drone_pos_hex, distance=test_distance, range=test_range, dim=test_dim, sample_resolution=sample_rate)
 
-
-plt.show()
-exit()
 drone_pos_hex_diamond = drone_hex_diamond_grid(test_dim, test_distance)
-plot_drone_positions("Hexagonal-diamond", drone_pos_hex_diamond, distance=test_distance, range=test_range)
+plot_drone_positions("Hexagonal-diamond", drone_pos_hex_diamond, distance=test_distance, range=test_range, dim=test_dim, sample_resolution=sample_rate)
 
 drone_pos_hex_squished = drone_hex_grid_squished(test_dim, test_distance)
-plot_drone_positions("Hexagonal-squished", drone_pos_hex_squished, distance=test_distance, range=test_range)
+plot_drone_positions("Hexagonal-squished", drone_pos_hex_squished, distance=test_distance, range=test_range, dim=test_dim, sample_resolution=sample_rate)
 
 drone_pos_tri = drone_triangle_grid(test_dim, test_distance)
-plot_drone_positions("Triangle", drone_pos_tri, distance=test_distance, range=test_range)
+plot_drone_positions("Triangle", drone_pos_tri, distance=test_distance, range=test_range, dim=test_dim, sample_resolution=sample_rate)
 
 drone_pos_sq = drone_sq_grid(test_dim, test_distance)
-plot_drone_positions("Square", drone_pos_sq, distance=test_distance, range=test_range)
+plot_drone_positions("Square", drone_pos_sq, distance=test_distance, range=test_range, dim=test_dim, sample_resolution=sample_rate)
 
 plt.show()
 
