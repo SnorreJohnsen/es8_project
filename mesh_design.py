@@ -61,10 +61,6 @@ def plot_drone_positions(grid_name: str,
     bbox=dict(facecolor='white', alpha=1, edgecolor='black')  # optional background box
     )
 
-    fig.tight_layout()
-
-  
-
 def make_grid_product(x_range, y_range):
     return np.stack(np.meshgrid(x_range, y_range), axis = -1).reshape(-1,2)
 
