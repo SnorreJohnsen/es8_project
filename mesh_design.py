@@ -24,9 +24,43 @@ def plot_drone_positions(grid_name: str,
     y_pos = drone_positions[:, 1]
     ax.plot(x_pos, y_pos, 'o', color = 'red')
 
-    for x, y in drone_positions:
+    #for x, y in drone_positions:
+    #    circle = plt.Circle((x, y), range, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
+    #    ax.add_patch(circle)
+
+    counts_inside = []
+
+    for i, (x, y) in enumerate(drone_positions):
+        # Compute distances from drone i to all drones
+        distances = np.sqrt(
+            (drone_positions[:, 0] - x)**2 +
+            (drone_positions[:, 1] - y)**2
+        )
+
+        # Count how many are within range (exclude itself)
+        count = np.sum(distances <= range+1) - 1
+        counts_inside.append(count)
+
+        # Draw communcation range as circle
         circle = plt.Circle((x, y), range, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
         ax.add_patch(circle)
+
+    counts_inside = np.array(counts_inside)
+
+    min_drones_inside = np.min(counts_inside)
+    max_drones_inside = np.max(counts_inside)
+    avg_drones_inside = np.mean(counts_inside)
+
+    ax.text(
+    0.01, 0.98,  # x, y position in axes coordinates (0 to 1)
+    f"Drone connections: Min = {min_drones_inside}, Max = {max_drones_inside}, Avg = {avg_drones_inside:.2f}",
+    transform=ax.transAxes,  # coordinates relative to axes
+    fontsize=12,
+    verticalalignment='top',   # align top of text to y position
+    horizontalalignment='left', # align left of text to x position
+    bbox=dict(facecolor='white', alpha=1, edgecolor='black')  # optional background box
+    )
+
   
 
 def make_grid_product(x_range, y_range):
