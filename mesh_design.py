@@ -10,14 +10,14 @@ def plot_drone_positions(grid_name: str,
     fig, ax = plt.subplots()
     ax.set_aspect('equal', 'box') 
 
-    ax.set_xlabel("meters", fontsize=14)
-    ax.set_ylabel("meters", fontsize=14)
+    ax.set_xlabel("meters", fontsize=16)
+    ax.set_ylabel("meters", fontsize=16)
 
-    ax.tick_params(axis='both', labelsize=14)
+    ax.tick_params(axis='both', labelsize=16)
 
     # Stating number of drones in mesh
     num_drones = len(drone_positions) 
-    ax.set_title(f"{grid_name} Mesh, Drones = {num_drones}, d = {distance} m, d_comm = {range} m", fontsize=14)
+    ax.set_title(f"{grid_name} Mesh, Drones = {num_drones}, d = {distance} m, d_comm = {range} m", fontsize=16)
 
     # Plot drone positions as dots
     x_pos = drone_positions[:, 0]
@@ -233,7 +233,7 @@ def drone_hex_grid(dim: tuple[float, float],
     part_i = 0
     while part_stepsize < x_dim:
         # Every 2nd step adds the offset
-        # step = dist + col_x_dist_offset if part_i % 2 == 1 else dist  # original - offset on odd 
+        #step = dist + col_x_dist_offset if part_i % 2 == 1 else dist  # original - offset on odd 
         step = dist if part_i % 2 == 1 else dist + col_x_dist_offset    # offset on even (starting with partial on left edge)
         part_stepsize = part_x_positions[-1] + step
         if part_stepsize <= x_dim:
