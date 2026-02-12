@@ -61,6 +61,8 @@ def plot_drone_positions(grid_name: str,
     bbox=dict(facecolor='white', alpha=1, edgecolor='black')  # optional background box
     )
 
+    fig.tight_layout()
+
   
 
 def make_grid_product(x_range, y_range):
@@ -75,7 +77,6 @@ def drone_sq_grid(dim: tuple[float, float],
 
     return make_grid_product(x_range, y_range)
     
-
 def drone_triangle_grid(dim: tuple[float, float],
                    dist: float):
     
@@ -299,7 +300,6 @@ def drone_hex_grid(dim: tuple[float, float],
 
     total_grid = np.vstack(full_grid_positions + part_grid_positions)
     return total_grid
-
 
 length = 30000
 width = 10000
