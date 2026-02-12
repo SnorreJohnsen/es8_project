@@ -213,32 +213,50 @@ def drone_hex_diamond_grid(dim: tuple[float, float],
     return full_grid
 
 def drone_hex_grid(dim: tuple[float, float],
-                   dist: float):
-
-    x_dim, y_dim = dim
-    x_dim = x_dim + dist # added dist for extra column of drones on the right edge
+                   dist: float,
+                   extra_edge_drones: bool):
 
     # Angle next node 
     alpha = np.radians(60)
 
-    # Calculate y locations for full columns
-    y_step_size = 2*np.sqrt(dist**2 - (dist/2)**2)
-    #full_cols_y_range = np.arange(0, y_dim+1, y_step_size) # original without extra drones on edges
-    full_cols_y_range = np.arange(0 - y_step_size/2, y_dim+dist, y_step_size) # added drones on edges
-
-    # Calculate y locations for part columns
-    #part_cols_y_range = np.arange(y_step_size/2, y_dim+1, y_step_size) # original without extra drones on edges
-    part_cols_y_range = np.arange(0, y_dim+dist, y_step_size) # added drones on edges
-
     # Calculate offsets
     col_x_dist_offset = 2*np.cos(alpha)*dist
 
-    # Generate X positions with alternating step for full columns
-    #full_x_positions = [0] # original without drones on edges
-    #full_stepsize = 0 # original stepsize
-      
-    full_x_positions = [col_x_dist_offset/2] # added drones on the edges
-    full_stepsize = full_x_positions[-1] # change stepsize for extra drones on edges
+    # Calculate y locations for full columns
+    y_step_size = 2*np.sqrt(dist**2 - (dist/2)**2)
+
+    if extra_edge_drones == False:
+        x_dim, y_dim = dim
+        full_cols_y_range = np.arange(0, y_dim+1, y_step_size) # original without extra drones on edges
+
+        # Calculate y locations for partial columns
+        part_cols_y_range = np.arange(y_step_size/2, y_dim+1, y_step_size) # original without extra drones on edges
+
+        # Generate X positions with alternating step for full columns
+        full_x_positions = [0] # original without drones on edges
+        full_stepsize = 0 # original stepsize
+
+        # Generate X positions with alternating steps for partial columns
+        part_x_positions = [dist + col_x_dist_offset/2]  # first point (original without drones on edges)
+        part_stepsize = part_x_positions[-1] # original stepsize
+
+    else:
+        x_dim, y_dim = dim
+        x_dim = x_dim + dist # added dist for extra column of drones on the right edge
+        full_cols_y_range = np.arange(0 - y_step_size/2, y_dim+dist, y_step_size) # added drones on edges
+        
+        # Calculate y locations for partial columns
+        part_cols_y_range = np.arange(0, y_dim+dist, y_step_size) # added drones on edges
+
+        # Generate X positions with alternating step for full columns
+        full_x_positions = [col_x_dist_offset/2] # added drones on the edges
+        full_stepsize = full_x_positions[-1] # change stepsize for extra drones on edges
+
+        # Generate X positions with alternating steps for partial columns
+        part_x_positions = [0]  # first point (added drones on the edges)
+        part_stepsize = 0 # change stepsize for extra drones on edges
+
+
     full_i = 0
     while full_stepsize < x_dim:
         # Every 2nd step adds the offset
@@ -257,18 +275,14 @@ def drone_hex_grid(dim: tuple[float, float],
         full_column_positions = make_grid_product([full_cols_x_range], full_cols_y_range)
         full_grid_positions.append(full_column_positions)
 
-    # Generate X positions with alternating steps for partial columns
-    #part_x_positions = [dist + col_x_dist_offset/2]  # first point (original without drones on edges)
-    #part_stepsize = part_x_positions[-1] # original stepsize
-    
-    part_x_positions = [0]  # first point (added drones on the edges)
-    part_stepsize = 0 # change stepsize for extra drones on edges
 
     part_i = 0
     while part_stepsize < x_dim:
         # Every 2nd step adds the offset
-        #step = dist + col_x_dist_offset if part_i % 2 == 1 else dist  # original - offset on odd 
-        step = dist if part_i % 2 == 1 else dist + col_x_dist_offset    # offset on even (starting with partial on left edge)
+        if extra_edge_drones == False:
+            step = dist + col_x_dist_offset if part_i % 2 == 1 else dist  # original - offset on odd 
+        else:
+            step = dist if part_i % 2 == 1 else dist + col_x_dist_offset    # offset on even (starting with partial on left edge)
         part_stepsize = part_x_positions[-1] + step
         if part_stepsize <= x_dim:
             part_x_positions.append(part_stepsize)
@@ -295,9 +309,12 @@ test_dim = (length*scale_factor, width*scale_factor)
 test_distance = 1000
 test_range = 1000
 
-drone_pos_hex = drone_hex_grid(test_dim, test_distance)
+drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = True)
 plot_drone_positions("Hexagonal", drone_pos_hex, distance=test_distance, range=test_range)
 
+
+plt.show()
+exit()
 drone_pos_hex_diamond = drone_hex_diamond_grid(test_dim, test_distance)
 plot_drone_positions("Hexagonal-diamond", drone_pos_hex_diamond, distance=test_distance, range=test_range)
 
