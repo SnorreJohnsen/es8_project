@@ -15,7 +15,7 @@ def plot_drone_positions(grid_name: str,
 
     # Stating number of drones in mesh
     num_drones = len(drone_positions) 
-    ax.set_title(f"Mesh network ({grid_name}), Drones = {num_drones}, Distance = {distance} meter, Range = {range} meter")
+    ax.set_title(f"{grid_name} Mesh, Drones = {num_drones}, d = {distance} m, d_comm = {range} m")
 
     # Plot drone positions as dots
     x_pos = drone_positions[:, 0]
@@ -249,19 +249,19 @@ test_distance = 1000
 test_range = 1000
 
 drone_pos_hex = drone_hex_grid(test_dim, test_distance)
-plot_drone_positions("hexagon", drone_pos_hex, distance=test_distance, range=test_range)
+plot_drone_positions("Hexagon", drone_pos_hex, distance=test_distance, range=test_range)
 
 drone_pos_hex_diamond = drone_hex_diamond_grid(test_dim, test_distance)
-plot_drone_positions("hexagon-diamond", drone_pos_hex_diamond, distance=test_distance, range=test_range)
+plot_drone_positions("Hexagon-diamond", drone_pos_hex_diamond, distance=test_distance, range=test_range)
 
 drone_pos_hex_squished = drone_hex_grid_squished(test_dim, test_distance)
-plot_drone_positions("hexagon-squished", drone_pos_hex_squished, distance=test_distance, range=test_range)
+plot_drone_positions("Hexagon-squished", drone_pos_hex_squished, distance=test_distance, range=test_range)
 
 drone_pos_tri = drone_triangle_grid(test_dim, test_distance)
-plot_drone_positions("triangle", drone_pos_tri, distance=test_distance, range=test_range)
+plot_drone_positions("Triangle", drone_pos_tri, distance=test_distance, range=test_range)
 
 drone_pos_sq = drone_sq_grid(test_dim, test_distance)
-plot_drone_positions("square", drone_pos_sq, distance=test_distance, range=test_range)
+plot_drone_positions("Square", drone_pos_sq, distance=test_distance, range=test_range)
 
 plt.show()
 
