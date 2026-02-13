@@ -331,7 +331,7 @@ scale_factor = 1
 test_dim = (length*scale_factor, width*scale_factor)
 test_distance = 1000
 test_range = 1000
-sample_rate = (10, 10)
+samples = (6000, 2000)
 file_folder = "./mesh_design_out"
 
 drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = True)
@@ -340,7 +340,7 @@ plot_drone_positions("Hexagonal",
                      distance=test_distance, 
                      range=test_range, 
                      dim=test_dim, 
-                     sample_resolution=sample_rate, 
+                     sample_resolution=samples, 
                      file_path_folder=file_folder)
 
 drone_pos_hex_diamond = drone_hex_diamond_grid(test_dim, test_distance)
@@ -349,7 +349,7 @@ plot_drone_positions("Hexagonal-diamond",
                      distance=test_distance, 
                      range=test_range, 
                      dim=test_dim, 
-                     sample_resolution=sample_rate, 
+                     sample_resolution=samples, 
                      file_path_folder=file_folder)
 
 drone_pos_hex_squished = drone_hex_grid_squished(test_dim, test_distance)
@@ -358,7 +358,7 @@ plot_drone_positions("Hexagonal-squished",
                      distance=test_distance, 
                      range=test_range, 
                      dim=test_dim, 
-                     sample_resolution=sample_rate, 
+                     sample_resolution=samples, 
                      file_path_folder=file_folder)
 
 drone_pos_tri = drone_triangle_grid(test_dim, test_distance)
@@ -367,7 +367,7 @@ plot_drone_positions("Triangle",
                      distance=test_distance, 
                      range=test_range, 
                      dim=test_dim, 
-                     sample_resolution=sample_rate, 
+                     sample_resolution=samples, 
                      file_path_folder=file_folder)
 
 drone_pos_sq = drone_sq_grid(test_dim, test_distance)
@@ -376,6 +376,6 @@ plot_drone_positions("Square",
                      distance=test_distance, 
                      range=test_range, 
                      dim=test_dim, 
-                     sample_resolution=sample_rate, 
+                     sample_resolution=samples, 
                      file_path_folder=file_folder)
 
