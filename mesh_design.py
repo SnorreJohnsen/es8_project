@@ -73,8 +73,8 @@ def plot_drone_positions(grid_name: str,
 
     title_text = (
     f"{grid_name} Mesh, Drones = {num_drones}, d = {distance} m, d_comm = {range} m\n"
-    f"Drone connections: Min = {min_drones_inside}, Max = {max_drones_inside}, Avg = {avg_drones_inside:.2f} \n "
-    f"Device connections: Min = {min_device_connections}, Max = {max_device_connections}, Avg = {avg_device_connections:.2f}"
+    f"Drone connections: Min = {min_drones_inside}, Avg = {avg_drones_inside:.2f} \n "
+    f"Device connections: Min = {min_device_connections}, Avg = {avg_device_connections:.2f}"
 )
 
     ax.set_title(title_text, fontsize=font_size, pad=10)  # pad adds space above plot
@@ -336,7 +336,7 @@ scale_factor = 1
 test_dim = (length*scale_factor, width*scale_factor)
 test_distance = 1000
 test_range = 1000
-sample_rate = (100, 50)
+sample_rate = (1000, 1000)
 file_folder = "./mesh_design_out"
 
 drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = True)
