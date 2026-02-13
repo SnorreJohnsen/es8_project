@@ -28,13 +28,10 @@ def plot_drone_positions(grid_name: str,
 
     for i, (x, y) in enumerate(drone_positions):
         # Compute distances from drone i to all drones
-        distances = np.sqrt(
-            (drone_positions[:, 0] - x)**2 +
-            (drone_positions[:, 1] - y)**2
-        )
-
+        distances = (drone_positions[:, 0] - x)**2 + (drone_positions[:, 1] - y)**2
+        
         # Count how many are within range (exclude itself)
-        count = np.sum(distances <= range+1) - 1
+        count = np.sum(distances <= (range+1)**2) - 1
         counts_inside.append(count)
 
         # Draw communcation range as circle
@@ -44,7 +41,7 @@ def plot_drone_positions(grid_name: str,
     counts_inside = np.array(counts_inside)
 
     min_drones_inside = np.min(counts_inside)
-    max_drones_inside = np.max(counts_inside)
+    #max_drones_inside = np.max(counts_inside) #commented out since its not used in plot fig
     avg_drones_inside = np.mean(counts_inside)
 
     # Device points in drone area
@@ -56,13 +53,11 @@ def plot_drone_positions(grid_name: str,
     for x_new in x_device_points:
         for y_new in y_device_points:
             # Compute distances from device i to all drones
-            distances = np.sqrt(
-            (drone_positions[:, 0] - x_new)**2 +
-            (drone_positions[:, 1] - y_new)**2
-        )
-            
+            distances = (drone_positions[:, 0] - x_new)**2 + (drone_positions[:, 1] - y_new)**2
+
             # Add connections to valid connection count
-            connections = np.sum(distances <= range)
+            connections = np.sum(distances <= range**2)
+
             valid_connection_counts.append(connections)
 
     valid_connection_counts = np.array(valid_connection_counts)
@@ -336,7 +331,7 @@ scale_factor = 1
 test_dim = (length*scale_factor, width*scale_factor)
 test_distance = 1000
 test_range = 1000
-sample_rate = (1000, 1000)
+sample_rate = (10, 10)
 file_folder = "./mesh_design_out"
 
 drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = True)
