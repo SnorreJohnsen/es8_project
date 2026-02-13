@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 import os
+from tqdm import tqdm
 
 def plot_drone_positions(grid_name: str,
                          drone_positions: np.ndarray, 
@@ -50,7 +51,7 @@ def plot_drone_positions(grid_name: str,
 
     valid_connection_counts = []
 
-    for x_new in x_device_points:
+    for x_new in tqdm(x_device_points, desc=f"Computing distances for {grid_name} mesh"):
         for y_new in y_device_points:
             # Compute distances from device i to all drones
             distances = (drone_positions[:, 0] - x_new)**2 + (drone_positions[:, 1] - y_new)**2
@@ -331,7 +332,7 @@ scale_factor = 1
 test_dim = (length*scale_factor, width*scale_factor)
 test_distance = 1000
 test_range = 1000
-samples = (6000, 2000)
+samples = (600, 200)
 file_folder = "./mesh_design_out"
 
 drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = True)
@@ -342,7 +343,7 @@ plot_drone_positions("Hexagonal",
                      dim=test_dim, 
                      sample_resolution=samples, 
                      file_path_folder=file_folder)
-
+"""
 drone_pos_hex_diamond = drone_hex_diamond_grid(test_dim, test_distance)
 plot_drone_positions("Hexagonal-diamond", 
                      drone_pos_hex_diamond, 
@@ -360,7 +361,8 @@ plot_drone_positions("Hexagonal-squished",
                      dim=test_dim, 
                      sample_resolution=samples, 
                      file_path_folder=file_folder)
-
+"""
+                     
 drone_pos_tri = drone_triangle_grid(test_dim, test_distance)
 plot_drone_positions("Triangle", 
                      drone_pos_tri, 
