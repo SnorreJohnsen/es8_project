@@ -261,11 +261,12 @@ def distance_calc(dist_comm: float,
     
 
 def dist_comm_calc(data_rate_Mbps: float, 
-                   bandwidth_Mhz: float = 5, 
-                   noise_figure_db: float = 3, 
-                   transmit_power_dbm: float = 24, 
+                   bandwidth_Mhz: float = 4, 
+                   noise_figure_db: float = 6, 
+                   transmit_power_dbm: float = 22, 
                    transmit_gain_dbi: float = 0, 
                    received_gain_dbi: float = 0,
+                   margin_loss: float = 10, 
                    freq_mhz: float = 865) -> float:
     """
     default values:
@@ -276,6 +277,7 @@ def dist_comm_calc(data_rate_Mbps: float,
     transmit_power_dbm = 24dbm
     transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
     received_gain_dbi = 0 usually in range 0-3 dbi
+    margin_loss = 2 dB (other losses like polarization mismatch)
     freq_mhz = 863 - 868 (wifi halow)
     """
 
@@ -295,14 +297,14 @@ def dist_comm_calc(data_rate_Mbps: float,
     received_power_dbm = snr_db + noise_power_dbm
 
     # Calculate free space path loss 
-    fspl = transmit_power_dbm + transmit_gain_dbi + received_gain_dbi - received_power_dbm
+    fspl = transmit_power_dbm + transmit_gain_dbi + received_gain_dbi - received_power_dbm - margin_loss
 
     # Calculate communication distance
     dist_comm_km = 10**((fspl - 20 * math.log10(freq_mhz) - 32.44) / 20)
     
     dist_comm = dist_comm_km * 1000
 
-    return dist_comm
+    return dist_comm, received_power_dbm, snr_db
 
 def plot_drone_positions(grid_name: str,
                          drone_positions: np.ndarray, 
@@ -401,8 +403,10 @@ test_tolerances = (0.05, 0.15, 3) #tolerances in percentage (min, max, step)
 test_dist_redundancy = 0
 
 
-dist_comm = dist_comm_calc(8, 5)
-print(dist_comm)
+dist_comm, received_power_dbm, snr_db = dist_comm_calc(data_rate_Mbps=8)
+print(f"{dist_comm=}")
+print(f"{received_power_dbm=}")
+print(f"{snr_db=}")
 
 exit()
 test_distance = distance_calc(test_dist_comm, test_tolerances, test_dist_redundancy)
