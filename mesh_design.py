@@ -4,91 +4,6 @@ import math
 import os
 from tqdm import tqdm
 
-def plot_drone_positions(grid_name: str,
-                         drone_positions: np.ndarray, 
-                         distance: float,
-                         range: float,
-                         dim: tuple[float, float],
-                         sample_resolution: tuple[int, int],
-                         file_path_folder: str):
-    x_dim, y_dim = dim
-    x_sample_res, y_sample_res = sample_resolution
-    font_size = 8
-
-    fig, ax = plt.subplots()
-
-    # Stating number of drones in mesh
-    num_drones = len(drone_positions) 
-
-    # Plot drone positions as dots
-    x_pos = drone_positions[:, 0]
-    y_pos = drone_positions[:, 1]
-    ax.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
-
-    counts_inside = []
-
-    for i, (x, y) in enumerate(drone_positions):
-        # Compute distances from drone i to all drones
-        distances = (drone_positions[:, 0] - x)**2 + (drone_positions[:, 1] - y)**2
-        
-        # Count how many are within range (exclude itself)
-        count = np.sum(distances <= (range+1)**2) - 1
-        counts_inside.append(count)
-
-        # Draw communcation range as circle
-        circle = plt.Circle((x, y), range, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
-        ax.add_patch(circle)
-
-    counts_inside = np.array(counts_inside)
-
-    min_drones_inside = np.min(counts_inside)
-    #max_drones_inside = np.max(counts_inside) #commented out since its not used in plot fig
-    avg_drones_inside = np.mean(counts_inside)
-
-    # Device points in drone area
-    x_device_points = np.linspace(0, x_dim, x_sample_res)
-    y_device_points = np.linspace(0, y_dim, y_sample_res)
-
-    valid_connection_counts = []
-
-    for x_new in tqdm(x_device_points, desc=f"Computing distances for {grid_name} mesh"):
-        for y_new in y_device_points:
-            # Compute distances from device i to all drones
-            distances = (drone_positions[:, 0] - x_new)**2 + (drone_positions[:, 1] - y_new)**2
-
-            # Add connections to valid connection count
-            connections = np.sum(distances <= range**2)
-
-            valid_connection_counts.append(connections)
-
-    valid_connection_counts = np.array(valid_connection_counts)
-
-    min_device_connections = np.min(valid_connection_counts)
-    max_device_connections = np.max(valid_connection_counts)
-    avg_device_connections = np.mean(valid_connection_counts)
-
-    title_text = (
-    f"{grid_name} Mesh, Drones = {num_drones}, d = {distance} m, d_comm = {range} m\n"
-    f"Drone connections: Min = {min_drones_inside}, Avg = {avg_drones_inside:.2f} \n "
-    f"Device connections: Min = {min_device_connections}, Avg = {avg_device_connections:.2f}"
-)
-
-    ax.set_title(title_text, fontsize=font_size, pad=10)  # pad adds space above plot
-    
-    ax.set_xlabel("meters", fontsize=font_size)
-    ax.set_ylabel("meters", fontsize=font_size)
-
-    ax.set_aspect('equal', 'box')
-    ax.tick_params(axis='both', labelsize=font_size)
-
-    # save fig to file path
-    os.makedirs(file_path_folder, exist_ok=True)
-    file_path = os.path.join(file_path_folder, f"{grid_name}.png")
-    fig.savefig(file_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-
-    
-
 def make_grid_product(x_range, y_range):
     return np.stack(np.meshgrid(x_range, y_range), axis = -1).reshape(-1,2)
 
@@ -325,30 +240,150 @@ def drone_hex_grid(dim: tuple[float, float],
     total_grid = np.vstack(full_grid_positions + part_grid_positions)
     return total_grid
 
+def distance_calc(dist_comm: float, 
+                  tolerances_input: tuple[float, float, float], 
+                  dist_redundancy: float) -> np.ndarray:
+    distance = []
+
+    tol_min, tol_max, tol_step = tolerances_input
+
+    # Convert percentage to meter
+    tol_min = tol_min*dist_comm
+    tol_max = tol_max*dist_comm
+
+    tolerances = np.linspace(tol_min, tol_max, tol_step)
+    
+
+    distance = dist_comm - tolerances - dist_redundancy
+
+    return distance
+
+def plot_drone_positions(grid_name: str,
+                         drone_positions: np.ndarray, 
+                         distance: float,
+                         dist_comm: float,
+                         dim: tuple[float, float],
+                         sample_resolution: tuple[int, int],
+                         file_path_folder: str):
+    x_dim, y_dim = dim
+    x_sample_res, y_sample_res = sample_resolution
+    font_size = 8
+
+    fig, ax = plt.subplots()
+
+    # Stating number of drones in mesh
+    num_drones = len(drone_positions) 
+
+    # Plot drone positions as dots
+    x_pos = drone_positions[:, 0]
+    y_pos = drone_positions[:, 1]
+    ax.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
+
+    counts_inside = []
+
+    for i, (x, y) in enumerate(drone_positions):
+        # Compute distances from drone i to all drones
+        distances = (drone_positions[:, 0] - x)**2 + (drone_positions[:, 1] - y)**2
+        
+        # Count how many are within dist_comm (exclude itself)
+        count = np.sum(distances <= (dist_comm+1)**2) - 1
+        counts_inside.append(count)
+
+        # Draw communcation dist_comm as circle
+        circle = plt.Circle((x, y), dist_comm, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
+        ax.add_patch(circle)
+
+    counts_inside = np.array(counts_inside)
+
+    min_drones_inside = np.min(counts_inside)
+    #max_drones_inside = np.max(counts_inside) #commented out since its not used in plot fig
+    avg_drones_inside = np.mean(counts_inside)
+
+    # Device points in drone area
+    x_device_points = np.linspace(0, x_dim, x_sample_res)
+    y_device_points = np.linspace(0, y_dim, y_sample_res)
+
+    valid_connection_counts = []
+
+    for x_new in tqdm(x_device_points, desc=f"Computing distances for {grid_name} mesh"):
+        for y_new in y_device_points:
+            # Compute distances from device i to all drones
+            distances = (drone_positions[:, 0] - x_new)**2 + (drone_positions[:, 1] - y_new)**2
+
+            # Add connections to valid connection count
+            connections = np.sum(distances <= dist_comm**2)
+
+            valid_connection_counts.append(connections)
+
+    valid_connection_counts = np.array(valid_connection_counts)
+
+    min_device_connections = np.min(valid_connection_counts)
+    max_device_connections = np.max(valid_connection_counts)
+    avg_device_connections = np.mean(valid_connection_counts)
+
+    title_text = (
+    f"{grid_name} Mesh, Drones = {num_drones}, d = {distance} m, dist_comm = {dist_comm} m\n"
+    f"Drone connections: Min = {min_drones_inside}, Avg = {avg_drones_inside:.2f} \n "
+    f"Device connections: Min = {min_device_connections}, Avg = {avg_device_connections:.2f}"
+)
+
+    ax.set_title(title_text, fontsize=font_size, pad=10)  # pad adds space above plot
+    
+    ax.set_xlabel("meters", fontsize=font_size)
+    ax.set_ylabel("meters", fontsize=font_size)
+
+    ax.set_aspect('equal', 'box')
+    ax.tick_params(axis='both', labelsize=font_size)
+
+    # save fig to file path
+    os.makedirs(file_path_folder, exist_ok=True)
+    file_path = os.path.join(file_path_folder, f"{grid_name}.png")
+    fig.savefig(file_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+
 length = 30000
 width = 10000
 scale_factor = 1
 
 test_dim = (length*scale_factor, width*scale_factor)
-test_distance = 1000
-test_range = 1000
+test_dist_comm = 2000
 samples = (600, 200)
 file_folder = "./mesh_design_out"
 
-drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = True)
+test_tolerances = (0.05, 0.15, 3) #tolerances in percentage (min, max, step)
+test_dist_redundancy = 0
+
+
+test_distance = distance_calc(test_dist_comm, test_tolerances, test_dist_redundancy)
+
+
+for i in range(3):
+    drone_pos_sq = drone_sq_grid(test_dim, test_distance[i])
+    plot_drone_positions(f"Square_{i}", 
+                        drone_pos_sq, 
+                        distance=test_distance[i], 
+                        dist_comm=test_dist_comm, 
+                        dim=test_dim, 
+                        sample_resolution=samples, 
+                        file_path_folder=file_folder)
+
+
+"""
+drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = False)
 plot_drone_positions("Hexagonal", 
                      drone_pos_hex, 
                      distance=test_distance, 
-                     range=test_range, 
+                     dist_comm=test_dist_comm, 
                      dim=test_dim, 
                      sample_resolution=samples, 
                      file_path_folder=file_folder)
-"""
+
 drone_pos_hex_diamond = drone_hex_diamond_grid(test_dim, test_distance)
 plot_drone_positions("Hexagonal-diamond", 
                      drone_pos_hex_diamond, 
                      distance=test_distance, 
-                     range=test_range, 
+                     dist_comm=test_dist_comm, 
                      dim=test_dim, 
                      sample_resolution=samples, 
                      file_path_folder=file_folder)
@@ -357,27 +392,18 @@ drone_pos_hex_squished = drone_hex_grid_squished(test_dim, test_distance)
 plot_drone_positions("Hexagonal-squished", 
                      drone_pos_hex_squished, 
                      distance=test_distance, 
-                     range=test_range, 
+                     dist_comm=test_dist_comm, 
                      dim=test_dim, 
                      sample_resolution=samples, 
                      file_path_folder=file_folder)
-"""
-                     
+                   
 drone_pos_tri = drone_triangle_grid(test_dim, test_distance)
 plot_drone_positions("Triangle", 
                      drone_pos_tri, 
                      distance=test_distance, 
-                     range=test_range, 
+                     dist_comm=test_dist_comm, 
                      dim=test_dim, 
                      sample_resolution=samples, 
                      file_path_folder=file_folder)
 
-drone_pos_sq = drone_sq_grid(test_dim, test_distance)
-plot_drone_positions("Square", 
-                     drone_pos_sq, 
-                     distance=test_distance, 
-                     range=test_range, 
-                     dim=test_dim, 
-                     sample_resolution=samples, 
-                     file_path_folder=file_folder)
-
+"""
