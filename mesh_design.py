@@ -258,6 +258,52 @@ def distance_calc(dist_comm: float,
 
     return distance
 
+    
+
+def dist_comm_calc(data_rate_Mbps: float, 
+                   bandwidth_Mhz: float = 5, 
+                   noise_figure_db: float = 3, 
+                   transmit_power_dbm: float = 24, 
+                   transmit_gain_dbi: float = 0, 
+                   received_gain_dbi: float = 0,
+                   freq_mhz: float = 865) -> float:
+    """
+    default values:
+    
+
+    bandwidth = 5 MHz (bandwidth of wifi halow)
+    noise_figure = 3db (double of ideal thermal noise) usually 3-5db
+    transmit_power_dbm = 24dbm
+    transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
+    received_gain_dbi = 0 usually in range 0-3 dbi
+    freq_mhz = 863 - 868 (wifi halow)
+    """
+
+
+    # Calculate shannon 
+    # data_rate_bps = bandwidth_hz * math.log2(1 + (signal_power/noise_power))
+    # isolate snr
+    data_rate_bps = data_rate_Mbps * 10**6 # convert datarate from Mpbs to bps
+    bandwidth_hz = bandwidth_Mhz * 10**6 # convert bandwidth from Mhz to Hz
+    snr = 2**(data_rate_bps/bandwidth_hz) - 1
+    snr_db = 10* math.log10(snr)
+
+    # Calculate noise power (-174 dbm/Hz is thermal noise density )
+    noise_power_dbm = -174 + 10 * math.log10(bandwidth_hz) + noise_figure_db
+
+    # Calculate received power
+    received_power_dbm = snr_db + noise_power_dbm
+
+    # Calculate free space path loss 
+    fspl = transmit_power_dbm + transmit_gain_dbi + received_gain_dbi - received_power_dbm
+
+    # Calculate communication distance
+    dist_comm_km = 10**((fspl - 20 * math.log10(freq_mhz) - 32.44) / 20)
+    
+    dist_comm = dist_comm_km * 1000
+
+    return dist_comm
+
 def plot_drone_positions(grid_name: str,
                          drone_positions: np.ndarray, 
                          distance: float,
@@ -355,6 +401,10 @@ test_tolerances = (0.05, 0.15, 3) #tolerances in percentage (min, max, step)
 test_dist_redundancy = 0
 
 
+dist_comm = dist_comm_calc(8, 5)
+print(dist_comm)
+
+exit()
 test_distance = distance_calc(test_dist_comm, test_tolerances, test_dist_redundancy)
 
 
@@ -367,6 +417,7 @@ for i in range(3):
                         dim=test_dim, 
                         sample_resolution=samples, 
                         file_path_folder=file_folder)
+
 
 
 """
