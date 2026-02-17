@@ -259,25 +259,19 @@ def distance_calc(dist_comm: float,
     return distance
 
     
-
-def dist_comm_calc(data_rate_Mbps: float, 
-                   bandwidth_Mhz: float = 4, 
-                   noise_figure_db: float = 6, 
-                   transmit_power_dbm: float = 22, 
-                   transmit_gain_dbi: float = 0, 
-                   received_gain_dbi: float = 0,
-                   margin_loss: float = 10, 
-                   freq_mhz: float = 865) -> float:
+# Shannon for calculating received power (not in use due to reuslt 48 km :)
+def shannon(data_rate_Mbps: float, 
+            bandwidth_Mhz: float = 4, 
+            noise_figure_db: float = 6) -> float:
     """
     default values:
-    
 
     bandwidth = 5 MHz (bandwidth of wifi halow)
     noise_figure = 3db (double of ideal thermal noise) usually 3-5db
     transmit_power_dbm = 24dbm
     transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
     received_gain_dbi = 0 usually in range 0-3 dbi
-    margin_loss = 2 dB (other losses like polarization mismatch)
+    margin_loss_db = 2 dB (other losses like polarization mismatch)
     freq_mhz = 863 - 868 (wifi halow)
     """
 
@@ -296,15 +290,35 @@ def dist_comm_calc(data_rate_Mbps: float,
     # Calculate received power
     received_power_dbm = snr_db + noise_power_dbm
 
+    return received_power_dbm
+
+
+def dist_comm_calc(transmit_power_dbm: float = 16, 
+                   received_power_dbm: float = -74,
+                   transmit_gain_dbi: float = 0, 
+                   received_gain_dbi: float = 0,
+                   margin_loss_db: float = 0, 
+                   freq_Mhz: float = 868) -> float:
+    """
+    default values:
+    
+    transmit_power_dbm = 24dbm
+    transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
+    received_gain_dbi = 0 usually in range 0-3 dbi
+    margin_loss_db = 2 dB (other losses like polarization mismatch)
+    freq_mhz = 863 - 868 (wifi halow)
+    """
+
     # Calculate free space path loss 
-    fspl = transmit_power_dbm + transmit_gain_dbi + received_gain_dbi - received_power_dbm - margin_loss
+    fspl = transmit_power_dbm + transmit_gain_dbi + received_gain_dbi - received_power_dbm - margin_loss_db
 
     # Calculate communication distance
-    dist_comm_km = 10**((fspl - 20 * math.log10(freq_mhz) - 32.44) / 20)
+    dist_comm_km = 10**((fspl - 20 * math.log10(freq_Mhz) - 32.44) / 20)
     
     dist_comm = dist_comm_km * 1000
 
-    return dist_comm, received_power_dbm, snr_db
+    return dist_comm
+
 
 def plot_drone_positions(grid_name: str,
                          drone_positions: np.ndarray, 
@@ -389,7 +403,7 @@ def plot_drone_positions(grid_name: str,
     fig.savefig(file_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
-
+################## test variables ###################################
 length = 30000
 width = 10000
 scale_factor = 1
@@ -402,11 +416,22 @@ file_folder = "./mesh_design_out"
 test_tolerances = (0.05, 0.15, 3) #tolerances in percentage (min, max, step)
 test_dist_redundancy = 0
 
+# These variables is chosen from datasheet 
+# BW = ...  
+# Mod scheme = .... 
+# datarate_scheme = 
+transmit_power_dbm = 21.5
+received_power_dbm = -83
+freq_Mhz = 868
+margin_loss_db = 3
+###################################################################
 
-dist_comm, received_power_dbm, snr_db = dist_comm_calc(data_rate_Mbps=8)
+
+dist_comm = dist_comm_calc(transmit_power_dbm=transmit_power_dbm, 
+                           received_power_dbm=received_power_dbm, 
+                           freq_Mhz=freq_Mhz,
+                           margin_loss_db=margin_loss_db)
 print(f"{dist_comm=}")
-print(f"{received_power_dbm=}")
-print(f"{snr_db=}")
 
 exit()
 test_distance = distance_calc(test_dist_comm, test_tolerances, test_dist_redundancy)
