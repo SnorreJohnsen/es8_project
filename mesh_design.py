@@ -3,9 +3,12 @@ import matplotlib.pyplot as plt
 import math
 import os
 from tqdm import tqdm
-import random
+from collections import Counter
+import json
 
-random.seed(0)
+metadata = dict()
+
+np.random.seed(67)
 
 def make_grid_product(x_range, y_range):
     return np.stack(np.meshgrid(x_range, y_range), axis = -1).reshape(-1,2)
@@ -387,35 +390,68 @@ def dist_comm_calc(transmit_power_dbm: float = 16,
 
     return dist_comm
 
+def dropout_drones(*,
+                   meta_prefix: str = "",
+                   drone_positions: np.ndarray,
+                   dropout_rate: float):
+    """
+    Docstring for dropout_drones
+    
+    Inputs: 
+    meta_prefix: prefix string prepended to metadata keys
+    drone_positions: Nx2 numpy array (not mutated)
+    dropout_rate: percentage of drones which are removed (0..1) 
+
+    Returns: Mx2 numpy array of drones left after dropout. 
+    Return array originates from copy of drone_positions.
+    """
+    if dropout_rate > 1 or dropout_rate < 0:
+        print(f"dropout_drones: Invalid {dropout_rate=}")  
+        exit(-1)
+
+    drone_positions_result = drone_positions.copy()
+
+    # Stating number of drones in mesh
+    num_drones = len(drone_positions)
+
+    num_drones_dropout = round(num_drones * dropout_rate)
+    drone_dropout_perc_real = num_drones_dropout/num_drones # Calculating actual dropout percentage for plot
+
+    # Removing drones from drone positions in relation to dropout
+    np.random.shuffle(drone_positions_result)
+    drone_positions_result = drone_positions_result[:-num_drones_dropout, :]
+    
+    # Writing stats to metadata
+    metadata[f"{meta_prefix}DROPOUT_REAL_PERCENTAGE"] = drone_dropout_perc_real
+    metadata[f"{meta_prefix}DROPOUT_NUM_DRONES"] = num_drones_dropout
+
+    return drone_positions_result
 
 def plot_drone_positions(grid_name: str,
-                         drone_positions: np.ndarray, 
+                         all_drone_positions: np.ndarray, 
                          distance: float,
                          dist_comm: float,
                          dim: tuple[float, float],
                          sample_resolution: tuple[int, int],
                          file_path_folder: str,
-                         drone_dropout: float):
+                         dropout_rate: float):
     x_dim, y_dim = dim
     x_sample_res, y_sample_res = sample_resolution
     font_size = 8
 
     fig, ax = plt.subplots()
 
-    # Stating number of drones in mesh
-    num_drones = len(drone_positions) 
-
-    if drone_dropout > 0:
-        num_drones_dropout = math.ceil(num_drones * drone_dropout)
-        drone_dropout_perc_real = num_drones_dropout/num_drones # Calculating actual dropout percentage for plot
-        num_drones = num_drones - num_drones_dropout
-
-        # Removing drones from drone positions in relation to dropout
-        np.random.shuffle(drone_positions)
-        drone_positions = drone_positions[:-num_drones_dropout, :]
-    
-    
-
+    drone_positions = dropout_drones(drone_positions=all_drone_positions, dropout_rate=dropout_rate)
+    # Pseudo
+    # links: list[Link]
+    # total: Counter
+    # for i in iters
+    #   drones = dropout_drones(...)
+    #   links, link_stats = calculate_links(drones)
+    #   total += link_stats
+    # plot_hist(total)
+    # full_links, _ = calculate_links(all_drones)    # full links is no dropout (to linux net)
+    # write_network_graph(drones, full_links)
 
     # Plot drone positions as dots
     x_pos = drone_positions[:, 0]
@@ -439,7 +475,6 @@ def plot_drone_positions(grid_name: str,
     counts_inside = np.array(counts_inside)
 
     min_drones_inside = np.min(counts_inside)
-    #max_drones_inside = np.max(counts_inside) #commented out since its not used in plot fig
     avg_drones_inside = np.mean(counts_inside)
 
     # Device points in drone area
@@ -463,25 +498,40 @@ def plot_drone_positions(grid_name: str,
     min_device_connections = np.min(valid_connection_counts)
     avg_device_connections = np.mean(valid_connection_counts)
 
+
+
+
+    # Building drone plot figure
     title_text = (
-    f"{grid_name} Mesh, Drones = {num_drones}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m], Dropout(%) = {drone_dropout_perc_real:.3f}, Dropout(#) = {num_drones_dropout} \n"
+    f"{grid_name} Mesh, Drones = {len(drone_positions)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
     f"Drone connections: Min = {min_drones_inside}, Avg = {avg_drones_inside:.2f} \n "
     f"Device connections: Min = {min_device_connections}, Avg = {avg_device_connections:.2f}"
 )
-
     ax.set_title(title_text, fontsize=font_size, pad=10)  # pad adds space above plot
-    
     ax.set_xlabel("meters", fontsize=font_size)
     ax.set_ylabel("meters", fontsize=font_size)
-
     ax.set_aspect('equal', 'box')
     ax.tick_params(axis='both', labelsize=font_size)
 
-    # save fig to file path
+    # Build histogram of # drones and # connections
+    fig_hist, ax_hist = plt.subplots()
+    connections_hist = Counter(counts_inside)
+    ax_hist.set_title("Histogram over connections")
+    ax_hist.set_xlabel("Connections", fontsize=font_size)
+    ax_hist.set_ylabel("Drones", fontsize=font_size)
+    ax_hist.bar(connections_hist.keys(), connections_hist.values(), width=0.2)
+
+
+    # save drone plot and hist fig to file path
     os.makedirs(file_path_folder, exist_ok=True)
     file_path = os.path.join(file_path_folder, f"{grid_name}.png")
     fig.savefig(file_path, dpi=300, bbox_inches='tight')
+    file_path_hist = os.path.join(file_path_folder, f"{grid_name}_connection_hist.png")
+    fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
+    plt.close(fig_hist)
     plt.close(fig)
+
+
 
 ################## test variables ###################################
 length = 30000
@@ -524,44 +574,8 @@ for i in range(test_tolerances[2]):
                         dim=test_dim, 
                         sample_resolution=samples, 
                         file_path_folder=file_folder,
-                        drone_dropout=dropout)
+                        dropout_rate=dropout)
 
 
-"""
-drone_pos_hex = drone_hex_grid(test_dim, test_distance, extra_edge_drones = False)
-plot_drone_positions("Hexagonal", 
-                     drone_pos_hex, 
-                     distance=test_distance, 
-                     dist_comm=test_dist_comm, 
-                     dim=test_dim, 
-                     sample_resolution=samples, 
-                     file_path_folder=file_folder)
-
-drone_pos_hex_diamond = drone_hex_diamond_grid(test_dim, test_distance)
-plot_drone_positions("Hexagonal-diamond", 
-                     drone_pos_hex_diamond, 
-                     distance=test_distance, 
-                     dist_comm=test_dist_comm, 
-                     dim=test_dim, 
-                     sample_resolution=samples, 
-                     file_path_folder=file_folder)
-
-drone_pos_hex_squished = drone_hex_grid_squished(test_dim, test_distance)
-plot_drone_positions("Hexagonal-squished", 
-                     drone_pos_hex_squished, 
-                     distance=test_distance, 
-                     dist_comm=test_dist_comm, 
-                     dim=test_dim, 
-                     sample_resolution=samples, 
-                     file_path_folder=file_folder)
-                   
-drone_pos_tri = drone_triangle_grid(test_dim, test_distance)
-plot_drone_positions("Triangle", 
-                     drone_pos_tri, 
-                     distance=test_distance, 
-                     dist_comm=test_dist_comm, 
-                     dim=test_dim, 
-                     sample_resolution=samples, 
-                     file_path_folder=file_folder)
-
-"""
+with open(os.path.join(file_folder, "metadata.json"), "w") as f:
+    json.dump(metadata, f)
