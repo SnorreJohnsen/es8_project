@@ -517,7 +517,7 @@ test_distance = distance_calc(dist_comm, test_tolerances, test_dist_redundancy)
 
 for i in range(test_tolerances[2]):
     drone_pos_sq = drone_sq_grid(test_dim, test_distance[i])
-    plot_drone_positions(f"Square_{i}_m", 
+    plot_drone_positions(f"Square_{i}", 
                         drone_pos_sq, 
                         distance=test_distance[i], 
                         dist_comm=dist_comm, 
