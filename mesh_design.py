@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import math
 import os
 from tqdm import tqdm
+import random
+
+random.seed(0)
 
 def make_grid_product(x_range, y_range):
     return np.stack(np.meshgrid(x_range, y_range), axis = -1).reshape(-1,2)
@@ -247,10 +250,6 @@ def distance_calc(dist_comm: float,
 
     tol_min, tol_max, tol_step = tolerances_input
 
-    # Convert percentage to meter
-    tol_min = tol_min*dist_comm
-    tol_max = tol_max*dist_comm
-
     tolerances = np.linspace(tol_min, tol_max, tol_step)
     
 
@@ -395,7 +394,8 @@ def plot_drone_positions(grid_name: str,
                          dist_comm: float,
                          dim: tuple[float, float],
                          sample_resolution: tuple[int, int],
-                         file_path_folder: str):
+                         file_path_folder: str,
+                         drone_dropout: float):
     x_dim, y_dim = dim
     x_sample_res, y_sample_res = sample_resolution
     font_size = 8
@@ -404,6 +404,18 @@ def plot_drone_positions(grid_name: str,
 
     # Stating number of drones in mesh
     num_drones = len(drone_positions) 
+
+    if drone_dropout > 0:
+        num_drones_dropout = math.ceil(num_drones * drone_dropout)
+        drone_dropout_perc_real = num_drones_dropout/num_drones # Calculating actual dropout percentage for plot
+        num_drones = num_drones - num_drones_dropout
+
+        # Removing drones from drone positions in relation to dropout
+        np.random.shuffle(drone_positions)
+        drone_positions = drone_positions[:-num_drones_dropout, :]
+    
+    
+
 
     # Plot drone positions as dots
     x_pos = drone_positions[:, 0]
@@ -449,11 +461,10 @@ def plot_drone_positions(grid_name: str,
     valid_connection_counts = np.array(valid_connection_counts)
 
     min_device_connections = np.min(valid_connection_counts)
-    max_device_connections = np.max(valid_connection_counts)
     avg_device_connections = np.mean(valid_connection_counts)
 
     title_text = (
-    f"{grid_name} Mesh, Drones = {num_drones}, d = {distance} m, dist_comm = {dist_comm} m\n"
+    f"{grid_name} Mesh, Drones = {num_drones}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m], Dropout(%) = {drone_dropout_perc_real:.3f}, Dropout(#) = {num_drones_dropout} \n"
     f"Drone connections: Min = {min_drones_inside}, Avg = {avg_drones_inside:.2f} \n "
     f"Device connections: Min = {min_device_connections}, Avg = {avg_device_connections:.2f}"
 )
@@ -478,15 +489,15 @@ width = 10000
 scale_factor = 1
 
 test_dim = (length*scale_factor, width*scale_factor)
-test_dist_comm = 2000
 samples = (600, 200)
 file_folder = "./mesh_design_out"
 
-test_tolerances = (0.05, 0.15, 3) #tolerances in percentage (min, max, step)
+test_tolerances = (100, 300, 3) #tolerances in meters (min, max, steps)
 test_dist_redundancy = 0
+dropout = 0.1
 
-desired_bandwidth_Mhz = 4
-desired_rate_Mbps = 13
+desired_bandwidth_Mhz = 8
+desired_rate_Mbps = 20
 freq_Mhz = 868
 margin_loss_db = 3
 ###################################################################
@@ -500,20 +511,20 @@ dist_comm = dist_comm_calc(transmit_power_dbm=transmit_power_dbm,
                            margin_loss_db=margin_loss_db)
 print(f"{dist_comm=}")
 
-exit()
-test_distance = distance_calc(test_dist_comm, test_tolerances, test_dist_redundancy)
+
+test_distance = distance_calc(dist_comm, test_tolerances, test_dist_redundancy)
 
 
-for i in range(3):
+for i in range(test_tolerances[2]):
     drone_pos_sq = drone_sq_grid(test_dim, test_distance[i])
-    plot_drone_positions(f"Square_{i}", 
+    plot_drone_positions(f"Square_{i}_m", 
                         drone_pos_sq, 
                         distance=test_distance[i], 
-                        dist_comm=test_dist_comm, 
+                        dist_comm=dist_comm, 
                         dim=test_dim, 
                         sample_resolution=samples, 
-                        file_path_folder=file_folder)
-
+                        file_path_folder=file_folder,
+                        drone_dropout=dropout)
 
 
 """
