@@ -335,11 +335,15 @@ lookup_table_halow_module_MM8108 = {
     }
 }
 
-def get_halow_module_MM8108_params(desired_bandwidth_Mhz, desired_rate_Mbps):
+def get_halow_module_MM8108_params(*,
+                                   meta_prefix: str ="",
+                                   desired_bandwidth_Mhz, 
+                                   desired_rate_Mbps):
     # Find closest available bandwidth
     available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
     bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
     closest_bandwidth = int(available_bandwidth[bandwidth_index])
+    metadata[f"{meta_prefix}BANDWIDTH"] = closest_bandwidth
 
     # Get all MCS schemes for that bandwidth
     schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
@@ -350,18 +354,17 @@ def get_halow_module_MM8108_params(desired_bandwidth_Mhz, desired_rate_Mbps):
     # Find first sorted_scheme >= desired datarate
     for best_scheme in sorted_schemes:
         if best_scheme['data_rate'] >= desired_rate_Mbps:
-            best_data_rate = best_scheme['data_rate']
-            best_rx_sens = best_scheme['receive_sensitivity']
-            best_tx_power = best_scheme['transmit_power']
+            metadata[f"{meta_prefix}DATA_RATE"] = best_scheme['data_rate']
+            metadata[f"{meta_prefix}RECEIVED_SENSITIVITY"] = best_scheme['receive_sensitivity']
+            metadata[f"{meta_prefix}TRANSMIT_POWER"] = best_scheme['transmit_power']
             break
         else:
             # If desired data rate above all availeble schemes return highest sorted_scheme
             best_scheme = sorted_schemes[0]
-            best_data_rate = best_scheme['data_rate']
-            best_rx_sens = best_scheme['receive_sensitivity']
-            best_tx_power = best_scheme['transmit_power']
-
-    return best_data_rate, best_rx_sens, best_tx_power, closest_bandwidth
+            metadata[f"{meta_prefix}DATA_RATE"] = best_scheme['data_rate']
+            metadata[f"{meta_prefix}RECEIVED_SENSITIVITY"] = best_scheme['receive_sensitivity']
+            metadata[f"{meta_prefix}TRANSMIT_POWER"] = best_scheme['transmit_power']
+    
 
 def dist_comm_calc(transmit_power_dbm: float = 16, 
                    received_power_dbm: float = -74,
@@ -393,7 +396,7 @@ def dist_comm_calc(transmit_power_dbm: float = 16,
 def dropout_drones(*,
                    meta_prefix: str = "",
                    drone_positions: np.ndarray,
-                   dropout_rate: float):
+                   dropout_rate: float) -> np.ndarray:
     """
     Docstring for dropout_drones
     
@@ -427,7 +430,133 @@ def dropout_drones(*,
 
     return drone_positions_result
 
-def plot_drone_positions(grid_name: str,
+def calculate_links(drone_positions: np.ndarray,
+                    dist_comm: float) -> np.ndarray:
+    """
+    Docstring for drone_links
+    
+    Inputs:
+    drone_positions: Nx2 Numpy array of drone positions in a given mesh
+    dist_comm: Communication distance of drone in meters
+
+    Returns:
+    num_links: Nx1 numpy array of links for each drone
+    """
+    num_links = []
+
+    for i, (x, y) in enumerate(drone_positions):
+        # Compute distances from drone i to all drones
+        distances = (drone_positions[:, 0] - x)**2 + (drone_positions[:, 1] - y)**2
+        
+        # Count how many are within dist_comm (exclude itself)
+        count = np.sum(distances <= (dist_comm+1)**2) - 1
+        num_links.append(count)
+        
+    return np.array(num_links)
+
+def calculate_device_links(*,
+                           meta_prefix: str = "",
+                           grid_name: str,
+                           drone_positions: np.ndarray,
+                           dim: tuple[float, float],
+                           sample_resolution: tuple[float, float]) -> np.ndarray:
+    """
+    Docstring for calculate_device_links
+    
+    Inputs:
+    grid_name: Name of grid used for file and plot name
+    drone_positions: Nx2 Numpy array of drone positions in a given mesh
+    dim: Dimensions [x, y] of the area the drone mesh need to cover
+    sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
+    
+    Returns: Dx1 numpy array of drone links for each device
+    """
+
+    x_dim, y_dim = dim
+    x_sample_res, y_sample_res = sample_resolution
+    # Device points in drone area
+    x_device_points = np.linspace(0, x_dim, x_sample_res)
+    y_device_points = np.linspace(0, y_dim, y_sample_res)
+
+    valid_links_counts = []
+
+    for x_new in tqdm(x_device_points, desc=f"Computing distances for {grid_name} mesh"):
+        for y_new in y_device_points:
+            # Compute distances from device i to all drones
+            distances = (drone_positions[:, 0] - x_new)**2 + (drone_positions[:, 1] - y_new)**2
+
+            # Add links to valid connection count
+            links = np.sum(distances <= dist_comm**2)
+
+            valid_links_counts.append(links)
+    
+    valid_links = np.array(valid_links_counts)
+
+    # Saving min and mean in dict for drone plot
+    metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(valid_links))
+    metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"] = float(np.mean(valid_links))
+
+
+def plot_drone_positions(*,
+                         meta_prefix: str = "", 
+                         grid_name: str,
+                         drone_positions: np.ndarray,
+                         distance: float,
+                         dist_comm: float,
+                         drone_links: np.ndarray,
+                         file_path_folder: str,
+                         font_size: float = 8.0):
+    
+    fig, ax_drone_pos = plt.subplots()
+    
+    # Plot drone positions as dots
+    x_pos = drone_positions[:, 0]
+    y_pos = drone_positions[:, 1]
+    ax_drone_pos.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
+
+
+    for i, (x, y) in enumerate(drone_positions):
+        # Draw communcation dist_comm as circle
+        circle = plt.Circle((x, y), dist_comm, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
+        ax_drone_pos.add_patch(circle)
+
+    device_links_min = metadata[f"{meta_prefix}MIN_DEVICE_LINKS"]
+    device_links_mean = metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"]
+
+    title_text = (
+    f"{grid_name} Mesh, Drones = {len(drone_positions)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
+    f"Drone links: Min = {np.min(drone_links)}, Avg = {np.mean(drone_links):.2f} \n "
+    f"Device links: Min = {device_links_min}, Avg = {device_links_mean:.2f}"
+)
+    ax_drone_pos.set_title(title_text, fontsize=font_size, pad=10)  # pad adds space above plot
+    ax_drone_pos.set_xlabel("meters", fontsize=font_size)
+    ax_drone_pos.set_ylabel("meters", fontsize=font_size)
+    ax_drone_pos.set_aspect('equal', 'box')
+    ax_drone_pos.tick_params(axis='both', labelsize=font_size)
+
+    file_path = os.path.join(file_path_folder, f"{grid_name}.png")
+    fig.savefig(file_path, dpi=300, bbox_inches='tight')
+    
+    plt.close(fig)
+
+def plot_histogram_drone_links(grid_name: str,
+                               drone_links: np.ndarray,
+                               file_path_folder: str,
+                               font_size: float = 8.0):
+
+    # Build histogram of # drones and # links
+    fig_hist, ax_hist = plt.subplots()
+    connections_hist = Counter(drone_links)
+    ax_hist.set_title("Histogram over links")
+    ax_hist.set_xlabel("Connections", fontsize=font_size)
+    ax_hist.set_ylabel("Drones", fontsize=font_size)
+    ax_hist.bar(connections_hist.keys(), connections_hist.values(), width=0.2)
+
+    file_path_hist = os.path.join(file_path_folder, f"{grid_name}_connection_hist.png")
+    fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
+    plt.close(fig_hist)
+
+def main(grid_name: str,
                          all_drone_positions: np.ndarray, 
                          distance: float,
                          dist_comm: float,
@@ -435,12 +564,25 @@ def plot_drone_positions(grid_name: str,
                          sample_resolution: tuple[int, int],
                          file_path_folder: str,
                          dropout_rate: float):
-    x_dim, y_dim = dim
-    x_sample_res, y_sample_res = sample_resolution
-    font_size = 8
+    """
+    Docstring for main
+    
+    Inputs:
+    grid_name: Name of grid used for file and plot name
+    all_drone_positions: Nx2 Numpy array of all drone positions in a given mesh
+    distance: Distance between drones in meters
+    dist_comm: Communication distance of drone in meters
+    dim: Dimensions [x, y] of the area the drone mesh need to cover
+    sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
+    file_path_folder: File path to folder where plots will be saved
+    dropout_rate: Percetage of drones which are removed (0..1)
 
-    fig, ax = plt.subplots()
+    This function takes a given drone mesh and 
+    - plots the mesh of drones of all drones and one example of drones with dropout
+    - plots histogram of number drones against links to other drones
 
+    """
+    
     drone_positions = dropout_drones(drone_positions=all_drone_positions, dropout_rate=dropout_rate)
     # Pseudo
     # links: list[Link]
@@ -453,84 +595,29 @@ def plot_drone_positions(grid_name: str,
     # full_links, _ = calculate_links(all_drones)    # full links is no dropout (to linux net)
     # write_network_graph(drones, full_links)
 
-    # Plot drone positions as dots
-    x_pos = drone_positions[:, 0]
-    y_pos = drone_positions[:, 1]
-    ax.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
-
-    counts_inside = []
-
-    for i, (x, y) in enumerate(drone_positions):
-        # Compute distances from drone i to all drones
-        distances = (drone_positions[:, 0] - x)**2 + (drone_positions[:, 1] - y)**2
-        
-        # Count how many are within dist_comm (exclude itself)
-        count = np.sum(distances <= (dist_comm+1)**2) - 1
-        counts_inside.append(count)
-
-        # Draw communcation dist_comm as circle
-        circle = plt.Circle((x, y), dist_comm, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
-        ax.add_patch(circle)
-
-    counts_inside = np.array(counts_inside)
-
-    min_drones_inside = np.min(counts_inside)
-    avg_drones_inside = np.mean(counts_inside)
-
-    # Device points in drone area
-    x_device_points = np.linspace(0, x_dim, x_sample_res)
-    y_device_points = np.linspace(0, y_dim, y_sample_res)
-
-    valid_connection_counts = []
-
-    for x_new in tqdm(x_device_points, desc=f"Computing distances for {grid_name} mesh"):
-        for y_new in y_device_points:
-            # Compute distances from device i to all drones
-            distances = (drone_positions[:, 0] - x_new)**2 + (drone_positions[:, 1] - y_new)**2
-
-            # Add connections to valid connection count
-            connections = np.sum(distances <= dist_comm**2)
-
-            valid_connection_counts.append(connections)
-
-    valid_connection_counts = np.array(valid_connection_counts)
-
-    min_device_connections = np.min(valid_connection_counts)
-    avg_device_connections = np.mean(valid_connection_counts)
 
 
+    # Calculating drone links
+    drone_links = calculate_links(drone_positions=drone_positions, dist_comm=dist_comm)
 
+    # Calculating links from devices to drones
+    calculate_device_links(meta_prefix=grid_name, grid_name=grid_name, drone_positions=drone_positions, dim=dim, sample_resolution=sample_resolution)
 
-    # Building drone plot figure
-    title_text = (
-    f"{grid_name} Mesh, Drones = {len(drone_positions)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-    f"Drone connections: Min = {min_drones_inside}, Avg = {avg_drones_inside:.2f} \n "
-    f"Device connections: Min = {min_device_connections}, Avg = {avg_device_connections:.2f}"
-)
-    ax.set_title(title_text, fontsize=font_size, pad=10)  # pad adds space above plot
-    ax.set_xlabel("meters", fontsize=font_size)
-    ax.set_ylabel("meters", fontsize=font_size)
-    ax.set_aspect('equal', 'box')
-    ax.tick_params(axis='both', labelsize=font_size)
-
-    # Build histogram of # drones and # connections
-    fig_hist, ax_hist = plt.subplots()
-    connections_hist = Counter(counts_inside)
-    ax_hist.set_title("Histogram over connections")
-    ax_hist.set_xlabel("Connections", fontsize=font_size)
-    ax_hist.set_ylabel("Drones", fontsize=font_size)
-    ax_hist.bar(connections_hist.keys(), connections_hist.values(), width=0.2)
-
-
+    # Building drone plot figures    
     # save drone plot and hist fig to file path
     os.makedirs(file_path_folder, exist_ok=True)
-    file_path = os.path.join(file_path_folder, f"{grid_name}.png")
-    fig.savefig(file_path, dpi=300, bbox_inches='tight')
-    file_path_hist = os.path.join(file_path_folder, f"{grid_name}_connection_hist.png")
-    fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
-    plt.close(fig_hist)
-    plt.close(fig)
-
+    
+    plot_drone_positions(meta_prefix=grid_name,
+                         grid_name=grid_name, 
+                         drone_positions=drone_positions, 
+                         distance=distance, 
+                         dist_comm=dist_comm, 
+                         drone_links=drone_links, 
+                         file_path_folder=file_path_folder)
+    
+    plot_histogram_drone_links(grid_name=grid_name,
+                               drone_links=drone_links,
+                               file_path_folder=file_path_folder)
 
 
 ################## test variables ###################################
@@ -550,16 +637,18 @@ desired_bandwidth_Mhz = 8
 desired_rate_Mbps = 20
 freq_Mhz = 868
 margin_loss_db = 3
+
 ###################################################################
 
-data_rate, received_power_dbm, transmit_power_dbm, bandwidth = get_halow_module_MM8108_params(desired_bandwidth_Mhz=desired_bandwidth_Mhz, desired_rate_Mbps=desired_rate_Mbps)
-print(f"{data_rate=},{received_power_dbm=}, {transmit_power_dbm=}, {bandwidth=}")
+# Calculate values for modelling wireless commmunication from wifi halow module
+# These values are the same for all grid types
+wireless_prefix = ""
+get_halow_module_MM8108_params(meta_prefix=wireless_prefix, desired_bandwidth_Mhz=desired_bandwidth_Mhz, desired_rate_Mbps=desired_rate_Mbps)
 
-dist_comm = dist_comm_calc(transmit_power_dbm=transmit_power_dbm, 
-                           received_power_dbm=received_power_dbm, 
+dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"], 
+                           received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
                            freq_Mhz=freq_Mhz,
                            margin_loss_db=margin_loss_db)
-print(f"{dist_comm=}")
 
 
 test_distance = distance_calc(dist_comm, test_tolerances, test_dist_redundancy)
@@ -567,7 +656,7 @@ test_distance = distance_calc(dist_comm, test_tolerances, test_dist_redundancy)
 
 for i in range(test_tolerances[2]):
     drone_pos_sq = drone_sq_grid(test_dim, test_distance[i])
-    plot_drone_positions(f"Square_{i}", 
+    main(f"Square_{i}", 
                         drone_pos_sq, 
                         distance=test_distance[i], 
                         dist_comm=dist_comm, 
