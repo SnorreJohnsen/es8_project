@@ -5,10 +5,23 @@ import os
 from tqdm import tqdm
 from collections import Counter
 import json
+from dataclasses import dataclass
 
 metadata = dict()
 
 np.random.seed(67)
+
+@dataclass
+class Node:
+    id: str
+    x: int
+    y: int
+
+@dataclass
+class Link:
+    source: str
+    target: str
+    
 
 def make_grid_product(x_range, y_range):
     return np.stack(np.meshgrid(x_range, y_range), axis = -1).reshape(-1,2)
@@ -254,7 +267,6 @@ def distance_calc(dist_comm: float,
     tol_min, tol_max, tol_step = tolerances_input
 
     tolerances = np.linspace(tol_min, tol_max, tol_step)
-    
 
     distance = dist_comm - tolerances - dist_redundancy
 
@@ -430,29 +442,101 @@ def dropout_drones(*,
 
     return drone_positions_result
 
-def calculate_links(drone_positions: np.ndarray,
-                    dist_comm: float) -> np.ndarray:
+""" Example of drone link and position json
+{
+    "nodes": [
+        {
+        "id": "0000",
+        "x": 0,
+        "y": 0
+        },
+        {
+        "id": "000a",
+        "x": 0,
+        "y": 1
+        }
+    ],
+    "links": [
+        {
+        "source": "0000",
+        "target": "0001"
+        },
+        {
+        "source": "0000",
+        "target": "000a"
+        },
+    ]
+}
+"""
+
+def node_list(drone_positions: np.ndarray) -> list[Node]:
+
     """
-    Docstring for drone_links
+    Docstring for node_list
     
     Inputs:
     drone_positions: Nx2 Numpy array of drone positions in a given mesh
+
+    Returns:
+    nodes: list of sorted N Node classes of drone IDs and positions
+    """    
+
+    # Sort drone positions by x then y
+    sorted_pos_indences = np.lexsort((drone_positions[:,1],  #secondary key (y)
+                                      drone_positions[:,0])) #primary key (x)
+    
+    drone_positions = drone_positions[sorted_pos_indences]
+
+    x_pos = drone_positions[:,0]
+    y_pos = drone_positions[:,1]
+
+    nodes: list[Node] = []
+
+    for i in range(len(drone_positions)):
+        id = f"{x_pos[i]}_{y_pos[i]}"
+        node = Node(id=id, x=float(x_pos[i]), y=float(y_pos[i]))
+        nodes.append(node)
+    
+    return nodes
+
+def link_list(nodes: list,
+              dist_comm: float) -> list[Link]:
+    
+    """
+    Docstring for link_list
+    
+    Inputs:
+    nodes: list of sorted N Node classes of drone IDs and positions
     dist_comm: Communication distance of drone in meters
 
     Returns:
+    links: list of N Link classes with sources and respective targets
     num_links: Nx1 numpy array of links for each drone
-    """
+    """    
+    
+    links: list[Link] = []
     num_links = []
 
-    for i, (x, y) in enumerate(drone_positions):
-        # Compute distances from drone i to all drones
-        distances = (drone_positions[:, 0] - x)**2 + (drone_positions[:, 1] - y)**2
+    for source in nodes:
+        count = 0
+        for target in nodes:
+
+            if target.id == source.id:
+               continue
+ 
+            # Compute distances from drone i to all drones
+            distances = (target.x - source.x)**2 + (target.y - source.y)**2    
+
+            if distances <= (dist_comm + 1)**2:
+                link = Link(source=source.id, target=target.id)
+                links.append(link)       
         
-        # Count how many are within dist_comm (exclude itself)
-        count = np.sum(distances <= (dist_comm+1)**2) - 1
+                # Count how many are within dist_comm (exclude itself)
+                count = count + 1 
+        
         num_links.append(count)
-        
-    return np.array(num_links)
+
+    return links, np.array(num_links)
 
 def calculate_device_links(*,
                            meta_prefix: str = "",
@@ -495,7 +579,6 @@ def calculate_device_links(*,
     # Saving min and mean in dict for drone plot
     metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(valid_links))
     metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"] = float(np.mean(valid_links))
-
 
 def plot_drone_positions(*,
                          meta_prefix: str = "", 
@@ -639,6 +722,24 @@ freq_Mhz = 868
 margin_loss_db = 3
 
 ###################################################################
+
+drone_positions_test = np.array([
+    [5, 3],
+    [2, 7],
+    [2, 1],
+    [4, 9]
+])
+dist_comm = 10
+
+test_node_list = node_list(drone_positions=drone_positions_test)
+test_link_list, test_count_link = link_list(nodes=test_node_list, dist_comm=dist_comm)
+
+
+print(test_node_list)
+print(test_link_list)
+print(test_count_link)
+
+exit()
 
 # Calculate values for modelling wireless commmunication from wifi halow module
 # These values are the same for all grid types
