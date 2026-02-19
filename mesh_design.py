@@ -5,7 +5,7 @@ import os
 from tqdm import tqdm
 from collections import Counter
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 metadata = dict()
 
@@ -27,7 +27,7 @@ def make_grid_product(x_range, y_range):
     return np.stack(np.meshgrid(x_range, y_range), axis = -1).reshape(-1,2)
 
 def drone_sq_grid(dim: tuple[float, float],
-               dist: float):
+                  dist: float):
     
     x_dim, y_dim = dim
     x_range = np.arange(0,x_dim+1, dist)   
@@ -260,15 +260,10 @@ def drone_hex_grid(dim: tuple[float, float],
     return total_grid
 
 def distance_calc(dist_comm: float, 
-                  tolerances_input: tuple[float, float, float], 
-                  dist_redundancy: float) -> np.ndarray:
-    distance = []
+                  tolerance: float, 
+                  dist_redundancy: float) -> float:
 
-    tol_min, tol_max, tol_step = tolerances_input
-
-    tolerances = np.linspace(tol_min, tol_max, tol_step)
-
-    distance = dist_comm - tolerances - dist_redundancy
+    distance = dist_comm - tolerance - dist_redundancy
 
     return distance
 
@@ -493,7 +488,7 @@ def node_list(drone_positions: np.ndarray) -> list[Node]:
     nodes: list[Node] = []
 
     for i in range(len(drone_positions)):
-        id = f"{x_pos[i]}_{y_pos[i]}"
+        id = f"{x_pos[i]:.2f}_{y_pos[i]:.2f}"
         node = Node(id=id, x=float(x_pos[i]), y=float(y_pos[i]))
         nodes.append(node)
     
@@ -537,6 +532,19 @@ def link_list(nodes: list,
         num_links.append(count)
 
     return links, np.array(num_links)
+
+def make_json_network(*,
+                      file_name: str,
+                      nodes: list,
+                      links: list):
+    network = dict()
+
+    network["nodes"] = [asdict(i) for i in nodes]
+    network["links"] = [asdict(j) for j in links]
+
+    with open(os.path.join(file_folder, file_name), "w") as f:
+        json.dump(network, f)
+
 
 def calculate_device_links(*,
                            meta_prefix: str = "",
@@ -712,7 +720,7 @@ test_dim = (length*scale_factor, width*scale_factor)
 samples = (600, 200)
 file_folder = "./mesh_design_out"
 
-test_tolerances = (100, 300, 3) #tolerances in meters (min, max, steps)
+test_tolerance = 0 #tolerance in meters
 test_dist_redundancy = 0
 dropout = 0.1
 
@@ -723,23 +731,10 @@ margin_loss_db = 3
 
 ###################################################################
 
-drone_positions_test = np.array([
-    [5, 3],
-    [2, 7],
-    [2, 1],
-    [4, 9]
-])
-dist_comm = 10
-
-test_node_list = node_list(drone_positions=drone_positions_test)
-test_link_list, test_count_link = link_list(nodes=test_node_list, dist_comm=dist_comm)
 
 
-print(test_node_list)
-print(test_link_list)
-print(test_count_link)
 
-exit()
+
 
 # Calculate values for modelling wireless commmunication from wifi halow module
 # These values are the same for all grid types
@@ -752,8 +747,18 @@ dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSM
                            margin_loss_db=margin_loss_db)
 
 
-test_distance = distance_calc(dist_comm, test_tolerances, test_dist_redundancy)
+test_distance = distance_calc(dist_comm, test_tolerance, test_dist_redundancy)
 
+drone_positions_test = drone_sq_grid(dim=test_dim, dist=test_distance)
+
+test_node_list = node_list(drone_positions=drone_positions_test)
+test_link_list, test_count_link = link_list(nodes=test_node_list, dist_comm=dist_comm)
+
+# Make the json network from list of nodes
+make_json_network(file_name="square_network.json", nodes=test_node_list, links=test_link_list)
+
+
+exit()
 
 for i in range(test_tolerances[2]):
     drone_pos_sq = drone_sq_grid(test_dim, test_distance[i])
