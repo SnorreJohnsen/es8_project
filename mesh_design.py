@@ -641,17 +641,27 @@ def plot_histogram_drone_links(file_name: str,
         drone_link_count = [count for sublist in drone_link_count for count in sublist]
 
     connections_hist = Counter(drone_link_count)
+
+    # Sort keys to ensure ordered x-axis
+    x_values = sorted(connections_hist.keys())
+    y_values = [connections_hist[x] for x in x_values]
+
     ax_hist.set_title("Histogram over links")
     ax_hist.set_xlabel("Connections", fontsize=font_size)
     ax_hist.set_ylabel("Drones", fontsize=font_size)
-    ax_hist.bar(connections_hist.keys(), connections_hist.values(), width=0.2)
+
+    # Center bars on integers
+    ax_hist.bar(x_values, y_values, width=0.2)
+
+    # Show only integer ticks (only existing values)
+    ax_hist.set_xticks(range(np.max(x_values)+1))
+    ax_hist.set_xlim(-0.5, np.max(x_values)+0.5)
 
     file_path_hist = os.path.join(file_folder_path, file_name)
     fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
     plt.close(fig_hist)
 
-
-# TODO make new nistogram plot fucntion for plotting device links
+# TODO make new histogram plot fucntion for plotting device links
 def process_drone_mesh(*,
                        grid_meta_prefix: str,
                        dist_comm: float,
