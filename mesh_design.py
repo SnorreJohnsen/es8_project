@@ -36,7 +36,7 @@ def drone_sq_grid(dim: tuple[float, float],
     return make_grid_product(x_range, y_range)
     
 def drone_triangle_grid(dim: tuple[float, float],
-                   dist: float):
+                        dist: float):
     
     x_dim, y_dim = dim
 
@@ -71,7 +71,7 @@ def drone_triangle_grid(dim: tuple[float, float],
     return full_grid   
 
 def drone_hex_grid_squished(dim: tuple[float, float],
-                   dist: float):
+                            dist: float):
     
     x_dim, y_dim = dim
 
@@ -133,7 +133,7 @@ def drone_hex_grid_squished(dim: tuple[float, float],
     return total_grid
 
 def drone_hex_diamond_grid(dim: tuple[float, float],
-                   dist: float):
+                           dist: float):
     
     x_dim, y_dim = dim
 
@@ -451,7 +451,7 @@ def calculate_device_links(*,
     
     Inputs:
     grid_name: Name of grid used for file and plot name
-    nodes: List of nodes contataining drone positions in a given mesh
+    nodes: List of nodes contataining of drone positions in a given mesh
     dim: Dimensions [x, y] of the area the drone mesh need to cover
     sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
     
@@ -651,28 +651,133 @@ def plot_histogram_drone_links(file_name: str,
     plt.close(fig_hist)
 
 
-
-
-
-def main():
+# TODO make new nistogram plot fucntion for plotting device links
+def process_drone_mesh(*,
+                       grid_meta_prefix: str,
+                       dist_comm: float,
+                       dim: tuple[float, float],
+                       sample_resolution: tuple[float, float],
+                       tolerances: np.ndarray,
+                       drone_distance_redundancy: float,
+                       dropout_rates: np.ndarray,
+                       dropout_iters: int,
+                       grid_func, 
+                       **kwargs):
     """
-    Docstring for main
-    
+    Docstring for process_drone_mesh
+
     Inputs:
-    grid_name: Name of grid used for file and plot name
-    all_drone_positions: Nx2 Numpy array of all drone positions in a given mesh
-    distance: Distance between drones in meters
+    grid_meta_prefix: Name for plot title, file name and folder for given grid type
     dist_comm: Communication distance of drone in meters
     dim: Dimensions [x, y] of the area the drone mesh need to cover
     sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
-    file_folder_path: File path to folder where plots will be saved
-    dropout_rate: Percetage of drones which are removed (0..1)
+    tolerances: Tx1 numpy array of distance tolerances used for calculating distance between drones
+    drone_distance_redundancy: Distance redundancy used in calc_distance function for placing drones in grid
+    dropout_rates: Nx1 numpy array of percentages of drones which are removed (0..1)
+    dropout_iters: Number of iterations for each dropout rate (used for histogram)
+    grid_func: Grid functions which outputs numpy array of drone positions in given grid type
+    grid_func_kwargs: Input dimentions only, distance is calculated in this function
 
-    This function takes a given drone mesh and 
-    - plots the mesh of drones of all drones and one example of drones with dropout
-    - plots histogram of number drones against links to other drones
-
+    Returns:
+    Saves drone position plots for both full drone mesh and one partial drone mesh(after dropout) in .png file
+    Saves histogram of drone link count for both full drone mesh and total link count for (dropout_iters) partial drone meshes fro each tolerance in .png file
+    Saves drone network graph of full drone mesh and one example of a partial drone mesh after dropout in a .json file
     """
+
+    # Chech if output is valid else make it
+    file_folder_path = f"./{grid_meta_prefix}_mesh_design_out"
+    os.makedirs(file_folder_path, exist_ok=True)
+
+    # For loop over number of tolerances
+    for i in range(len(tolerances)):
+
+        tolerance = tolerances[i]
+        # Calculate distance from wireless communication range and tolerances
+        drone_distance = distance_calc(dist_comm, tolerance, drone_distance_redundancy)
+
+        # Choose grid function
+        all_drone_positions = grid_func(dim=dim, dist=drone_distance)
+
+        # For loop over number of dropouts
+        for j in range(len(dropout_rates)):
+            dropout_rate = dropout_rates[j]
+            
+            total_link_count_dropout = []
+
+            # For loop over dropout iterations for histogram
+            for k in range(dropout_iters):
+                drone_positions_dropout = dropout_drones(meta_prefix=f"{grid_meta_prefix}_{j}_", drone_positions=all_drone_positions, dropout_rate=dropout_rate)
+                
+                # Make node and link list for partial drone mesh with removed drones
+                node_list_dropout = node_list(drone_positions=drone_positions_dropout)
+                link_list_dropout, link_count_dropout = link_list(nodes=node_list_dropout, dist_comm=dist_comm)
+
+                # Make array of all link counts for partial drone mesh 
+                total_link_count_dropout.append(link_count_dropout)
+
+
+            # Make single network of each dropout rate
+            make_json_network(file_name=f"{grid_meta_prefix}_network_dropout_example.json", 
+                              file_folder_path=file_folder_path, 
+                              nodes=node_list_dropout, 
+                              links=link_list_dropout)
+
+            # Calculating links from devices to drones for partial drone mesh
+            calc_dev_links_partial = metadata[f"{grid_meta_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
+            calculate_device_links(meta_prefix= f"{grid_meta_prefix}_{j}_DROPOUT", 
+                                   tqdm_grid_title=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}", 
+                                   nodes=node_list_dropout, 
+                                   dim=dim, 
+                                   dist_comm=dist_comm, 
+                                   sample_resolution=sample_resolution)
+
+            # Histogram and drone position plots over total iterations (not mean)
+            plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}_histogram.png",
+                                       drone_link_count=total_link_count_dropout,
+                                       file_folder_path=file_folder_path)
+            
+            plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_{j}_DROPOUT",
+                                 grid_name=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}",
+                                 nodes=node_list_dropout,
+                                 distance=drone_distance,
+                                 dist_comm=dist_comm,
+                                 drone_link_count=link_count_dropout,
+                                 file_folder_path=file_folder_path)
+
+        # Make node and link list for full drone mesh
+        node_list_all = node_list(drone_positions=all_drone_positions)
+        link_list_all, link_count_all = link_list(nodes=node_list_all, dist_comm=dist_comm)
+
+        # Make the json network from list of nodes
+        make_json_network(file_name=f"{grid_meta_prefix}_network.json", file_folder_path=file_folder_path, nodes=node_list_all, links=link_list_all)
+
+        # Calculating links from devices to drones for full drone mesh
+        calculate_device_links(meta_prefix=f"{grid_meta_prefix}_all", 
+                               tqdm_grid_title=f"{grid_meta_prefix}_all", 
+                               nodes=node_list_all, 
+                               dim=dim, 
+                               dist_comm=dist_comm,
+                               sample_resolution=sample_resolution)
+
+
+        # Histogram and drone position plots over full drone mesh
+        plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_full_mesh.png",
+                                   drone_link_count=link_count_all,
+                                   file_folder_path=file_folder_path)
+            
+        plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_all",
+                             grid_name=f"{grid_meta_prefix}_all",
+                             nodes=node_list_all,
+                             distance=drone_distance,
+                             dist_comm=dist_comm,
+                             drone_link_count=link_count_all,
+                             file_folder_path=file_folder_path)
+
+    with open(os.path.join(file_folder_path, "metadata.json"), "w") as f:
+        json.dump(metadata, f)
+
+
+def main():
     ###############################################################################
     #__________________________ TEST PARAMETERS __________________________________#
     ###############################################################################
@@ -681,13 +786,12 @@ def main():
     scale_factor = 1
 
     test_dim = (length*scale_factor, width*scale_factor)
-    samples = (600, 200)
-    file_folder_path = "./mesh_design_out" 
+    test_samples = (600, 200)
 
     test_tolerances = np.arange(100, 300, 100)  #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0
-    dropout_rates = np.arange(0.1, 0.3, 0.1)    #dropout rate in percentage (min, max, stepsize)
-    dropout_iters = 100                         # number of iterations for each dropout rate (used for histogram)
+    test_dropout_rates = np.arange(0.1, 0.3, 0.1)    #dropout rate in percentage (min, max, stepsize)
+    test_dropout_iters = 100                         # number of iterations for each dropout rate (used for histogram)
 
     wireless_prefix = ""
     desired_bandwidth_Mhz = 8
@@ -697,11 +801,8 @@ def main():
     ###############################################################################
     ###############################################################################
 
-    # Chech if output is valid else make it
-    os.makedirs(file_folder_path, exist_ok=True)
-
     # Save dropout iterations used for histogram
-    metadata["DROPOUT_ITERATIONS"] = dropout_iters
+    metadata["DROPOUT_ITERATIONS"] = test_dropout_iters
 
 
     # Calculate values for modelling wireless commmunication from wifi halow module
@@ -714,95 +815,17 @@ def main():
                                received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
                                freq_Mhz=freq_Mhz,
                                margin_loss_db=margin_loss_db)
- 
-    # For loop over number of tolerances
-    for i in range(len(test_tolerances)):
-
-        tolerance = test_tolerances[i]
-        # Calculate distance from wireless communication range and tolerances
-        drone_distance = distance_calc(dist_comm, tolerance, test_dist_redundancy)
-
-        # Choose grid function
-        all_drone_positions = drone_sq_grid(dim=test_dim, dist=drone_distance)
-
-        # For loop over number of dropouts
-        for j in range(len(dropout_rates)):
-            dropout_rate = dropout_rates[j]
-            
-            total_link_count_dropout = []
-
-            # For loop over dropout iterations for histogram
-            for k in range(dropout_iters):
-                drone_positions_dropout = dropout_drones(meta_prefix=f"SQUARE_{j}_", drone_positions=all_drone_positions, dropout_rate=dropout_rate)
-                
-                # Make node and link list for partial drone mesh with removed drones
-                node_list_dropout = node_list(drone_positions=drone_positions_dropout)
-                link_list_dropout, link_count_dropout = link_list(nodes=node_list_dropout, dist_comm=dist_comm)
-
-                # Make array of all link counts for partial drone mesh 
-                total_link_count_dropout.append(link_count_dropout)
-
-
-            # Make single network of each dropout rate
-            make_json_network(file_name="square_network_dropout_example.json", 
-                              file_folder_path=file_folder_path, 
-                              nodes=node_list_dropout, 
-                              links=link_list_dropout)
-
-            # Calculating links from devices to drones for partial drone mesh
-            calc_dev_links_partial = metadata[f"SQUARE_{j}_DROPOUT_REAL_PERCENTAGE"]
-            calculate_device_links(meta_prefix= f"SQUARE_{j}_DROPOUT", 
-                                   tqdm_grid_title=f"SQUARE_LINKS_{calc_dev_links_partial}", 
-                                   nodes=node_list_dropout, 
-                                   dim=test_dim, 
-                                   dist_comm=dist_comm, 
-                                   sample_resolution=samples)
-
-            # Histogram and drone position plots over total iterations (not mean)
-            plot_histogram_drone_links(file_name=f"SQUARE_LINKS_{calc_dev_links_partial}_hist.png",
-                                       drone_link_count=total_link_count_dropout,
-                                       file_folder_path=file_folder_path)
-            
-            plot_drone_positions(meta_prefix=f"SQUARE_{j}_DROPOUT",
-                                 grid_name=f"SQUARE_LINKS_{calc_dev_links_partial}",
-                                 nodes=node_list_dropout,
-                                 distance=drone_distance,
-                                 dist_comm=dist_comm,
-                                 drone_link_count=link_count_dropout,
-                                 file_folder_path=file_folder_path)
-
-        # Make node and link list for full drone mesh
-        node_list_all = node_list(drone_positions=all_drone_positions)
-        link_list_all, link_count_all = link_list(nodes=node_list_all, dist_comm=dist_comm)
-
-        # Make the json network from list of nodes
-        make_json_network(file_name="square_network.json", file_folder_path=file_folder_path, nodes=node_list_all, links=link_list_all)
-
-        # Calculating links from devices to drones for full drone mesh
-        calculate_device_links(meta_prefix="square_all", 
-                               tqdm_grid_title="square_all", 
-                               nodes=node_list_all, 
-                               dim=test_dim, 
-                               dist_comm=dist_comm,
-                               sample_resolution=samples)
-
-
-        # Histogram and drone position plots over full drone mesh
-        plot_histogram_drone_links(file_name="square_full_mesh.png",
-                                   drone_link_count=link_count_all,
-                                   file_folder_path=file_folder_path)
-            
-        plot_drone_positions(meta_prefix="square_all",
-                             grid_name="square_all",
-                             nodes=node_list_all,
-                             distance=drone_distance,
-                             dist_comm=dist_comm,
-                             drone_link_count=link_count_all,
-                             file_folder_path=file_folder_path)
-
-    with open(os.path.join(file_folder_path, "metadata.json"), "w") as f:
-        json.dump(metadata, f)
-
+    
+    process_drone_mesh(grid_meta_prefix="SQUARE",
+                       dist_comm=dist_comm,
+                       dim=test_dim,
+                       sample_resolution=test_samples,
+                       tolerances=test_tolerances,
+                       drone_distance_redundancy=test_dist_redundancy,
+                       dropout_rates=test_dropout_rates,
+                       dropout_iters=test_dropout_iters,
+                       grid_func=drone_sq_grid)
+    
 if __name__ == "__main__":
     main()
 
