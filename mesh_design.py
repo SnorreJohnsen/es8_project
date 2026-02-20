@@ -442,7 +442,7 @@ def dropout_drones(*,
 def calculate_device_links(*,
                            meta_prefix: str = "",
                            tqdm_grid_title: str,
-                           drone_positions: np.ndarray,
+                           nodes: list,
                            dim: tuple[float, float],
                            dist_comm: float,
                            sample_resolution: tuple[float, float]) -> np.ndarray:
@@ -451,7 +451,7 @@ def calculate_device_links(*,
     
     Inputs:
     grid_name: Name of grid used for file and plot name
-    drone_positions: Nx2 Numpy array of drone positions in a given mesh
+    nodes: List of nodes contataining drone positions in a given mesh
     dim: Dimensions [x, y] of the area the drone mesh need to cover
     sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
     
@@ -466,10 +466,14 @@ def calculate_device_links(*,
 
     valid_links_counts = []
 
-    for x_new in tqdm(x_device_points, desc=f"Computing distances for {tqdm_grid_title} mesh"):
-        for y_new in y_device_points:
+    # Extract x and y position from node list
+    x_drone_pos = [node.x for node in nodes]
+    y_drone_pos = [node.y for node in nodes]
+
+    for x_device_new in tqdm(x_device_points, desc=f"Computing distances for {tqdm_grid_title} mesh"):
+        for y_device_new in y_device_points:
             # Compute distances from device i to all drones
-            distances = (drone_positions[:, 0] - x_new)**2 + (drone_positions[:, 1] - y_new)**2
+            distances = (x_drone_pos - x_device_new)**2 + (y_drone_pos - y_device_new)**2
 
             # Add links to valid connection count
             links = np.sum(distances <= dist_comm**2)
@@ -579,11 +583,10 @@ def make_json_network(*,
 #___________________________ PLOT FUNCITONS __________________________________#
 ###############################################################################
 
-# TODO make so drone positions takes node list instead of numpy array
 def plot_drone_positions(*,
                          meta_prefix: str = "", 
                          grid_name: str,
-                         drone_positions: np.ndarray,
+                         nodes: list,
                          distance: float,
                          dist_comm: float,
                          drone_link_count: np.ndarray,
@@ -592,13 +595,16 @@ def plot_drone_positions(*,
     
     fig, ax_drone_pos = plt.subplots()
     
-    # Plot drone positions as dots
-    x_pos = drone_positions[:, 0]
-    y_pos = drone_positions[:, 1]
+    # Plot drone positions as dots form node list
+    x_pos = [node.x for node in nodes]
+    y_pos = [node.y for node in nodes]
     ax_drone_pos.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
 
 
-    for i, (x, y) in enumerate(drone_positions):
+    for _, node in enumerate(nodes):
+        x = node.x
+        y = node.y
+
         # Draw communcation dist_comm as circle
         circle = plt.Circle((x, y), dist_comm, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
         ax_drone_pos.add_patch(circle)
@@ -607,7 +613,7 @@ def plot_drone_positions(*,
     device_links_mean = metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"]
 
     title_text = (
-    f"{grid_name} Mesh, Drones = {len(drone_positions)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
+    f"{grid_name} Mesh, Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
     f"Drone links: Min = {np.min(drone_link_count)}, Avg = {np.mean(drone_link_count):.2f} \n "
     f"Device links: Min = {device_links_min}, Avg = {device_links_mean:.2f}"
 )
@@ -623,7 +629,7 @@ def plot_drone_positions(*,
     plt.close(fig)
 
 def plot_histogram_drone_links(file_name: str,
-                               drone_link_count: np.ndarray,
+                               drone_link_count: list,
                                file_folder_path: str,
                                font_size: float = 8.0):
 
@@ -735,8 +741,8 @@ def main():
 
                 # Make array of all link counts for partial drone mesh 
                 total_link_count_dropout.append(link_count_dropout)
-            
-            
+
+
             # Make single network of each dropout rate
             make_json_network(file_name="square_network_dropout_example.json", 
                               file_folder_path=file_folder_path, 
@@ -747,7 +753,7 @@ def main():
             calc_dev_links_partial = metadata[f"SQUARE_{j}_DROPOUT_REAL_PERCENTAGE"]
             calculate_device_links(meta_prefix= f"SQUARE_{j}_DROPOUT", 
                                    tqdm_grid_title=f"SQUARE_LINKS_{calc_dev_links_partial}", 
-                                   drone_positions=drone_positions_dropout, 
+                                   nodes=node_list_dropout, 
                                    dim=test_dim, 
                                    dist_comm=dist_comm, 
                                    sample_resolution=samples)
@@ -759,7 +765,7 @@ def main():
             
             plot_drone_positions(meta_prefix=f"SQUARE_{j}_DROPOUT",
                                  grid_name=f"SQUARE_LINKS_{calc_dev_links_partial}",
-                                 drone_positions=drone_positions_dropout,
+                                 nodes=node_list_dropout,
                                  distance=drone_distance,
                                  dist_comm=dist_comm,
                                  drone_link_count=link_count_dropout,
@@ -775,7 +781,7 @@ def main():
         # Calculating links from devices to drones for full drone mesh
         calculate_device_links(meta_prefix="square_all", 
                                tqdm_grid_title="square_all", 
-                               drone_positions=all_drone_positions, 
+                               nodes=node_list_all, 
                                dim=test_dim, 
                                dist_comm=dist_comm,
                                sample_resolution=samples)
@@ -788,7 +794,7 @@ def main():
             
         plot_drone_positions(meta_prefix="square_all",
                              grid_name="square_all",
-                             drone_positions=all_drone_positions,
+                             nodes=node_list_all,
                              distance=drone_distance,
                              dist_comm=dist_comm,
                              drone_link_count=link_count_all,
