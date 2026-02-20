@@ -735,14 +735,14 @@ def process_drone_mesh(*,
             # Calculating links from devices to drones for partial drone mesh
             calc_dev_links_partial = metadata[f"{grid_meta_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
             calculate_device_links(meta_prefix= f"{grid_meta_prefix}_{j}_DROPOUT", 
-                                   tqdm_grid_title=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}", 
+                                   tqdm_grid_title=f"{grid_meta_prefix} links {calc_dev_links_partial}", 
                                    nodes=node_list_dropout, 
                                    dim=dim, 
                                    dist_comm=dist_comm, 
                                    sample_resolution=sample_resolution)
 
             # Histogram and drone position plots over total iterations (not mean)
-            plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}_histogram.png",
+            plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}_partial_histogram.png",
                                        drone_link_count=total_link_count_dropout,
                                        file_folder_path=file_folder_path)
             
@@ -762,8 +762,8 @@ def process_drone_mesh(*,
         make_json_network(file_name=f"{grid_meta_prefix}_network.json", file_folder_path=file_folder_path, nodes=node_list_all, links=link_list_all)
 
         # Calculating links from devices to drones for full drone mesh
-        calculate_device_links(meta_prefix=f"{grid_meta_prefix}_all", 
-                               tqdm_grid_title=f"{grid_meta_prefix}_all", 
+        calculate_device_links(meta_prefix=f"{grid_meta_prefix}_ALL", 
+                               tqdm_grid_title=f"{grid_meta_prefix} device links all", 
                                nodes=node_list_all, 
                                dim=dim, 
                                dist_comm=dist_comm,
@@ -771,11 +771,11 @@ def process_drone_mesh(*,
 
 
         # Histogram and drone position plots over full drone mesh
-        plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_full_mesh.png",
+        plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_full_histogram.png",
                                    drone_link_count=link_count_all,
                                    file_folder_path=file_folder_path)
             
-        plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_all",
+        plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_ALL",
                              grid_name=f"{grid_meta_prefix}_all",
                              nodes=node_list_all,
                              distance=drone_distance,
@@ -802,12 +802,16 @@ def main():
     test_dist_redundancy = 0
     test_dropout_rates = np.arange(0.1, 0.3, 0.1)    #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 100                         # number of iterations for each dropout rate (used for histogram)
-
+    
     wireless_prefix = ""
     desired_bandwidth_Mhz = 8
     desired_rate_Mbps = 20
     freq_Mhz = 868
     margin_loss_db = 3
+
+    # Set grid type to process
+    test_grid_meta_prefix = "SQUARE"
+    test_grid_func = drone_sq_grid
     ###############################################################################
     ###############################################################################
 
@@ -826,7 +830,7 @@ def main():
                                freq_Mhz=freq_Mhz,
                                margin_loss_db=margin_loss_db)
     
-    process_drone_mesh(grid_meta_prefix="SQUARE",
+    process_drone_mesh(grid_meta_prefix=test_grid_meta_prefix,
                        dist_comm=dist_comm,
                        dim=test_dim,
                        sample_resolution=test_samples,
@@ -834,7 +838,7 @@ def main():
                        drone_distance_redundancy=test_dist_redundancy,
                        dropout_rates=test_dropout_rates,
                        dropout_iters=test_dropout_iters,
-                       grid_func=drone_sq_grid)
+                       grid_func=test_grid_func)
     
 if __name__ == "__main__":
     main()
