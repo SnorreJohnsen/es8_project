@@ -470,6 +470,8 @@ def calculate_device_links(*,
     x_drone_pos = [node.x for node in nodes]
     y_drone_pos = [node.y for node in nodes]
 
+    all_points_covered = True  # Assume full coverage
+
     for x_device_new in tqdm(x_device_points, desc=f"Computing device to drone distances for {tqdm_grid_title}"):
         for y_device_new in y_device_points:
             # Compute distances from device i to all drones
@@ -479,12 +481,19 @@ def calculate_device_links(*,
             links = np.sum(distances <= dist_comm**2)
 
             valid_links_counts.append(links)
+
+            # Check if this point is uncovered
+            if links == 0:
+                all_points_covered = False
     
     valid_links = np.array(valid_links_counts)
 
     # Saving min and mean in dict for drone plot
     metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(valid_links))
     metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"] = float(np.mean(valid_links))
+
+    # Save area covered boolean to metadata 
+    metadata[f"{meta_prefix}AREA_FULLY_COVERED"] = all_points_covered
 
 def is_network_fully_connected(nodes: list[Node], 
                                links: list[Link]) -> bool:
@@ -850,7 +859,7 @@ def main():
     test_samples = (600, 200)
 
     test_tolerances = np.arange(100, 300, 100)       #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 0
+    test_dist_redundancy = 0          
     test_dropout_rates = np.arange(0.1, 0.3, 0.1)    #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 100                         # number of iterations for each dropout rate (used for histogram)
     
@@ -861,8 +870,8 @@ def main():
     margin_loss_db = 3
 
     # Set grid type to process
-    test_grid_meta_prefix = "HEXAGONAL_DIAMOND"
-    test_grid_func = drone_hex_diamond_grid
+    test_grid_meta_prefix = "SQUARE"
+    test_grid_func = drone_sq_grid
     ###############################################################################
     ###############################################################################
 
