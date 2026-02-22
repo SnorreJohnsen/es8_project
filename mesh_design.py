@@ -734,7 +734,7 @@ def process_drone_mesh(*,
 
             # Calculating links from devices to drones for partial drone mesh
             calc_dev_links_partial = metadata[f"{grid_meta_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
-            calculate_device_links(meta_prefix= f"{grid_meta_prefix}_{j}_DROPOUT", 
+            calculate_device_links(meta_prefix= f"{grid_meta_prefix}_{j}_DROPOUT_", 
                                    tqdm_grid_title=f"{grid_meta_prefix} mesh {calc_dev_links_partial:.4f}% dropout", 
                                    nodes=node_list_dropout, 
                                    dim=dim, 
@@ -746,7 +746,7 @@ def process_drone_mesh(*,
                                        drone_link_count=total_link_count_dropout,
                                        file_folder_path=file_folder_path)
             
-            plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_{j}_DROPOUT",
+            plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_{j}_DROPOUT_",
                                  grid_name=f"{grid_meta_prefix}_{calc_dev_links_partial:.4f}_dropout_mesh",
                                  nodes=node_list_dropout,
                                  distance=drone_distance,
