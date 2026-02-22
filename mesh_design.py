@@ -470,7 +470,7 @@ def calculate_device_links(*,
     x_drone_pos = [node.x for node in nodes]
     y_drone_pos = [node.y for node in nodes]
 
-    for x_device_new in tqdm(x_device_points, desc=f"Computing distances for {tqdm_grid_title} mesh"):
+    for x_device_new in tqdm(x_device_points, desc=f"Computing device to drone distances for {tqdm_grid_title}"):
         for y_device_new in y_device_points:
             # Compute distances from device i to all drones
             distances = (x_drone_pos - x_device_new)**2 + (y_drone_pos - y_device_new)**2
@@ -715,7 +715,7 @@ def process_drone_mesh(*,
             total_link_count_dropout = []
 
             # For loop over dropout iterations for histogram
-            for k in range(dropout_iters):
+            for _ in range(dropout_iters):
                 drone_positions_dropout = dropout_drones(meta_prefix=f"{grid_meta_prefix}_{j}_", drone_positions=all_drone_positions, dropout_rate=dropout_rate)
                 
                 # Make node and link list for partial drone mesh with removed drones
@@ -735,19 +735,19 @@ def process_drone_mesh(*,
             # Calculating links from devices to drones for partial drone mesh
             calc_dev_links_partial = metadata[f"{grid_meta_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
             calculate_device_links(meta_prefix= f"{grid_meta_prefix}_{j}_DROPOUT", 
-                                   tqdm_grid_title=f"{grid_meta_prefix} links {calc_dev_links_partial}", 
+                                   tqdm_grid_title=f"{grid_meta_prefix} mesh {calc_dev_links_partial:.4f}% dropout", 
                                    nodes=node_list_dropout, 
                                    dim=dim, 
                                    dist_comm=dist_comm, 
                                    sample_resolution=sample_resolution)
 
             # Histogram and drone position plots over total iterations (not mean)
-            plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}_partial_histogram.png",
+            plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_{calc_dev_links_partial:.4f}_dropout_histogram.png",
                                        drone_link_count=total_link_count_dropout,
                                        file_folder_path=file_folder_path)
             
             plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_{j}_DROPOUT",
-                                 grid_name=f"{grid_meta_prefix}_LINKS_{calc_dev_links_partial}",
+                                 grid_name=f"{grid_meta_prefix}_{calc_dev_links_partial:.4f}_dropout_mesh",
                                  nodes=node_list_dropout,
                                  distance=drone_distance,
                                  dist_comm=dist_comm,
@@ -762,8 +762,8 @@ def process_drone_mesh(*,
         make_json_network(file_name=f"{grid_meta_prefix}_network.json", file_folder_path=file_folder_path, nodes=node_list_all, links=link_list_all)
 
         # Calculating links from devices to drones for full drone mesh
-        calculate_device_links(meta_prefix=f"{grid_meta_prefix}_ALL", 
-                               tqdm_grid_title=f"{grid_meta_prefix} device links all", 
+        calculate_device_links(meta_prefix=f"{grid_meta_prefix}_ALL_", 
+                               tqdm_grid_title=f"{grid_meta_prefix} mesh all device links", 
                                nodes=node_list_all, 
                                dim=dim, 
                                dist_comm=dist_comm,
@@ -775,8 +775,8 @@ def process_drone_mesh(*,
                                    drone_link_count=link_count_all,
                                    file_folder_path=file_folder_path)
             
-        plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_ALL",
-                             grid_name=f"{grid_meta_prefix}_all",
+        plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_ALL_",
+                             grid_name=f"{grid_meta_prefix}_full_mesh",
                              nodes=node_list_all,
                              distance=drone_distance,
                              dist_comm=dist_comm,
@@ -798,7 +798,7 @@ def main():
     test_dim = (length*scale_factor, width*scale_factor)
     test_samples = (600, 200)
 
-    test_tolerances = np.arange(100, 300, 100)  #tolerance in meters (min, max, stepsize) 
+    test_tolerances = np.arange(100, 300, 100)       #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0
     test_dropout_rates = np.arange(0.1, 0.3, 0.1)    #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 100                         # number of iterations for each dropout rate (used for histogram)
