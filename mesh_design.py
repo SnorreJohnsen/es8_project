@@ -486,6 +486,45 @@ def calculate_device_links(*,
     metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(valid_links))
     metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"] = float(np.mean(valid_links))
 
+def is_network_fully_connected(nodes: list[Node], 
+                               links: list[Link]) -> bool:
+    """
+    Docstring for is_network_fully_connected
+
+    Inputs:
+    nodes: List of nodes contataining of drone positions in a given mesh
+    links: List of drone links
+
+    Returns:
+    True if the network is fully connected.
+    """
+
+    # If no drones in network return true
+    if len(nodes) == 0:
+        return True
+
+    # Build adjacency list 
+    adjacency = {node.id: [] for node in nodes}
+
+    # Add links to other nodes in both directions since network is undirected
+    for link in links:
+        adjacency[link.source].append(link.target)
+        adjacency[link.target].append(link.source)
+
+    # BFS algorithm
+    start_node = nodes[0].id                    # Set start node
+    visited = set([start_node])                 # Mark start node as visited, set([start_node]) = {start_node}
+    queue = [start_node]                        # Place start node in queue to explore
+
+
+    while queue:
+        current = queue.pop(0)                  # Take next node in queue to explore
+        for neighbor in adjacency[current]:     # Look at all drones connected to it
+            if neighbor not in visited:         # If neighbor not visited it is new so
+                visited.add(neighbor)           # Mark the new node as visited
+                queue.append(neighbor)          # Add it to queue to explore later
+
+    return len(visited) == len(nodes)
 
 ###############################################################################
 #_____________________ NETWORK LISTS (JSON) __________________________________#
@@ -712,7 +751,11 @@ def process_drone_mesh(*,
         for j in range(len(dropout_rates)):
             dropout_rate = dropout_rates[j]
             
+            # Create array for total number of link count for dropout networks
             total_link_count_dropout = []
+
+            # Create variable for network is fully connected percentage
+            connected_count = 0
 
             # For loop over dropout iterations for histogram
             for _ in range(dropout_iters):
@@ -724,6 +767,13 @@ def process_drone_mesh(*,
 
                 # Make array of all link counts for partial drone mesh 
                 total_link_count_dropout.append(link_count_dropout)
+
+                # Check if the remaining network after dropout is fully connected
+                if is_network_fully_connected(node_list_dropout, link_list_dropout):
+                    connected_count += 1
+                
+                # Calculate the connected percentage of given dropout mesh
+                metadata[f"{grid_meta_prefix}_{j}_CONNECTED_PERCENTAGE"] = connected_count / dropout_iters
 
 
             # Make single network of each dropout rate
@@ -810,8 +860,8 @@ def main():
     margin_loss_db = 3
 
     # Set grid type to process
-    test_grid_meta_prefix = "SQUARE"
-    test_grid_func = drone_sq_grid
+    test_grid_meta_prefix = "TRIANGLE"
+    test_grid_func = drone_triangle_grid
     ###############################################################################
     ###############################################################################
 
