@@ -470,7 +470,9 @@ def calculate_device_links(*,
     x_drone_pos = [node.x for node in nodes]
     y_drone_pos = [node.y for node in nodes]
 
-    all_points_covered = True  # Assume full coverage
+    # Variable for calculating area coverage
+    covered_points_count = 0
+    total_points = x_sample_res * y_sample_res
 
     for x_device_new in tqdm(x_device_points, desc=f"Computing device to drone distances for {tqdm_grid_title}"):
         for y_device_new in y_device_points:
@@ -483,8 +485,8 @@ def calculate_device_links(*,
             valid_links_counts.append(links)
 
             # Check if this point is uncovered
-            if links == 0:
-                all_points_covered = False
+            if links > 0:
+                covered_points_count += 1
     
     valid_links = np.array(valid_links_counts)
 
@@ -492,8 +494,8 @@ def calculate_device_links(*,
     metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(valid_links))
     metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"] = float(np.mean(valid_links))
 
-    # Save area covered boolean to metadata 
-    metadata[f"{meta_prefix}AREA_FULLY_COVERED"] = all_points_covered
+    # Save area covered percentage to metadata
+    metadata[f"{meta_prefix}AREA_COVERED"] = covered_points_count / total_points
 
 def is_network_fully_connected(nodes: list[Node], 
                                links: list[Link]) -> bool:
