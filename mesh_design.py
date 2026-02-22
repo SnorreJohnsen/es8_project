@@ -745,7 +745,7 @@ def process_drone_mesh(*,
         drone_distance = distance_calc(dist_comm, tolerance, drone_distance_redundancy)
 
         # Choose grid function
-        all_drone_positions = grid_func(dim=dim, dist=drone_distance)
+        all_drone_positions = grid_func(dim=dim, dist=drone_distance, **kwargs)
 
         # For loop over number of dropouts
         for j in range(len(dropout_rates)):
@@ -808,6 +808,7 @@ def process_drone_mesh(*,
         node_list_all = node_list(drone_positions=all_drone_positions)
         link_list_all, link_count_all = link_list(nodes=node_list_all, dist_comm=dist_comm)
 
+
         # Make the json network from list of nodes
         make_json_network(file_name=f"{grid_meta_prefix}_network.json", file_folder_path=file_folder_path, nodes=node_list_all, links=link_list_all)
 
@@ -860,8 +861,8 @@ def main():
     margin_loss_db = 3
 
     # Set grid type to process
-    test_grid_meta_prefix = "TRIANGLE"
-    test_grid_func = drone_triangle_grid
+    test_grid_meta_prefix = "HEXAGONAL_DIAMOND"
+    test_grid_func = drone_hex_diamond_grid
     ###############################################################################
     ###############################################################################
 
@@ -880,6 +881,7 @@ def main():
                                freq_Mhz=freq_Mhz,
                                margin_loss_db=margin_loss_db)
     
+    # Process a drone mesh to give metadata and plots
     process_drone_mesh(grid_meta_prefix=test_grid_meta_prefix,
                        dist_comm=dist_comm,
                        dim=test_dim,
