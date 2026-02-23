@@ -635,7 +635,7 @@ def make_json_network(*,
 
 def plot_drone_positions(*,
                          meta_prefix: str = "", 
-                         grid_name: str,
+                         file_name: str,
                          nodes: list,
                          distance: float,
                          dist_comm: float,
@@ -663,23 +663,25 @@ def plot_drone_positions(*,
     device_links_mean = metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"]
 
     title_text = (
-    f"{grid_name} Mesh, Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-    f"Drone links: Min = {np.min(drone_link_count)}, Avg = {np.mean(drone_link_count):.2f} \n "
-    f"Device links: Min = {device_links_min}, Avg = {device_links_mean:.2f}"
+    f"{file_name} \n"
+    f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
+    f"Drone links: Min = {np.min(drone_link_count)}, Avg = {np.mean(drone_link_count):.2f}, Device links: Min = {device_links_min}, Avg = {device_links_mean:.2f}"
 )
-    ax_drone_pos.set_title(title_text, fontsize=font_size, pad=10)  # pad adds space above plot
-    ax_drone_pos.set_xlabel("meters", fontsize=font_size)
-    ax_drone_pos.set_ylabel("meters", fontsize=font_size)
+    ax_drone_pos.set_title(title_text, fontsize=font_size)
+    ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
+    ax_drone_pos.set_ylabel("[m]", fontsize=font_size)
     ax_drone_pos.set_aspect('equal', 'box')
     ax_drone_pos.tick_params(axis='both', labelsize=font_size)
 
-    file_path = os.path.join(file_folder_path, f"{grid_name}.png")
+    file_path = os.path.join(file_folder_path, file_name)
     fig.savefig(file_path, dpi=300, bbox_inches='tight')
     
     plt.close(fig)
 
-def plot_histogram_drone_links(file_name: str,
+def plot_histogram_drone_links(*,
+                               file_name: str,
                                drone_link_count: list,
+                               iterations: int = 1,
                                file_folder_path: str,
                                font_size: float = 8.0):
 
@@ -692,16 +694,34 @@ def plot_histogram_drone_links(file_name: str,
 
     connections_hist = Counter(drone_link_count)
 
-    # Sort keys to ensure ordered x-axis
-    x_values = sorted(connections_hist.keys())
-    y_values = [connections_hist[x] for x in x_values]
+    # Compute average for each bin in histogram
+    connections_hist_avg = {key: value / iterations for key, value in connections_hist.items()}
 
-    ax_hist.set_title("Histogram over links")
+    # Sort keys to ensure ordered x-axis
+    x_values = sorted(connections_hist_avg.keys())
+    y_values = [connections_hist_avg[x] for x in x_values]
+
+    title_text = (
+        f"{file_name} \n"
+        f"Histogram drone links, {iterations} iteration(s)"
+    )
+
+    ax_hist.set_title(title_text, fontsize=font_size)
     ax_hist.set_xlabel("Connections", fontsize=font_size)
     ax_hist.set_ylabel("Drones", fontsize=font_size)
 
     # Center bars on integers
-    ax_hist.bar(x_values, y_values, width=0.2)
+    bars = ax_hist.bar(x_values, y_values, width=0.2)
+
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            height,
+            f'{float(height)}',
+            ha='center',
+            va='bottom'
+            )
 
     # Show only integer ticks (only existing values)
     ax_hist.set_xticks(range(np.max(x_values)+1))
@@ -760,8 +780,11 @@ def process_drone_mesh(*,
 
         # For loop over number of dropouts
         for j in range(len(dropout_rates)):
+
+            # Iterate over dropout rates and add to metadata
             dropout_rate = dropout_rates[j]
-            
+            metadata[f"{grid_meta_prefix}_{j}_DROPOUT_RATE"] = dropout_rate
+
             # Create array for total number of link count for dropout networks
             total_link_count_dropout = []
 
@@ -805,10 +828,11 @@ def process_drone_mesh(*,
             # Histogram and drone position plots over total iterations (not mean)
             plot_histogram_drone_links(file_name=f"{grid_meta_prefix}_{calc_dev_links_partial:.4f}_dropout_histogram.png",
                                        drone_link_count=total_link_count_dropout,
+                                       iterations=dropout_iters,
                                        file_folder_path=file_folder_path)
             
             plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_{j}_DROPOUT_",
-                                 grid_name=f"{grid_meta_prefix}_{calc_dev_links_partial:.4f}_dropout_mesh",
+                                 file_name=f"{grid_meta_prefix}_{calc_dev_links_partial:.4f}_dropout_mesh.png",
                                  nodes=node_list_dropout,
                                  distance=drone_distance,
                                  dist_comm=dist_comm,
@@ -819,6 +843,8 @@ def process_drone_mesh(*,
         node_list_all = node_list(drone_positions=all_drone_positions)
         link_list_all, link_count_all = link_list(nodes=node_list_all, dist_comm=dist_comm)
 
+        # Add number drones used in full mesh to metadata
+        metadata[f"{grid_meta_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
 
         # Make the json network from list of nodes
         make_json_network(file_name=f"{grid_meta_prefix}_network.json", file_folder_path=file_folder_path, nodes=node_list_all, links=link_list_all)
@@ -838,7 +864,7 @@ def process_drone_mesh(*,
                                    file_folder_path=file_folder_path)
             
         plot_drone_positions(meta_prefix=f"{grid_meta_prefix}_ALL_",
-                             grid_name=f"{grid_meta_prefix}_full_mesh",
+                             file_name=f"{grid_meta_prefix}_full_mesh.png",
                              nodes=node_list_all,
                              distance=drone_distance,
                              dist_comm=dist_comm,
