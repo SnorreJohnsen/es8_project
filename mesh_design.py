@@ -19,6 +19,7 @@ class Node:
 class Link:
     source: str
     target: str
+    data_rate: str
     
 ###############################################################################
 #__________________________ DRONE MESH GRIDS _________________________________#
@@ -346,14 +347,14 @@ lookup_table_halow_module_MM8108 = {
 }
 
 def get_halow_module_MM8108_params(*,
-                                   meta_prefix: str ="",
+                                   wireless_prefix: str ="",
                                    desired_bandwidth_Mhz, 
                                    desired_rate_Mbps):
     # Find closest available bandwidth
     available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
     bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
     closest_bandwidth = int(available_bandwidth[bandwidth_index])
-    metadata[f"{meta_prefix}BANDWIDTH"] = closest_bandwidth
+    metadata[f"{wireless_prefix}BANDWIDTH"] = closest_bandwidth
 
     # Get all MCS schemes for that bandwidth
     schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
@@ -364,16 +365,16 @@ def get_halow_module_MM8108_params(*,
     # Find first sorted_scheme >= desired datarate
     for best_scheme in sorted_schemes:
         if best_scheme['data_rate'] >= desired_rate_Mbps:
-            metadata[f"{meta_prefix}DATA_RATE"] = best_scheme['data_rate']
-            metadata[f"{meta_prefix}RECEIVED_SENSITIVITY"] = best_scheme['receive_sensitivity']
-            metadata[f"{meta_prefix}TRANSMIT_POWER"] = best_scheme['transmit_power']
+            metadata[f"{wireless_prefix}DATA_RATE"] = best_scheme['data_rate']
+            metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"] = best_scheme['receive_sensitivity']
+            metadata[f"{wireless_prefix}TRANSMIT_POWER"] = best_scheme['transmit_power']
             break
         else:
             # If desired data rate above all availeble schemes return highest sorted_scheme
             best_scheme = sorted_schemes[0]
-            metadata[f"{meta_prefix}DATA_RATE"] = best_scheme['data_rate']
-            metadata[f"{meta_prefix}RECEIVED_SENSITIVITY"] = best_scheme['receive_sensitivity']
-            metadata[f"{meta_prefix}TRANSMIT_POWER"] = best_scheme['transmit_power']
+            metadata[f"{wireless_prefix}DATA_RATE"] = best_scheme['data_rate']
+            metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"] = best_scheme['receive_sensitivity']
+            metadata[f"{wireless_prefix}TRANSMIT_POWER"] = best_scheme['transmit_power']
 
 def dist_comm_calc(transmit_power_dbm: float = 16, 
                    received_power_dbm: float = -74,
@@ -499,7 +500,6 @@ def calculate_device_links(*,
     # Save area covered percentage to metadata
     metadata[f"{meta_prefix}AREA_COVERED"] = covered_points_count / total_points
 
-
 def is_network_fully_connected(nodes: list[Node], 
                                links: list[Link]) -> bool:
     """
@@ -574,7 +574,9 @@ def node_list(drone_positions: np.ndarray) -> list[Node]:
     
     return nodes
 
-def link_list(nodes: list,
+def link_list(*,
+              wireless_prefix: str = "",
+              nodes: list,
               dist_comm: float) -> list[Link]:
     
     """
@@ -603,7 +605,9 @@ def link_list(nodes: list,
             distances = (target.x - source.x)**2 + (target.y - source.y)**2    
 
             if distances <= (dist_comm + 1)**2:
-                link = Link(source=source.id, target=target.id)
+                link = Link(source=source.id, 
+                            target=target.id,
+                            data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
                 links.append(link)       
         
                 # Count how many are within dist_comm (exclude itself)
@@ -737,6 +741,7 @@ def plot_histogram_drone_links(*,
 
 def process_drone_mesh(*,
                        grid_meta_prefix: str,
+                       wireless_prefix:str,
                        dist_comm: float,
                        dim: tuple[float, float],
                        sample_resolution: tuple[float, float],
@@ -829,7 +834,9 @@ def process_drone_mesh(*,
                 
                 # Make node and link list for partial drone mesh with removed drones
                 node_list_dropout = node_list(drone_positions=drone_positions_dropout)
-                link_list_dropout, link_count_dropout = link_list(nodes=node_list_dropout, dist_comm=dist_comm)
+                link_list_dropout, link_count_dropout = link_list(wireless_prefix=wireless_prefix, 
+                                                                  nodes=node_list_dropout, 
+                                                                  dist_comm=dist_comm)
 
                 # Make array of all link counts for partial drone mesh 
                 total_link_count_dropout.append(link_count_dropout)
@@ -874,7 +881,9 @@ def process_drone_mesh(*,
 
         # Make node and link list for full drone mesh
         node_list_all = node_list(drone_positions=all_drone_positions)
-        link_list_all, link_count_all = link_list(nodes=node_list_all, dist_comm=dist_comm)
+        link_list_all, link_count_all = link_list(wireless_prefix=wireless_prefix,
+                                                  nodes=node_list_all, 
+                                                  dist_comm=dist_comm)
 
         # Add number drones used in full mesh to metadata
         metadata[f"{grid_meta_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
@@ -945,7 +954,7 @@ def main():
 
     # Calculate values for modelling wireless commmunication from wifi halow module
     # These values are the same for all grid types
-    get_halow_module_MM8108_params(meta_prefix=wireless_prefix, 
+    get_halow_module_MM8108_params(wireless_prefix=wireless_prefix, 
                                    desired_bandwidth_Mhz=desired_bandwidth_Mhz, 
                                    desired_rate_Mbps=desired_rate_Mbps)
 
@@ -956,6 +965,7 @@ def main():
     
     # Process a drone mesh to give metadata and plots
     process_drone_mesh(grid_meta_prefix=test_grid_meta_prefix,
+                       wireless_prefix=wireless_prefix,
                        dist_comm=dist_comm,
                        dim=test_dim,
                        sample_resolution=test_samples,
