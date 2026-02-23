@@ -442,7 +442,6 @@ def dropout_drones(*,
 
 def calculate_device_links(*,
                            meta_prefix: str = "",
-                           tqdm_grid_title: str,
                            nodes: list,
                            dim: tuple[float, float],
                            dist_comm: float,
@@ -812,10 +811,12 @@ def process_drone_mesh(*,
         all_drone_positions = grid_func(dim=dim, dist=drone_distance, **kwargs)
 
         # For loop over number of dropouts
-        for j in range(len(dropout_rates)):
+        bar_dropout_rates = tqdm(dropout_rates)
+        for j, dropout_rate in enumerate(bar_dropout_rates):
+            bar_dropout_rates.set_description(f"Processing {grid_meta_prefix} mesh tol={tolerance} | all rates {dropout_rates} | current dropout={dropout_rate:.2f}")
 
             # Iterate over dropout rates and add to metadata
-            dropout_rate = dropout_rates[j]
+            #dropout_rate = dropout_rates[j]
             metadata[f"{grid_meta_prefix}_{j}_DROPOUT_RATE"] = dropout_rate
 
             # Create array for total number of link count for dropout networks
@@ -855,7 +856,6 @@ def process_drone_mesh(*,
 
             # Calculating links from devices to drones for partial drone mesh
             calculate_device_links(meta_prefix= f"{grid_meta_prefix}_{j}_DROPOUT_", 
-                                   tqdm_grid_title=f"{grid_meta_prefix} mesh {prefix_dropout_real_perc:.4f}% dropout {tolerance}[m] tolerance", 
                                    nodes=node_list_dropout, 
                                    dim=dim, 
                                    dist_comm=dist_comm, 
@@ -892,7 +892,6 @@ def process_drone_mesh(*,
 
         # Calculating links from devices to drones for full drone mesh
         calculate_device_links(meta_prefix=f"{grid_meta_prefix}_ALL_", 
-                               tqdm_grid_title=f"{grid_meta_prefix} mesh all device links", 
                                nodes=node_list_all, 
                                dim=dim, 
                                dist_comm=dist_comm,
