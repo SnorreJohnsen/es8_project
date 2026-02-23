@@ -463,42 +463,38 @@ def calculate_device_links(*,
 
     x_dim, y_dim = dim
     x_sample_res, y_sample_res = sample_resolution
+
     # Device points in drone area
-    x_device_points = np.linspace(0, x_dim, x_sample_res)
-    y_device_points = np.linspace(0, y_dim, y_sample_res)
+    x_device = np.linspace(0, x_dim, x_sample_res)
+    y_device = np.linspace(0, y_dim, y_sample_res)
+    X_device, Y_device = np.meshgrid(x_device, y_device)
 
-    valid_links_counts = []
+    # Flatten device grid -> shape (N_device, 2)
+    device_positions = np.stack([X_device.ravel(), Y_device.ravel()], axis=1)
 
-    # Extract x and y position from node list
-    x_drone_pos = [node.x for node in nodes]
-    y_drone_pos = [node.y for node in nodes]
+    # Extract drone position from list -> shape (N_points, 2)
+    drone_positions = np.asarray([[node.x, node.y] for node in nodes])
 
-    # Variable for calculating area coverage
-    covered_points_count = 0
-    total_points = x_sample_res * y_sample_res
+    # Compute squared distances using broadcasting
+    # device_points[:, None, :] -> (N_points, 1, 2)
+    # drone_positions[None, :, :] -> (1, N_drones, 2)
+    # Result -> (N_points, N_drones)
+    diff = device_positions[:, None, :] - drone_positions[None, :, :]
+    distances_sq = np.sum(diff**2, axis=2)
 
-    for x_device_new in tqdm(x_device_points, desc=f"Computing device to drone distances for {tqdm_grid_title}"):
-        for y_device_new in y_device_points:
-            # Compute distances from device i to all drones
-            distances = (x_drone_pos - x_device_new)**2 + (y_drone_pos - y_device_new)**2
-
-            # Add links to valid connection count
-            links = np.sum(distances <= dist_comm**2)
-
-            valid_links_counts.append(links)
-
-            # Check if this point is uncovered
-            if links > 0:
-                covered_points_count += 1
-    
-    valid_links = np.array(valid_links_counts)
+    # Count links per device point
+    links_per_device = np.sum(distances_sq <= dist_comm**2, axis=1)
 
     # Saving min and mean in dict for drone plot
-    metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(valid_links))
-    metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"] = float(np.mean(valid_links))
+    metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(links_per_device))
+    metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"] = float(np.mean(links_per_device))
+
+    # Area coverage percentage
+    covered_points = np.sum(links_per_device > 0)
+    total_points = links_per_device.size
 
     # Save area covered percentage to metadata
-    metadata[f"{meta_prefix}AREA_COVERED"] = covered_points_count / total_points
+    metadata[f"{meta_prefix}AREA_COVERED"] = covered_points / total_points
 
 def is_network_fully_connected(nodes: list[Node], 
                                links: list[Link]) -> bool:
