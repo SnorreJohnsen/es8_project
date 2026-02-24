@@ -272,7 +272,7 @@ def distance_calc(dist_comm: float,
 
     return distance
     
-# Shannon for calculating received power (not in use due to reuslt 48 km :)
+# Shannon for calculating received power (not in used due to datasheet is used instead)
 def shannon(data_rate_Mbps: float, 
             bandwidth_Mhz: float = 4, 
             noise_figure_db: float = 6) -> float:
