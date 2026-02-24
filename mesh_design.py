@@ -951,6 +951,16 @@ def main():
     ###############################################################################
     ###############################################################################
 
+    # Save test parameters to metadata
+    metadata["AREA_DIMENSIONS"] = str(test_dim)
+    metadata["SAMPLES"] = str(test_samples)
+    metadata["TOLERANCES"] = str(test_tolerances)
+    metadata["DROPOUT_RATES"] = str(test_dropout_rates)
+    metadata["DISTANCE_REDUNDANCY"] = test_dist_redundancy
+
+    metadata["FREQ_MHZ"] = freq_Mhz
+    metadata["MARGIN_LOSS"] = margin_loss_db
+
     # Save dropout iterations used for histogram
     metadata["DROPOUT_ITERATIONS"] = test_dropout_iters
 
