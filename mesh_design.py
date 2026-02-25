@@ -729,7 +729,7 @@ def plot_histogram_drone_links(*,
         plt.text(
             bar.get_x() + bar.get_width() / 2,
             height,
-            f'{float(height)}',
+            f'{height:.2f}',
             ha='center',
             va='bottom'
             )
@@ -936,12 +936,12 @@ def main():
     width = 10000
     scale_factor = 1
     test_dim = (length*scale_factor, width*scale_factor)
-    test_samples = (600, 200)                           # number of sample points on area (x, y)
+    test_samples = (1200, 400)                           # number of sample points on area (x, y)
 
-    test_tolerances = np.arange(0, 600, 100)          #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 0                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05, 0.3, 0.05)      #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 1000                           # number of iterations for each dropout rate (used for histogram)
+    test_tolerances = np.arange(0, 150, 50)          #tolerance in meters (min, max, stepsize) 
+    test_dist_redundancy = 1000                         # distance redundancy for drone placement
+    test_dropout_rates = np.arange(0.05, 0.55, 0.05)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_iters = 10000                           # number of iterations for each dropout rate (used for histogram)
     
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
