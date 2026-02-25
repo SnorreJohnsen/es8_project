@@ -290,13 +290,8 @@ def shannon(data_rate_Mbps: float,
     """
     default values:
 
-    bandwidth = 5 MHz (bandwidth of wifi halow)
-    noise_figure = 3db (double of ideal thermal noise) usually 3-5db
-    transmit_power_dbm = 24dbm
-    transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
-    received_gain_dbi = 0 usually in range 0-3 dbi
-    margin_loss_db = 2 dB (other losses like polarization mismatch)
-    freq_mhz = 863 - 868 (wifi halow)
+    bandwidth_MHz = 5 MHz (bandwidth of wifi halow)
+    noise_figure_db = 3db (double of ideal thermal noise) usually 3-5db
     """
 
 
@@ -396,10 +391,11 @@ def dist_comm_calc(transmit_power_dbm: float = 16,
     """
     default values:
     
-    transmit_power_dbm = 24dbm
+    transmit_power_dbm = 16dbm (lowest value from module 8MHz bandwidth)
+    received_power_dbm = -74dbm (same modulation scheme as transmit power)
     transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
     received_gain_dbi = 0 usually in range 0-3 dbi
-    margin_loss_db = 2 dB (other losses like polarization mismatch)
+    margin_loss_db = 0 dB (other losses like polarization mismatch)
     freq_mhz = 863 - 868 (wifi halow)
     """
 
@@ -942,10 +938,10 @@ def main():
     test_dim = (length*scale_factor, width*scale_factor)
     test_samples = (600, 200)                           # number of sample points on area (x, y)
 
-    test_tolerances = np.arange(100, 300, 100)          #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 3000                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.1, 0.3, 0.1)      #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 100                            # number of iterations for each dropout rate (used for histogram)
+    test_tolerances = np.arange(0, 600, 100)          #tolerance in meters (min, max, stepsize) 
+    test_dist_redundancy = 0                         # distance redundancy for drone placement
+    test_dropout_rates = np.arange(0.05, 0.3, 0.05)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_iters = 1000                           # number of iterations for each dropout rate (used for histogram)
     
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
@@ -957,7 +953,7 @@ def main():
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones 
     # has to be set in function process_drone_mesh
-    test_grid_meta_prefix = "Square"
+    test_grid_meta_prefix = "SQUARE"
     test_grid_func = drone_sq_grid
     ###############################################################################
     ###############################################################################
