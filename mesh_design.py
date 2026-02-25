@@ -31,8 +31,13 @@ def drone_sq_grid(dim: tuple[float, float],
                   dist: float):
     
     x_dim, y_dim = dim
-    x_range = np.arange(0,x_dim+1, dist)   
-    y_range = np.arange(0,y_dim+1, dist)   
+
+    col_num_drones = y_dim // dist
+    center_dist = dist * col_num_drones
+    offset =(y_dim - center_dist) /2
+
+    x_range = np.arange(offset,x_dim+1, dist)   
+    y_range = np.arange(offset,y_dim+1, dist)   
 
     return make_grid_product(x_range, y_range)
     
@@ -43,9 +48,14 @@ def drone_triangle_grid(dim: tuple[float, float],
 
     # Angle from node in full column to adjacent node in partial column relative to x axis
     alpha = np.radians(30) 
+
+    full_col_num_drones = y_dim // dist
+
+    center_dist = dist * full_col_num_drones
+    offset =(y_dim - center_dist) /2
     
     # Calculate y locations for full columns
-    full_cols_y_range = np.arange(0, y_dim+1, dist)
+    full_cols_y_range = np.arange(offset, y_dim+1, dist)
 
     # Calculate number of full comlumns
     full_col_x_dist = 2*dist*np.cos(alpha)
@@ -58,8 +68,8 @@ def drone_triangle_grid(dim: tuple[float, float],
     part_col_num_rows = len(full_cols_y_range)-1
 
     # linspace(start, start + step*num, num=num, endpoint=False)
-    part_cols_y_range = np.linspace(dist*np.sin(alpha), 
-                                    dist*np.sin(alpha) + 2*dist*np.sin(alpha)*part_col_num_rows, 
+    part_cols_y_range = np.linspace(offset + dist*np.sin(alpha), 
+                                    offset + dist*np.sin(alpha) + 2*dist*np.sin(alpha)*part_col_num_rows, 
                                     num=part_col_num_rows, 
                                     endpoint=False)
     part_cols_x_range = np.linspace(dist*np.cos(alpha),
@@ -69,6 +79,7 @@ def drone_triangle_grid(dim: tuple[float, float],
     part_col_pos = make_grid_product(part_cols_x_range, part_cols_y_range) 
 
     full_grid = np.concat([full_col_pos, part_col_pos])
+
     return full_grid   
 
 def drone_hex_grid_squished(dim: tuple[float, float],
@@ -902,14 +913,14 @@ def process_drone_mesh(*,
 
 
         # Histogram and drone position plots over full drone mesh
-        plot_histogram_drone_links(file_name=f"{grid_prefix}_full_histogram.png",
-                                   title_name=f"{grid_prefix} Histogram",
+        plot_histogram_drone_links(file_name=f"{grid_prefix}_{tolerance}_tolerance_full_histogram.png",
+                                   title_name=f"{grid_prefix} Histogram | tolerance = {tolerance} [m]",
                                    drone_link_count=link_count_all,
                                    file_folder_path=dir_origin_full_plots)
             
         plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
-                             file_name=f"{grid_prefix}_full_mesh.png",
-                             title_name=f"{grid_prefix} Mesh",
+                             file_name=f"{grid_prefix}_{tolerance}_tolerance_full_mesh.png",
+                             title_name=f"{grid_prefix} Mesh | tolerance = {tolerance} [m]",
                              nodes=node_list_all,
                              distance=drone_distance,
                              dist_comm=dist_comm,
@@ -932,7 +943,7 @@ def main():
     test_samples = (600, 200)                           # number of sample points on area (x, y)
 
     test_tolerances = np.arange(100, 300, 100)          #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 0                         # distance redundancy for drone placement
+    test_dist_redundancy = 3000                         # distance redundancy for drone placement
     test_dropout_rates = np.arange(0.1, 0.3, 0.1)      #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 100                            # number of iterations for each dropout rate (used for histogram)
     
@@ -946,7 +957,7 @@ def main():
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones 
     # has to be set in function process_drone_mesh
-    test_grid_meta_prefix = "SQUARE"
+    test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
     ###############################################################################
     ###############################################################################
