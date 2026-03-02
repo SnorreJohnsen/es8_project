@@ -570,8 +570,8 @@ def node_list(drone_positions: np.ndarray) -> list[Node]:
     nodes: list[Node] = []
 
     for i in range(len(drone_positions)):
-        id = f"{x_pos[i]:.2f}_{y_pos[i]:.2f}"
-        node = Node(id=id, x=float(x_pos[i]), y=float(y_pos[i]))
+        id = f"n{i}"
+        node = Node(id=id, x=round(float(x_pos[i]), 2), y=round(float(y_pos[i]), 2))
         nodes.append(node)
     
     return nodes
@@ -936,12 +936,12 @@ def main():
     width = 10000
     scale_factor = 1
     test_dim = (length*scale_factor, width*scale_factor)
-    test_samples = (1200, 400)                           # number of sample points on area (x, y)
+    test_samples = (600, 200)                           # number of sample points on area (x, y)
 
     test_tolerances = np.arange(0, 150, 50)          #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 1000                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05, 0.55, 0.05)      #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 10000                           # number of iterations for each dropout rate (used for histogram)
+    test_dist_redundancy = 2500                         # distance redundancy for drone placement
+    test_dropout_rates = np.arange(0.05, 0.30, 0.05)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_iters = 1000                           # number of iterations for each dropout rate (used for histogram)
     
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
@@ -953,8 +953,8 @@ def main():
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones 
     # has to be set in function process_drone_mesh
-    test_grid_meta_prefix = "SQUARE"
-    test_grid_func = drone_sq_grid
+    test_grid_meta_prefix = "TRIANGLE_NET_TEST"
+    test_grid_func = drone_triangle_grid
     ###############################################################################
     ###############################################################################
 
