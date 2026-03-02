@@ -6,6 +6,8 @@ from tqdm import tqdm
 from collections import Counter
 import json
 from dataclasses import dataclass, asdict
+from scipy.optimize import curve_fit
+
 
 metadata = dict()
 
@@ -286,12 +288,21 @@ def distance_calc(dist_comm: float,
 # Shannon for calculating received power (not in used due to datasheet is used instead)
 def shannon(data_rate_Mbps: float, 
             bandwidth_Mhz: float = 4, 
-            noise_figure_db: float = 6) -> float:
+            noise_figure_db: float = 6,
+            snr_eff: float = 1,
+            eta: float = 1) -> float:
     """
     default values:
 
-    bandwidth_MHz = 5 MHz (bandwidth of wifi halow)
-    noise_figure_db = 3db (double of ideal thermal noise) usually 3-5db
+    bandwidth = 5 MHz (bandwidth of wifi halow)
+    noise_figure = 3db (double of ideal thermal noise) usually 3-5db
+    transmit_power_dbm = 24dbm
+    transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
+    received_gain_dbi = 0 usually in range 0-3 dbi
+    margin_loss_db = 2 dB (other losses like polarization mismatch)
+    freq_mhz = 863 - 868 (wifi halow)
+    snr_eff = 1 for standard shannon
+    eta = 1 for standard shannon
     """
 
 
@@ -300,11 +311,15 @@ def shannon(data_rate_Mbps: float,
     # isolate snr
     data_rate_bps = data_rate_Mbps * 10**6 # convert datarate from Mpbs to bps
     bandwidth_hz = bandwidth_Mhz * 10**6 # convert bandwidth from Mhz to Hz
-    snr = 2**(data_rate_bps/bandwidth_hz) - 1
+
+    bandwidth_eff_hz = eta * bandwidth_hz
+    snr = 2**(data_rate_bps/bandwidth_eff_hz) - 1
+    # adjust if desire modifed shannon
+    snr /= snr_eff
     snr_db = 10* math.log10(snr)
 
     # Calculate noise power (-174 dbm/Hz is thermal noise density )
-    noise_power_dbm = -174 + 10 * math.log10(bandwidth_hz) + noise_figure_db
+    noise_power_dbm = -174 + 10 * math.log10(bandwidth_eff_hz) + noise_figure_db
 
     # Calculate received power
     received_power_dbm = snr_db + noise_power_dbm
@@ -391,11 +406,10 @@ def dist_comm_calc(transmit_power_dbm: float = 16,
     """
     default values:
     
-    transmit_power_dbm = 16dbm (lowest value from module 8MHz bandwidth)
-    received_power_dbm = -74dbm (same modulation scheme as transmit power)
+    transmit_power_dbm = 24dbm
     transmit_gain_dbi = 0 (isotropic) usually in range 0-3 dbi
     received_gain_dbi = 0 usually in range 0-3 dbi
-    margin_loss_db = 0 dB (other losses like polarization mismatch)
+    margin_loss_db = 2 dB (other losses like polarization mismatch)
     freq_mhz = 863 - 868 (wifi halow)
     """
 
@@ -729,7 +743,7 @@ def plot_histogram_drone_links(*,
         plt.text(
             bar.get_x() + bar.get_width() / 2,
             height,
-            f'{height:.2f}',
+            f'{float(height)}',
             ha='center',
             va='bottom'
             )
@@ -742,6 +756,89 @@ def plot_histogram_drone_links(*,
     fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
     plt.close(fig_hist)
 
+
+
+def shannon_fit( data_rate, snr_eff, eta,bandwidth):
+    # Use the closest_bandwidth (assume constant) and fixed noise figure
+    return np.array([
+        shannon(
+            data_rate_Mbps=dr,
+            bandwidth_Mhz=bandwidth,
+            noise_figure_db=3,
+            eta=eta,
+            snr_eff=snr_eff
+        ) 
+        for dr in data_rate
+    ])
+
+def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
+    available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
+    bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
+    closest_bandwidth = int(available_bandwidth[bandwidth_index])
+
+
+    # Get all MCS schemes for that bandwidth
+    schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
+
+    # sort after datarate 
+    sorted_schemes = sorted(schemes, key=lambda s: s['data_rate'])
+
+    # Take the values out from the lookup table
+    data_rates = [s['data_rate'] for s in sorted_schemes]
+    sensitivities = [s['receive_sensitivity'] for s in sorted_schemes]
+
+    shannon_receive_sens = [
+        shannon(
+            data_rate_Mbps=data_rate,
+            bandwidth_Mhz=closest_bandwidth,
+            noise_figure_db=3
+        )
+        for data_rate in data_rates
+    ]
+
+    # fir the best parameters for snr_eff and eta to fit the datasheet
+    popt, pcov = curve_fit(
+        lambda dr, snr_eff, eta:
+            shannon_fit(dr, snr_eff, eta, closest_bandwidth),
+        data_rates,
+        sensitivities,
+        p0=[0.1, 0.8]
+    )
+
+    snr_eff_opt, eta_opt = popt
+
+    fitted_sens = shannon_fit(
+        data_rates,
+        snr_eff_opt,
+        eta_opt,
+        closest_bandwidth
+    )
+   
+    shannon_mod_receive_sens = [
+        shannon(
+            data_rate_Mbps=data_rate,
+            bandwidth_Mhz=closest_bandwidth,
+            noise_figure_db=3,
+            eta=0.77,
+            snr_eff=0.17
+        )
+        for data_rate in data_rates
+    ]
+    # create plot
+    fig, ax1 = plt.subplots()
+
+    ax1.set_xlabel("Receive Sensitivity (dBm)")
+    ax1.set_ylabel("Data Rate (Mbps)")
+    ax1.plot(sensitivities, data_rates,'x', label="Datasheet MM8108",)
+    ax1.plot(shannon_receive_sens, data_rates, label="Shannon")
+    ax1.plot(fitted_sens, data_rates, label=f"Modified Shannon Optimized snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}")
+    ax1.legend()
+    plt.show() 
+
+
+
+
+
 def process_drone_mesh(*,
                        grid_prefix: str,
                        wireless_prefix:str,
@@ -752,6 +849,7 @@ def process_drone_mesh(*,
                        drone_distance_redundancy: float,
                        dropout_rates: np.ndarray,
                        dropout_iters: int,
+                       hist_plot: bool,
                        grid_func, 
                        **kwargs):
     """
@@ -870,11 +968,12 @@ def process_drone_mesh(*,
                                    sample_resolution=sample_resolution)
         
             # Histogram and drone position plots over total iterations
-            plot_histogram_drone_links(file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.4f}_dropout_{tolerance}_tolerance_histogram.png",
-                                       title_name=f"{grid_prefix} Histogram | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
-                                       drone_link_count=total_link_count_dropout,
-                                       iterations=dropout_iters,
-                                       file_folder_path=dir_origin_partial_plots)
+            if hist_plot == True:
+                plot_histogram_drone_links(file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.4f}_dropout_{tolerance}_tolerance_histogram.png",
+                                            title_name=f"{grid_prefix} Histogram | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                                            drone_link_count=total_link_count_dropout,
+                                            iterations=dropout_iters,
+                                            file_folder_path=dir_origin_partial_plots)
             
             plot_drone_positions(meta_prefix=f"{grid_prefix}_{j}_DROPOUT_",
                                  file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.4f}_dropout_{tolerance}_tolerance_mesh.png",
@@ -909,10 +1008,11 @@ def process_drone_mesh(*,
 
 
         # Histogram and drone position plots over full drone mesh
-        plot_histogram_drone_links(file_name=f"{grid_prefix}_{tolerance}_tolerance_full_histogram.png",
-                                   title_name=f"{grid_prefix} Histogram | tolerance = {tolerance} [m]",
-                                   drone_link_count=link_count_all,
-                                   file_folder_path=dir_origin_full_plots)
+        if hist_plot == True:
+            plot_histogram_drone_links(file_name=f"{grid_prefix}_{tolerance}_tolerance_full_histogram.png",
+                                    title_name=f"{grid_prefix} Histogram | tolerance = {tolerance} [m]",
+                                    drone_link_count=link_count_all,
+                                    file_folder_path=dir_origin_full_plots)
             
         plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
                              file_name=f"{grid_prefix}_{tolerance}_tolerance_full_mesh.png",
@@ -936,12 +1036,12 @@ def main():
     width = 10000
     scale_factor = 1
     test_dim = (length*scale_factor, width*scale_factor)
-    test_samples = (1200, 400)                           # number of sample points on area (x, y)
+    test_samples = (600, 200)                           # number of sample points on area (x, y)
 
-    test_tolerances = np.arange(0, 150, 50)          #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 1000                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05, 0.55, 0.05)      #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 10000                           # number of iterations for each dropout rate (used for histogram)
+    test_tolerances = np.arange(100, 300, 100)          #tolerance in meters (min, max, stepsize) 
+    test_dist_redundancy = 3000                         # distance redundancy for drone placement
+    test_dropout_rates = np.arange(0.1, 0.3, 0.1)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_iters = 100                            # number of iterations for each dropout rate (used for histogram)
     
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
@@ -953,7 +1053,7 @@ def main():
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones 
     # has to be set in function process_drone_mesh
-    test_grid_meta_prefix = "SQUARE"
+    test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
     ###############################################################################
     ###############################################################################
@@ -977,6 +1077,9 @@ def main():
                                    desired_bandwidth_Mhz=desired_bandwidth_Mhz, 
                                    desired_rate_Mbps=desired_rate_Mbps)
 
+    graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
+
+    exit()
     dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"], 
                                received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
                                freq_Mhz=freq_Mhz,
@@ -992,6 +1095,7 @@ def main():
                        drone_distance_redundancy=test_dist_redundancy,
                        dropout_rates=test_dropout_rates,
                        dropout_iters=test_dropout_iters,
+                       hist_plot= False,
                        grid_func=test_grid_func)
     
 if __name__ == "__main__":
