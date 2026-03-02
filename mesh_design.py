@@ -1055,6 +1055,7 @@ def main():
     # has to be set in function process_drone_mesh
     test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
+    sens_phyrate_plot = True
     ###############################################################################
     ###############################################################################
 
@@ -1077,9 +1078,9 @@ def main():
                                    desired_bandwidth_Mhz=desired_bandwidth_Mhz, 
                                    desired_rate_Mbps=desired_rate_Mbps)
 
-    graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
+    if sens_phyrate_plot == True:
+        graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
 
-    exit()
     dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"], 
                                received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
                                freq_Mhz=freq_Mhz,
