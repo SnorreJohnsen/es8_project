@@ -1,0 +1,3 @@
+[submodule "meshnet-lab"]
+	path = meshnet-lab
+	url = https://github.com/mwarning/meshnet-lab
