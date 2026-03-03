@@ -276,6 +276,8 @@ def drone_hex_grid(dim: tuple[float, float],
 ###############################################################################
 #__________________________ HELPER FUNCTIONS _________________________________#
 ###############################################################################
+def exp_model(x, a, b): # a = scale exponetial function, b = exponetial parameter
+    return a * np.exp(-b * x)
 
 def distance_calc(dist_comm: float, 
                   tolerance: float, 
@@ -594,7 +596,8 @@ def node_list(drone_positions: np.ndarray) -> list[Node]:
 def link_list(*,
               wireless_prefix: str = "",
               nodes: list,
-              dist_comm: float) -> list[Link]:
+              dist_comm: float,
+              exp_params: tuple [float,float]) -> list[Link]:
     
     """
     Docstring for link_list
@@ -610,6 +613,7 @@ def link_list(*,
     
     links: list[Link] = []
     num_links = []
+    scale_exp, exp_param = exp_params 
 
     for source in nodes:
         count = 0
@@ -621,13 +625,17 @@ def link_list(*,
             # Compute distances from drone i to all drones
             distances = (target.x - source.x)**2 + (target.y - source.y)**2    
 
+            # if distances <= (dist_comm + 1)**2:
+            predicted_rate= exp_model(np.sqrt(distances), scale_exp, exp_param)
+            # print(f"{predicted_rate=}")
+            link = Link(source=source.id, 
+                        target=target.id,
+                        data_rate=str(predicted_rate))
+                    #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
+            links.append(link)       
+
             if distances <= (dist_comm + 1)**2:
-                link = Link(source=source.id, 
-                            target=target.id,
-                            data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
-                links.append(link)       
-        
-                # Count how many are within dist_comm (exclude itself)
+            # Count how many are within dist_comm (exclude itself)
                 count = count + 1 
         
         num_links.append(count)
@@ -651,7 +659,6 @@ def make_json_network(*,
 
     with open(os.path.join(file_folder_path, file_name), "w") as f:
         json.dump(network, f)
-
 
 ###############################################################################
 #___________________________ PLOT FUNCITONS __________________________________#
@@ -842,8 +849,6 @@ def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
     ax1.legend()
     plt.show() 
 
-def exp_model(x, a, b): # a = scale exponetial function, b = exponetial parameter
-    return a * np.exp(-b * x)
 
 def graph_range_phyrate(desired_bandwidth_Mhz):
     data_rates = []
@@ -881,7 +886,7 @@ def graph_range_phyrate(desired_bandwidth_Mhz):
     ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation:.2f} Mbps")
     ax1.legend()
     plt.show()
-    return exp_param
+    return params
 
 
 def process_drone_mesh(*,
@@ -896,7 +901,8 @@ def process_drone_mesh(*,
                        dropout_rates: np.ndarray,
                        dropout_iters: int,
                        hist_plot: bool,
-                       grid_func, 
+                       exp_params: tuple[float, float],
+                       grid_func,
                        **kwargs):
     """
     Docstring for process_drone_mesh
@@ -985,7 +991,8 @@ def process_drone_mesh(*,
                 node_list_dropout = node_list(drone_positions=drone_positions_dropout)
                 link_list_dropout, link_count_dropout = link_list(wireless_prefix=wireless_prefix, 
                                                                   nodes=node_list_dropout, 
-                                                                  dist_comm=dist_comm)
+                                                                  dist_comm=dist_comm,
+                                                                  exp_params= exp_params)
 
                 # Make array of all link counts for partial drone mesh 
                 total_link_count_dropout.append(link_count_dropout)
@@ -1034,7 +1041,8 @@ def process_drone_mesh(*,
         node_list_all = node_list(drone_positions=all_drone_positions)
         link_list_all, link_count_all = link_list(wireless_prefix=wireless_prefix,
                                                   nodes=node_list_all, 
-                                                  dist_comm=dist_comm)
+                                                  dist_comm=dist_comm,
+                                                  exp_params=exp_params)
 
         # Add number drones used in full mesh to metadata
         metadata[f"{grid_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
@@ -1085,7 +1093,7 @@ def main():
     test_samples = (600, 200)                           # number of sample points on area (x, y)
 
     test_tolerances = np.arange(100, 300, 100)          #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 3000                         # distance redundancy for drone placement
+    test_dist_redundancy = 0                        # distance redundancy for drone placement
     test_dropout_rates = np.arange(0.1, 0.3, 0.1)      #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 100                            # number of iterations for each dropout rate (used for histogram)
     
@@ -1126,7 +1134,8 @@ def main():
 
     if sens_phyrate_plot == True:
         graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
-        graph_range_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
+        exp_params = graph_range_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
+        print(f"{exp_params=}")
 
     dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"], 
                                received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
@@ -1143,8 +1152,10 @@ def main():
                        drone_distance_redundancy=test_dist_redundancy,
                        dropout_rates=test_dropout_rates,
                        dropout_iters=test_dropout_iters,
-                       hist_plot= False,
-                       grid_func=test_grid_func)
+                       hist_plot= True,
+                       exp_params= exp_params,
+                       grid_func=test_grid_func,
+                    )
     
 if __name__ == "__main__":
     main()
