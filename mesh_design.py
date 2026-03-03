@@ -375,13 +375,14 @@ def get_halow_module_MM8108_params(*,
     available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
     bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
     closest_bandwidth = int(available_bandwidth[bandwidth_index])
-    metadata[f"{wireless_prefix}BANDWIDTH"] = closest_bandwidth
 
     # Get all MCS schemes for that bandwidth
     schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
 
     # Find the sorted_scheme with data_rate closest to desired_rate_Mbps
     sorted_schemes = sorted(schemes, key=lambda s: abs(s['data_rate'] - desired_rate_Mbps))
+
+    metadata[f"{wireless_prefix}BANDWIDTH"] = closest_bandwidth
 
     # Find first sorted_scheme >= desired datarate
     for best_scheme in sorted_schemes:
@@ -771,17 +772,23 @@ def shannon_fit( data_rate, snr_eff, eta,bandwidth):
         for dr in data_rate
     ])
 
-def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
+def sort_scheme_for_data_rate(desired_bandwidth_Mhz):
     available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
     bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
     closest_bandwidth = int(available_bandwidth[bandwidth_index])
 
-
     # Get all MCS schemes for that bandwidth
     schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
 
-    # sort after datarate 
+    # Find the sorted_scheme with data_rate closest to desired_rate_Mbps
     sorted_schemes = sorted(schemes, key=lambda s: s['data_rate'])
+
+    return sorted_schemes, closest_bandwidth
+
+
+def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
+
+    sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
 
     # Take the values out from the lookup table
     data_rates = [s['data_rate'] for s in sorted_schemes]
@@ -842,17 +849,7 @@ def graph_range_phyrate(desired_bandwidth_Mhz):
     data_rates = []
     dist_comms = []
 
-    available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
-    bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
-    closest_bandwidth = int(available_bandwidth[bandwidth_index])
-
-
-    # Get all MCS schemes for that bandwidth
-    schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
-
-    # sort after datarate 
-    sorted_schemes = sorted(schemes, key=lambda s: s['data_rate'])
-
+    sorted_schemes, _ = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
 
     # Take the values out from the lookup table
     data_rates = [ s['data_rate'] for s in sorted_schemes]
