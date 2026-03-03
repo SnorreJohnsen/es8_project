@@ -850,7 +850,7 @@ def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
     plt.show() 
 
 
-def graph_range_phyrate(desired_bandwidth_Mhz):
+def graph_range_phyrate(desired_bandwidth_Mhz: float, range_phyrate_plot: bool):
     data_rates = []
     dist_comms = []
 
@@ -865,27 +865,28 @@ def graph_range_phyrate(desired_bandwidth_Mhz):
     scale_exp, exp_param = params
     
     # Create smooth curve 
-    x_line = np.linspace(min(dist_comms), 30000, 200)
-    y_line = exp_model(x_line, scale_exp, exp_param)
+    if range_phyrate_plot == True:
+        x_line = np.linspace(min(dist_comms), 30000, 200)
+        y_line = exp_model(x_line, scale_exp, exp_param)
 
-    fig, ax1 = plt.subplots()
-    plt.xscale('log')  # set x-axis to logarithmic
-    ax1.set_xlabel("Range (m)")
-    ax1.set_ylabel("Data Rate (Mbps)")
-    ax1.plot(dist_comms, data_rates,'x', label="Datasheet MM8108")
-    for x, y in zip(dist_comms, data_rates):
-        predicted_rate = exp_model(x, scale_exp, exp_param)
-        deviation = y - predicted_rate             # residual
-        ax1.annotate(f"({x:.2f}, {y} \n Δ={deviation:.2f} Mbps)",
-                    (x, y),
-                    textcoords="offset points",
-                    xytext=(5, 5),  
-                    fontsize=8)
-        total_deviation =+ deviation
-    avg_deviation = total_deviation / len(dist_comms)
-    ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation:.2f} Mbps")
-    ax1.legend()
-    plt.show()
+        fig, ax1 = plt.subplots()
+        plt.xscale('log')  # set x-axis to logarithmic
+        ax1.set_xlabel("Range (m)")
+        ax1.set_ylabel("Data Rate (Mbps)")
+        ax1.plot(dist_comms, data_rates,'x', label="Datasheet MM8108")
+        for x, y in zip(dist_comms, data_rates):
+            predicted_rate = exp_model(x, scale_exp, exp_param)
+            deviation = y - predicted_rate             # residual
+            ax1.annotate(f"({x:.2f}, {y} \n Δ={deviation:.2f} Mbps)",
+                        (x, y),
+                        textcoords="offset points",
+                        xytext=(5, 5),  
+                        fontsize=8)
+            total_deviation =+ deviation
+        avg_deviation = total_deviation / len(dist_comms)
+        ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation:.2f} Mbps")
+        ax1.legend()
+        plt.show()
     return params
 
 
@@ -1109,7 +1110,7 @@ def main():
     # has to be set in function process_drone_mesh
     test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
-    sens_phyrate_plot = True
+    sens_phyrate_plot = False
     ###############################################################################
     ###############################################################################
 
@@ -1134,8 +1135,8 @@ def main():
 
     if sens_phyrate_plot == True:
         graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
-        exp_params = graph_range_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
-        print(f"{exp_params=}")
+
+    exp_params = graph_range_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz, range_phyrate_plot = sens_phyrate_plot)
 
     dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"], 
                                received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
