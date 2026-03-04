@@ -330,6 +330,7 @@ def shannon(data_rate_Mbps: float,
     metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"] = received_power_dbm
     metadata[f"{wireless_prefix}DATA_RATE"] = data_rate_Mbps
     metadata[f"{wireless_prefix}BANDWIDTH"] = bandwidth_Mhz
+
     return received_power_dbm
 
 # Look up table for halow module MM8108-MF15457 values are (data_rate, received_sensitivity, transmit_power) 
@@ -1305,17 +1306,6 @@ def main():
     #                                desired_bandwidth_Mhz=desired_bandwidth_Mhz,
     #                                desired_rate_Mbps=desired_rate_Mbps)
 
-    if graph_plots == True:
-        graph_sensitivity_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                                  filename="sensivity vs Phyrate",
-                                  desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                                  eta_strict=eta,snr_eff_strict=snr_eff,
-                                  )
-        graph_range_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                            filename="Range vs Phyrate",
-                            desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                            eta_strict=eta,snr_eff_strict=snr_eff)
-
     # for checking given a distance what do i get as the datarate
     # data_rate_mbps = data_rate_given_dist_comm(distance_m=30000,
     #                                            bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
@@ -1344,6 +1334,19 @@ def main():
                        snr_eff=snr_eff,
                        grid_func=test_grid_func,
                     )
+    
+
+    # have to be after dont overate datarate in metadata
+    if graph_plots == True:
+        graph_sensitivity_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+                                    filename="sensivity vs Phyrate",
+                                    desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                                    eta_strict=eta,snr_eff_strict=snr_eff,
+                                    )
+        graph_range_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+                            filename="Range vs Phyrate",
+                            desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                            eta_strict=eta,snr_eff_strict=snr_eff)
     
 if __name__ == "__main__":
     main()
