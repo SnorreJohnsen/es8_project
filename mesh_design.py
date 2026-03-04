@@ -559,6 +559,47 @@ def is_network_fully_connected(nodes: list[Node],
 
     return len(visited) == len(nodes)
 
+def shannon_inverse_bitrate(received_power_dbm: float = -74, 
+                            bandwidth_Mhz: float = 8, 
+                            noise_figure_db: float = 6,
+                            snr_eff: float = 1,
+                            eta: float = 1) -> float:
+    
+    bandwidth_hz = bandwidth_Mhz * 10**6 # convert bandwidth from Mhz to Hz
+    bandwidth_eff_hz = eta * bandwidth_hz
+
+    # Calculate noise power (-174 dbm/Hz is thermal noise density )
+    noise_power_dbm = -174 + 10 * math.log10(bandwidth_eff_hz) + noise_figure_db
+    
+    # Linear SNR
+    snr_linear = 10 ** ((received_power_dbm - noise_power_dbm) / 10)
+
+    # Adjust for SNR efficiency
+    snr_linear *= snr_eff
+
+    # Shannon formula (bps)
+    data_rate_bps = bandwidth_eff_hz * math.log2(1 + snr_linear)
+
+    # Convert to Mbps
+    data_rate_Mbps = data_rate_bps / 10**6
+
+    return data_rate_Mbps
+    
+def sensivity_given_range_fspl(distance_m: float,
+                                transmit_power_dbm: float = 22,
+                                transmit_gain_dbi: float = 0, 
+                                received_gain_dbi: float = 0,
+                                margin_loss_db: float = 0, 
+                                freq_Mhz: float = 868) -> float:
+    # convert distance to km
+    distance_km = distance_m / 1000
+    # FSPL in dB
+    fspl = 20 * math.log10(distance_km) + 20 * math.log10(freq_Mhz) + 32.44
+
+    received_power_dbm = transmit_power_dbm + transmit_gain_dbi + received_gain_dbi - margin_loss_db - fspl
+
+    return received_power_dbm
+
 ###############################################################################
 #_____________________ NETWORK LISTS (JSON) __________________________________#
 ###############################################################################
@@ -597,7 +638,9 @@ def link_list(*,
               wireless_prefix: str = "",
               nodes: list,
               dist_comm: float,
-              exp_params: tuple [float,float]) -> list[Link]:
+              margin_loss_db: float,
+              eta: float = 0.79,
+              snr_eff: float = 0.14) -> list[Link]:
     
     """
     Docstring for link_list
@@ -612,9 +655,7 @@ def link_list(*,
     """    
     
     links: list[Link] = []
-    num_links = []
-    scale_exp, exp_param = exp_params 
-
+    num_links = [] 
     for source in nodes:
         count = 0
         for target in nodes:
@@ -626,11 +667,16 @@ def link_list(*,
             distances = (target.x - source.x)**2 + (target.y - source.y)**2    
 
             # if distances <= (dist_comm + 1)**2:
-            predicted_rate= exp_model(np.sqrt(distances), scale_exp, exp_param)
-            # print(f"{predicted_rate=}")
+            #predicted_rate= exp_model(np.sqrt(distances), scale_exp, exp_param)
+            data_rate_mbps = data_rate_given_dist_comm(distance_m=np.sqrt(distances),
+                                               bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+                                               transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+                                               margin_loss_db=margin_loss_db,
+                                               eta=eta,
+                                               snr_eff=snr_eff)
             link = Link(source=source.id, 
                         target=target.id,
-                        data_rate=str(predicted_rate))
+                        data_rate=f"{data_rate_mbps:.2f}")
                     #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
             links.append(link)       
 
@@ -639,7 +685,6 @@ def link_list(*,
                 count = count + 1 
         
         num_links.append(count)
-
     return links, num_links
 
 def make_json_network(*,
@@ -765,7 +810,6 @@ def plot_histogram_drone_links(*,
     plt.close(fig_hist)
 
 
-
 def shannon_fit( data_rate, snr_eff, eta,bandwidth):
     # Use the closest_bandwidth (assume constant) and fixed noise figure
     return np.array([
@@ -792,8 +836,10 @@ def sort_scheme_for_data_rate(desired_bandwidth_Mhz):
 
     return sorted_schemes, closest_bandwidth
 
-
-def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
+def graph_sensitivity_phyrate(desired_bandwidth_Mhz: float,
+                              eta_strict: float = 0.79,
+                              snr_eff_strict: float = 0.14
+                              ):
 
     sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
 
@@ -828,13 +874,24 @@ def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
         closest_bandwidth
     )
    
-    shannon_mod_receive_sens = [
+    shannon_mod_receive_sens_optimal = [
         shannon(
             data_rate_Mbps=data_rate,
             bandwidth_Mhz=closest_bandwidth,
             noise_figure_db=3,
             eta=0.77,
             snr_eff=0.17
+        )
+        for data_rate in data_rates
+    ]
+
+    shannon_mod_receive_sens_strict = [
+        shannon(
+            data_rate_Mbps=data_rate,
+            bandwidth_Mhz=closest_bandwidth,
+            noise_figure_db=3,
+            eta=eta_strict,
+            snr_eff=snr_eff_strict 
         )
         for data_rate in data_rates
     ]
@@ -845,50 +902,135 @@ def graph_sensitivity_phyrate(desired_bandwidth_Mhz):
     ax1.set_ylabel("Data Rate (Mbps)")
     ax1.plot(sensitivities, data_rates,'x', label="Datasheet MM8108",)
     ax1.plot(shannon_receive_sens, data_rates, label="Shannon")
-    ax1.plot(fitted_sens, data_rates, label=f"Modified Shannon Optimized snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}")
+    ax1.plot(shannon_mod_receive_sens_optimal, data_rates, label=f"Modified Shannon Optimized snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}")
+    ax1.plot(shannon_mod_receive_sens_strict, data_rates, label=f"Modified Shannon Strict snr_eff: {snr_eff_strict}, eta: {eta_strict}")
     ax1.legend()
     plt.show() 
 
+def data_rate_given_dist_comm(distance_m: float,
+                              bandwidth_Mhz: float = 8,
+                              transmit_power_dbm: float = 22,
+                              margin_loss_db: float = 0,
+                              eta: float = 0.79,
+                              snr_eff: float = 0.14
+                              ):
+    required_sens= sensivity_given_range_fspl(distance_m=distance_m,
+                               transmit_power_dbm=transmit_power_dbm,
+                               transmit_gain_dbi= 0,
+                               received_gain_dbi= 0,
+                               margin_loss_db=margin_loss_db,
+                               freq_Mhz=868)
 
-def graph_range_phyrate(desired_bandwidth_Mhz: float, range_phyrate_plot: bool):
+    data_rate_Mbps = shannon_inverse_bitrate(received_power_dbm=required_sens,
+                            bandwidth_Mhz=bandwidth_Mhz,
+                            noise_figure_db= 3,
+                            eta = eta,
+                            snr_eff= snr_eff)
+    return data_rate_Mbps
+
+def graph_range_phyrate(desired_bandwidth_Mhz: float,
+                        eta_strict: float = 0.79,
+                        snr_eff_strict: float = 0.14):
     data_rates = []
     dist_comms = []
 
-    sorted_schemes, _ = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
+    sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
 
     # Take the values out from the lookup table
     data_rates = [ s['data_rate'] for s in sorted_schemes]
     dist_comms= [ dist_comm_calc(s['transmit_power'],s['receive_sensitivity'],transmit_gain_dbi=0,received_gain_dbi=0,margin_loss_db=3,freq_Mhz=868) for s in sorted_schemes]
-
-    # for regression curve order size 4 is used as highest without significiantly seing overfit
-    params, _ = curve_fit(exp_model,dist_comms,data_rates, p0=(max(data_rates), 0.001))   # initial guess)
-    scale_exp, exp_param = params
     
-    # Create smooth curve 
-    if range_phyrate_plot == True:
-        x_line = np.linspace(min(dist_comms), 30000, 200)
-        y_line = exp_model(x_line, scale_exp, exp_param)
+    shannon_mod_receive_sens_optimal = [
+        shannon(
+            data_rate_Mbps=data_rate,
+            bandwidth_Mhz=closest_bandwidth,
+            noise_figure_db=3,
+            eta=0.77,
+            snr_eff=0.17
+        )
+        for data_rate in data_rates
+    ]
+    dist_comms_mod_shannon_optimal = [
+        dist_comm_calc(
+            s['transmit_power'],
+            shannon_mod_receive_sens_optimal[i],   # use the corresponding receive sens
+            transmit_gain_dbi=0,
+            received_gain_dbi=0,
+            margin_loss_db=3,
+            freq_Mhz=868
+        )
+        for i, s in enumerate(sorted_schemes)
+    ]
+    shannon_mod_receive_sens_strict = [
+        shannon(
+            data_rate_Mbps=data_rate,
+            bandwidth_Mhz=closest_bandwidth,
+            noise_figure_db=3,
+            eta=eta_strict,
+            snr_eff=snr_eff_strict
+        )
+        for data_rate in data_rates
+    ]
+    dist_comms_mod_shannon_strict = [
+        dist_comm_calc(
+            s['transmit_power'],
+            shannon_mod_receive_sens_strict[i],   # use the corresponding receive sens
+            transmit_gain_dbi=0,
+            received_gain_dbi=0,
+            margin_loss_db=3,
+            freq_Mhz=868
+        )
+        for i, s in enumerate(sorted_schemes)
+    ]
 
-        fig, ax1 = plt.subplots()
-        plt.xscale('log')  # set x-axis to logarithmic
-        ax1.set_xlabel("Range (m)")
-        ax1.set_ylabel("Data Rate (Mbps)")
-        ax1.plot(dist_comms, data_rates,'x', label="Datasheet MM8108")
-        for x, y in zip(dist_comms, data_rates):
-            predicted_rate = exp_model(x, scale_exp, exp_param)
-            deviation = y - predicted_rate             # residual
-            ax1.annotate(f"({x:.2f}, {y} \n Δ={deviation:.2f} Mbps)",
-                        (x, y),
-                        textcoords="offset points",
-                        xytext=(5, 5),  
-                        fontsize=8)
-            total_deviation =+ deviation
-        avg_deviation = total_deviation / len(dist_comms)
-        ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation:.2f} Mbps")
-        ax1.legend()
-        plt.show()
-    return params
-
+    # FIGURE
+    total_deviation = 0
+    fig, ax1 = plt.subplots()
+    plt.xscale('log')  # set x-axis to logarithmic
+    ax1.set_xlabel("Range (m)")
+    ax1.set_ylabel("Data Rate (Mbps)")
+    ax1.plot(dist_comms, data_rates,'x', label="Datasheet MM8108")
+    for x, y, z in zip(dist_comms, data_rates, dist_comms_mod_shannon_optimal):
+        deviation = x - z            # residual
+        ax1.annotate(f"Optimal \n ({x:.2f}, {y} \n Δ={deviation:.2f} Meter)",
+                    (x, y),
+                    textcoords="offset points",
+                    xytext=(5, 5),  
+                    fontsize=8)
+        total_deviation += abs(deviation)
+    avg_deviation = total_deviation / len(dist_comms)
+    ax1.plot(dist_comms_mod_shannon_optimal, data_rates, label=f"Modified shannon MM8108 with avg deviation of {avg_deviation:.2f} Meter Optimal")
+    for x, y, z in zip(dist_comms, data_rates, dist_comms_mod_shannon_strict):
+        deviation = x - z            # residual
+        ax1.annotate(f"Strict \n ({x:.2f}, {y} \n Δ={deviation:.2f} Meter)",
+                    (x, y),
+                    textcoords="offset points",
+                    xytext=(80, 5),  
+                    fontsize=8)
+        total_deviation += abs(deviation)
+    avg_deviation = total_deviation / len(dist_comms)
+    ax1.plot(dist_comms_mod_shannon_strict, data_rates, label=f"Modified shannon MM8108 with avg deviation of {avg_deviation:.2f} Meter Strict")
+    # FOR EXP PLOT
+    # # for regression curve order size 4 is used as highest without significiantly seing overfit
+    # params, _ = curve_fit(exp_model,dist_comms,data_rates, p0=(max(data_rates), 0.001))   # initial guess)
+    # scale_exp, exp_param = params
+    # # for plotting regression
+    # x_line = np.linspace(min(dist_comms), 30000, 200)
+    # y_line = exp_model(x_line, scale_exp, exp_param)
+    # total_deviation_reg = 0
+    # for x, y in zip(dist_comms, data_rates):
+    #     predicted_rate = exp_model(x,scale_exp, exp_param)
+    #     deviation = y - predicted_rate            # residual
+    #     ax1.annotate(f"({x:.2f}, {y} \n Δ={deviation:.2f} Mbps)",
+    #                 (x, y),
+    #                 textcoords="offset points",
+    #                 xytext=(5, 5),  
+    #                 fontsize=8)
+    #     total_deviation_reg += abs(deviation)
+    # avg_deviation_reg = total_deviation_reg / len(dist_comms)
+    # ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation_reg:.2f} Mbps")
+    ax1.legend()
+    plt.show()
 
 def process_drone_mesh(*,
                        
@@ -902,7 +1044,9 @@ def process_drone_mesh(*,
                        dropout_rates: np.ndarray,
                        dropout_iters: int,
                        hist_plot: bool,
-                       exp_params: tuple[float, float],
+                       margin_loss_db: float,
+                       eta: float = 0.79,
+                       snr_eff: float = 0.14,
                        grid_func,
                        **kwargs):
     """
@@ -993,7 +1137,9 @@ def process_drone_mesh(*,
                 link_list_dropout, link_count_dropout = link_list(wireless_prefix=wireless_prefix, 
                                                                   nodes=node_list_dropout, 
                                                                   dist_comm=dist_comm,
-                                                                  exp_params= exp_params)
+                                                                  margin_loss_db= margin_loss_db,
+                                                                  eta=eta,
+                                                                  snr_eff=snr_eff)
 
                 # Make array of all link counts for partial drone mesh 
                 total_link_count_dropout.append(link_count_dropout)
@@ -1043,7 +1189,9 @@ def process_drone_mesh(*,
         link_list_all, link_count_all = link_list(wireless_prefix=wireless_prefix,
                                                   nodes=node_list_all, 
                                                   dist_comm=dist_comm,
-                                                  exp_params=exp_params)
+                                                  margin_loss_db= margin_loss_db,
+                                                  eta=eta,
+                                                  snr_eff=snr_eff)
 
         # Add number drones used in full mesh to metadata
         metadata[f"{grid_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
@@ -1081,7 +1229,6 @@ def process_drone_mesh(*,
     with open(os.path.join(dir_origin, "metadata.json"), "w") as f:
         json.dump(metadata, f)
 
-
 def main():
     ###############################################################################
     #__________________________ TEST PARAMETERS __________________________________#
@@ -1094,8 +1241,8 @@ def main():
     test_samples = (600, 200)                           # number of sample points on area (x, y)
 
     test_tolerances = np.arange(100, 300, 100)          #tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 0                        # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.1, 0.3, 0.1)      #dropout rate in percentage (min, max, stepsize)
+    test_dist_redundancy = 0                            # distance redundancy for drone placement
+    test_dropout_rates = np.arange(0.1, 0.3, 0.1)       #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 100                            # number of iterations for each dropout rate (used for histogram)
     
     # wireless communication parameters for MM8108-MF15457 lookup table
@@ -1103,14 +1250,16 @@ def main():
     desired_bandwidth_Mhz = 8
     desired_rate_Mbps = 20
     freq_Mhz = 868
-    margin_loss_db = 3                          # safety variable for "other" losses
+    margin_loss_db = 3                                  # safety variable for "other" losses
 
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones 
     # has to be set in function process_drone_mesh
     test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
-    sens_phyrate_plot = False
+    graph_plots = False
+    eta = 0.79
+    snr_eff = 0.14
     ###############################################################################
     ###############################################################################
 
@@ -1133,10 +1282,16 @@ def main():
                                    desired_bandwidth_Mhz=desired_bandwidth_Mhz, 
                                    desired_rate_Mbps=desired_rate_Mbps)
 
-    if sens_phyrate_plot == True:
-        graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz)
+    if graph_plots == True:
+        graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz,eta_strict=eta,snr_eff_strict=snr_eff)
+        graph_range_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz,eta_strict=eta,snr_eff_strict=snr_eff)
 
-    exp_params = graph_range_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz, range_phyrate_plot = sens_phyrate_plot)
+    # for checking given a distance what do i get as the datarate
+    # data_rate_mbps = data_rate_given_dist_comm(distance_m=30000,
+    #                                            bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+    #                                            transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+    #                                            margin_loss_db=margin_loss_db)
+    # print(f"{data_rate_mbps=}")
 
     dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"], 
                                received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
@@ -1154,7 +1309,9 @@ def main():
                        dropout_rates=test_dropout_rates,
                        dropout_iters=test_dropout_iters,
                        hist_plot= True,
-                       exp_params= exp_params,
+                       margin_loss_db=margin_loss_db,
+                       eta=eta,
+                       snr_eff=snr_eff,
                        grid_func=test_grid_func,
                     )
     
