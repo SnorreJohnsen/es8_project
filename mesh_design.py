@@ -292,7 +292,8 @@ def shannon(data_rate_Mbps: float,
             bandwidth_Mhz: float = 4, 
             noise_figure_db: float = 6,
             snr_eff: float = 1,
-            eta: float = 1) -> float:
+            eta: float = 1,
+            wireless_prefix: str ="") -> float:
     """
     default values:
 
@@ -326,6 +327,9 @@ def shannon(data_rate_Mbps: float,
     # Calculate received power
     received_power_dbm = snr_db + noise_power_dbm
 
+    metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"] = received_power_dbm
+    metadata[f"{wireless_prefix}DATA_RATE"] = data_rate_Mbps
+    metadata[f"{wireless_prefix}BANDWIDTH"] = bandwidth_Mhz
     return received_power_dbm
 
 # Look up table for halow module MM8108-MF15457 values are (data_rate, received_sensitivity, transmit_power) 
@@ -809,7 +813,6 @@ def plot_histogram_drone_links(*,
     fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
     plt.close(fig_hist)
 
-
 def shannon_fit( data_rate, snr_eff, eta,bandwidth):
     # Use the closest_bandwidth (assume constant) and fixed noise figure
     return np.array([
@@ -836,11 +839,13 @@ def sort_scheme_for_data_rate(desired_bandwidth_Mhz):
 
     return sorted_schemes, closest_bandwidth
 
-def graph_sensitivity_phyrate(desired_bandwidth_Mhz: float,
+def graph_sensitivity_phyrate(file_folder_path: str,
+                              filename: str,
+                              desired_bandwidth_Mhz: float,
                               eta_strict: float = 0.79,
                               snr_eff_strict: float = 0.14
                               ):
-
+    os.makedirs(file_folder_path,exist_ok=True)
     sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
 
     # Take the values out from the lookup table
@@ -905,7 +910,9 @@ def graph_sensitivity_phyrate(desired_bandwidth_Mhz: float,
     ax1.plot(shannon_mod_receive_sens_optimal, data_rates, label=f"Modified Shannon Optimized snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}")
     ax1.plot(shannon_mod_receive_sens_strict, data_rates, label=f"Modified Shannon Strict snr_eff: {snr_eff_strict}, eta: {eta_strict}")
     ax1.legend()
-    plt.show() 
+    file_path_graph = os.path.join(file_folder_path,filename)
+    fig.savefig(file_path_graph,dpi=300,bbox_inches='tight')
+    plt.close(fig)
 
 def data_rate_given_dist_comm(distance_m: float,
                               bandwidth_Mhz: float = 8,
@@ -928,9 +935,12 @@ def data_rate_given_dist_comm(distance_m: float,
                             snr_eff= snr_eff)
     return data_rate_Mbps
 
-def graph_range_phyrate(desired_bandwidth_Mhz: float,
+def graph_range_phyrate(file_folder_path: str,
+                        filename: str,
+                        desired_bandwidth_Mhz: float,
                         eta_strict: float = 0.79,
-                        snr_eff_strict: float = 0.14):
+                        snr_eff_strict: float = 0.14,
+                        ):
     data_rates = []
     dist_comms = []
 
@@ -985,7 +995,7 @@ def graph_range_phyrate(desired_bandwidth_Mhz: float,
 
     # FIGURE
     total_deviation = 0
-    fig, ax1 = plt.subplots()
+    fig, ax1 = plt.subplots(figsize=(16, 9))
     plt.xscale('log')  # set x-axis to logarithmic
     ax1.set_xlabel("Range (m)")
     ax1.set_ylabel("Data Rate (Mbps)")
@@ -1030,7 +1040,9 @@ def graph_range_phyrate(desired_bandwidth_Mhz: float,
     # avg_deviation_reg = total_deviation_reg / len(dist_comms)
     # ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation_reg:.2f} Mbps")
     ax1.legend()
-    plt.show()
+    file_path_graph = os.path.join(file_folder_path,filename)
+    fig.savefig(file_path_graph,dpi=300, bbox_inches = 'tight')
+    plt.close(fig)
 
 def process_drone_mesh(*,
                        
@@ -1251,13 +1263,15 @@ def main():
     desired_rate_Mbps = 20
     freq_Mhz = 868
     margin_loss_db = 3                                  # safety variable for "other" losses
+    transmit_power_dbm = 22
+    metadata[f"{wireless_prefix}TRANSMIT_POWER"] = transmit_power_dbm
 
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones 
     # has to be set in function process_drone_mesh
     test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
-    graph_plots = False
+    graph_plots = True
     eta = 0.79
     snr_eff = 0.14
     ###############################################################################
@@ -1278,13 +1292,29 @@ def main():
 
     # Calculate values for modelling wireless commmunication from wifi halow module
     # These values are the same for all grid types
-    get_halow_module_MM8108_params(wireless_prefix=wireless_prefix, 
-                                   desired_bandwidth_Mhz=desired_bandwidth_Mhz, 
-                                   desired_rate_Mbps=desired_rate_Mbps)
+
+    shannon_mod_receive_sens_strict = shannon( data_rate_Mbps=desired_rate_Mbps,
+                                                bandwidth_Mhz=desired_bandwidth_Mhz,
+                                                noise_figure_db=3,
+                                                eta=eta,
+                                                snr_eff=snr_eff,
+                                                wireless_prefix=wireless_prefix
+                                            )
+    
+    # get_halow_module_MM8108_params(wireless_prefix=wireless_prefix, 
+    #                                desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+    #                                desired_rate_Mbps=desired_rate_Mbps)
 
     if graph_plots == True:
-        graph_sensitivity_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz,eta_strict=eta,snr_eff_strict=snr_eff)
-        graph_range_phyrate(desired_bandwidth_Mhz=desired_bandwidth_Mhz,eta_strict=eta,snr_eff_strict=snr_eff)
+        graph_sensitivity_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+                                  filename="sensivity vs Phyrate",
+                                  desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                                  eta_strict=eta,snr_eff_strict=snr_eff,
+                                  )
+        graph_range_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+                            filename="Range vs Phyrate",
+                            desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                            eta_strict=eta,snr_eff_strict=snr_eff)
 
     # for checking given a distance what do i get as the datarate
     # data_rate_mbps = data_rate_given_dist_comm(distance_m=30000,
@@ -1293,8 +1323,8 @@ def main():
     #                                            margin_loss_db=margin_loss_db)
     # print(f"{data_rate_mbps=}")
 
-    dist_comm = dist_comm_calc(transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"], 
-                               received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"], 
+    dist_comm = dist_comm_calc(transmit_power_dbm=transmit_power_dbm, 
+                               received_power_dbm=shannon_mod_receive_sens_strict, 
                                freq_Mhz=freq_Mhz,
                                margin_loss_db=margin_loss_db)
     
