@@ -684,6 +684,8 @@ def graph_sensitivity_phyrate(file_folder_path: str,
             metadata = metadata,
             data_rate_Mbps=data_rate,
             bandwidth_Mhz=closest_bandwidth,
+            eta=1,
+            snr_eff=1,
             noise_figure_db=3
         )
         for data_rate in data_rates

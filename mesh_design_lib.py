@@ -12,12 +12,13 @@ def distance_calc(dist_comm: float,
     return distance
 
 # Shannon for calculating received power (not in used due to datasheet is used instead)
+# Shannon parameters are set to strict (eta=0.79, snr_eff=0.14)
 def shannon(metadata: dict,
             data_rate_Mbps: float,
             bandwidth_Mhz: float = 4,
             noise_figure_db: float = 6,
-            snr_eff: float = 1,
-            eta: float = 1,
+            snr_eff: float = 0.14,
+            eta: float = 0.79,
             wireless_prefix: str ="") -> float:
     """
     default values:
