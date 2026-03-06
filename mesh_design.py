@@ -16,6 +16,7 @@ class Node:
     id: str
     x: int
     y: int
+    z: int
 
 @dataclass
 class Link:
@@ -629,12 +630,13 @@ def node_list(drone_positions: np.ndarray) -> list[Node]:
 
     x_pos = drone_positions[:,0]
     y_pos = drone_positions[:,1]
+    z_pos = drone_positions[:,2]
 
     nodes: list[Node] = []
 
     for i in range(len(drone_positions)):
         id = f"{x_pos[i]:.2f}_{y_pos[i]:.2f}"
-        node = Node(id=id, x=float(x_pos[i]), y=float(y_pos[i]))
+        node = Node(id=id, x=float(x_pos[i]), y=float(y_pos[i]), z=float(z_pos[i]))
         nodes.append(node)
     
     return nodes
@@ -669,7 +671,7 @@ def link_list(*,
                continue
  
             # Compute distances from drone i to all drones
-            distances = (target.x - source.x)**2 + (target.y - source.y)**2    
+            distances = (target.x - source.x)**2 + (target.y - source.y)**2 + (target.z - source.z)**2     
 
             # if distances <= (dist_comm + 1)**2:
             #predicted_rate= exp_model(np.sqrt(distances), scale_exp, exp_param)
@@ -1046,11 +1048,11 @@ def graph_range_phyrate(file_folder_path: str,
     plt.close(fig)
 
 def process_drone_mesh(*,
-                       
                        grid_prefix: str,
                        wireless_prefix:str,
                        dist_comm: float,
                        dim: tuple[float, float],
+                       z_height: float,
                        sample_resolution: tuple[float, float],
                        tolerances: np.ndarray,
                        drone_distance_redundancy: float,
@@ -1069,6 +1071,7 @@ def process_drone_mesh(*,
     grid_prefix: Name for plot title, file name and folder for given grid type
     dist_comm: Communication distance of drone in meters
     dim: Dimensions [x, y] of the area the drone mesh need to cover
+    height: Drone height [z]
     sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
     tolerances: Tx1 numpy array of distance tolerances used for calculating distance between drones
     drone_distance_redundancy: Distance redundancy used in calc_distance function for placing drones in grid
@@ -1125,6 +1128,10 @@ def process_drone_mesh(*,
 
         # Choose grid function
         all_drone_positions = grid_func(dim=dim, dist=drone_distance, **kwargs)
+
+        z_height = 500 # height of drones
+        z_row = np.full((all_drone_positions.shape[0], 1), z_height)
+        all_drone_positions = np.hstack((all_drone_positions, z_row))
 
         # For loop over number of dropouts
         bar_dropout_rates = tqdm(dropout_rates)
@@ -1210,7 +1217,7 @@ def process_drone_mesh(*,
         metadata[f"{grid_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
 
         # Make the json network from list of nodes
-        make_json_network(file_name=f"{grid_prefix}_network.json", 
+        make_json_network(file_name=f"{grid_prefix}_network_{tolerance}_tolerance.json", 
                           file_folder_path=dir_origin_full_json, 
                           nodes=node_list_all, 
                           links=link_list_all)
@@ -1249,6 +1256,7 @@ def main():
     # dimensions of area
     length = 30000
     width = 10000
+    height = 500
     scale_factor = 1
     test_dim = (length*scale_factor, width*scale_factor)
     test_samples = (600, 200)                           # number of sample points on area (x, y)
@@ -1280,6 +1288,7 @@ def main():
 
     # Save test parameters to metadata
     metadata["AREA_DIMENSIONS"] = str(test_dim)
+    metadata["DRONE_HEIGHT"] = height
     metadata["SAMPLES"] = str(test_samples)
     metadata["TOLERANCES"] = str(test_tolerances)
     metadata["DROPOUT_RATES"] = str(test_dropout_rates)
@@ -1323,6 +1332,7 @@ def main():
                        wireless_prefix=wireless_prefix,
                        dist_comm=dist_comm,
                        dim=test_dim,
+                       z_height=height,
                        sample_resolution=test_samples,
                        tolerances=test_tolerances,
                        drone_distance_redundancy=test_dist_redundancy,
