@@ -5,6 +5,7 @@ import json
 import subprocess
 import signal
 import time
+import shutil
 
 sys.path.append('meshnet-lab/')
 import software as mn_software
@@ -14,16 +15,16 @@ from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop
 # Create list of tcpdump processes
 tcpdump_procs = []
 
+pcap_dir = os.path.join("pcaps", "raw")
+
+
 def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
     """
-    Terminate multiple subprocess process groups.
+    Terminate multiple subprocess.
 
-    Sends SIGINT to each running process group, waits up to `timeout`
+    Sends SIGINT to each running subprocess, waits up to `timeout`
     seconds for termination, then escalates to SIGTERM and finally
     SIGKILL if necessary.
-
-    Assumes each subprocess was started with `start_new_session=True`
-    so that `p.pid` is the process group ID.
 
     Parameters
     ----------
@@ -34,7 +35,7 @@ def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
     for p in procs:
         if p.poll() is None:  # still running
             try:
-                os.killpg(p.pid, signal.SIGINT)  # p.pid is the pgid when start_new_session=True
+                p.send_signal(signal.SIGINT)
             except ProcessLookupError:
                 pass
 
@@ -50,7 +51,7 @@ def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
     for p in procs:
         if p.poll() is None:
             try:
-                os.killpg(p.pid, signal.SIGTERM)
+                p.send_signal(signal.SIGTERM)
             except ProcessLookupError:
                 pass
 
@@ -61,7 +62,7 @@ def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
             except subprocess.TimeoutExpired:
                 # last resort
                 try:
-                    os.killpg(p.pid, signal.SIGKILL)
+                    p.send_signal(signal.SIGKILL)
                 except ProcessLookupError:
                     pass
 
@@ -92,13 +93,11 @@ def start_tcpdump(node_name: str, out_dir: str):
     proc = subprocess.Popen(cmd,
                        stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL,
-                       start_new_session=False,
+                       start_new_session=True,
                        close_fds=True) 
     
     tcpdump_procs.append(proc)   
 
-    
-    
 
 def main():
     parser = argparse.ArgumentParser()
@@ -109,9 +108,15 @@ def main():
     global verbosity
     verbosity = args.verbosity
     globalTerminalGroup.setVerbosity(args.verbosity)
-    
+
+    # Delelte pcap directory
+    try:
+        shutil.rmtree(pcap_dir)
+    except FileNotFoundError as e:
+        pass
+     
     # make directory for pcap files for all nodes
-    os.makedirs(exist_ok=True, name="pcaps")
+    os.makedirs(exist_ok=False, name=pcap_dir)
 
     if not os.path.isfile(args.graph):
         eprint(f'File not found: {args.graph}')
@@ -130,9 +135,9 @@ def main():
 
     # Start tcpdump for each node
     for id in ids:
-        start_tcpdump(id, "pcaps")
+        start_tcpdump(id, pcap_dir)
 
-    time.sleep(30)
+    time.sleep(2)  # allow to launch tcpdumps
 
     stop_all_tcpdump()         
     stop_all_terminals()        
