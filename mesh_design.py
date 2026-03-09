@@ -4,6 +4,7 @@ import math
 import os
 from tqdm import tqdm
 from collections import Counter
+from statistics import mean
 import json
 from dataclasses import dataclass, asdict
 from scipy.optimize import curve_fit
@@ -27,7 +28,7 @@ class Node:
 class Link:
     source: str
     target: str
-    data_rate: str
+    bandwidth_mbps: str
 
 ###############################################################################
 #__________________________ DRONE MESH GRIDS _________________________________#
@@ -366,7 +367,14 @@ def calculate_device_links(*,
     # drone_positions[None, :, :] -> (1, N_drones, 3)
     # Result -> (N_points, N_drones)
     diff = device_positions[:, None, :] - drone_positions[None, :, :]
-    distances_sq = np.sum(diff**2, axis=2)
+    distances_sq = np.sum(diff**2, axis=2)                                  # euclidean distance
+    min_dist_sq_per_device = np.min(distances_sq, axis=1)                   # find shortest distance for each device
+    min_dist_per_device= np.sqrt(min_dist_sq_per_device)
+    
+
+
+
+    # This need to be removed here after 
 
     # Count links per device point
     links_per_device = np.sum(distances_sq <= dist_comm**2, axis=1)
@@ -381,6 +389,8 @@ def calculate_device_links(*,
 
     # Save area covered percentage to metadata
     metadata[f"{meta_prefix}AREA_COVERED"] = covered_points / total_points
+
+    return min_dist_per_device
 
 def is_network_fully_connected(nodes: list[Node],
                                links: list[Link]) -> bool:
@@ -499,7 +509,7 @@ def link_list(*,
                                                snr_eff=snr_eff)
             link = Link(source=source.id,
                         target=target.id,
-                        data_rate=f"{data_rate_mbps:.2f}")
+                        bandwidth_mbps=f"{data_rate_mbps:.2f}")
                     #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
             links.append(link)
 
@@ -534,13 +544,17 @@ def make_json_network(*,
 
 def plot_drone_positions(*,
                          meta_prefix: str = "",
+                         wireless_prefix: str = "",
                          title_name: str,
                          file_name: str,
                          nodes: list,
                          device_positions: np.ndarray,
                          distance: float,
                          dist_comm: float,
-                         drone_link_count: np.ndarray,
+                         dist_device_to_drone: np.ndarray,
+                         links: list,
+                         eta: float,
+                         snr_eff: float,
                          file_folder_path: str,
                          font_size: float = 8.0):
 
@@ -557,6 +571,18 @@ def plot_drone_positions(*,
     ax_drone_pos.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
     
 
+    rates_for_devices= np.array([ data_rate_given_dist_comm(s,
+                              bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+                              transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+                              margin_loss_db=metadata["MARGIN_LOSS"],
+                              eta=eta,
+                              snr_eff=snr_eff
+                              ) for s in dist_device_to_drone ])
+    
+    bandwidths = [float(link.bandwidth_mbps) for link in links]
+    
+    # print(dist_device_to_drone)
+    #print(rates_for_devices)
 
     for _, node in enumerate(nodes):
         x = node.x
@@ -566,13 +592,11 @@ def plot_drone_positions(*,
         circle = plt.Circle((x, y), dist_comm, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
         ax_drone_pos.add_patch(circle)
 
-    device_links_min = metadata[f"{meta_prefix}MIN_DEVICE_LINKS"]
-    device_links_mean = metadata[f"{meta_prefix}MEAN_DEVICE_LINKS"]
-
     title_text = (
     f"{title_name}\n"
     f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-    f"Drone links: Min = {np.min(drone_link_count)}, Avg = {np.mean(drone_link_count):.2f}, Device links: Min = {device_links_min}, Avg = {device_links_mean:.2f}"
+    f" Device Phyrate: Min = {np.min(rates_for_devices):.2f}, Avg = {np.mean(rates_for_devices):.2f} \n"
+    f"Drone Phyrate: Min = {min(bandwidths):.2f}, Avg = {mean(bandwidths):.2f}"
 )
     ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold')
     ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
@@ -990,7 +1014,7 @@ def process_drone_mesh(*,
                               links=link_list_dropout)
 
             # Calculating links from devices to drones for partial drone mesh
-            calculate_device_links(meta_prefix= f"{grid_prefix}_{j}_DROPOUT_",
+            dist_device_to_drone= calculate_device_links(meta_prefix= f"{grid_prefix}_{j}_DROPOUT_",
                                    nodes=node_list_dropout,
                                    dist_comm=dist_comm,
                                    device_positions=device_grid)
@@ -1004,13 +1028,17 @@ def process_drone_mesh(*,
                                             file_folder_path=dir_origin_partial_plots)
 
             plot_drone_positions(meta_prefix=f"{grid_prefix}_{j}_DROPOUT_",
+                                 wireless_prefix = wireless_prefix,
                                  file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.4f}_dropout_{tolerance}_tolerance_mesh.png",
                                  title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
                                  nodes=node_list_dropout,
                                  device_positions=device_grid,
                                  distance=drone_distance,
                                  dist_comm=dist_comm,
-                                 drone_link_count=link_count_dropout,
+                                 dist_device_to_drone=dist_device_to_drone,
+                                 links=link_list_dropout,
+                                 eta=eta,
+                                 snr_eff=snr_eff,
                                  file_folder_path=dir_origin_partial_plots)
 
         # Make node and link list for full drone mesh
@@ -1045,13 +1073,17 @@ def process_drone_mesh(*,
                                     file_folder_path=dir_origin_full_plots)
 
         plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
+                             wireless_prefix=wireless_prefix,
                              file_name=f"{grid_prefix}_{tolerance}_tolerance_full_mesh.png",
                              title_name=f"{grid_prefix} Mesh | tolerance = {tolerance} [m]",
                              nodes=node_list_all,
                              device_positions=device_grid,
                              distance=drone_distance,
                              dist_comm=dist_comm,
-                             drone_link_count=link_count_all,
+                             dist_device_to_drone=dist_device_to_drone,
+                             links=link_list_all,
+                             eta=eta,
+                             snr_eff=snr_eff,
                              file_folder_path=dir_origin_full_plots)
 
     with open(os.path.join(dir_origin, "metadata.json"), "w") as f:
