@@ -28,7 +28,7 @@ class Node:
 class Link:
     source: str
     target: str
-    bandwidth_mbps: str
+    bandwidth_mbit: str
 
 ###############################################################################
 #__________________________ DRONE MESH GRIDS _________________________________#
@@ -509,7 +509,7 @@ def link_list(*,
                                                snr_eff=snr_eff)
             link = Link(source=source.id,
                         target=target.id,
-                        bandwidth_mbps=f"{data_rate_mbps:.2f}")
+                        bandwidth_mbit=f"{data_rate_mbps:.2f}")
                     #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
             links.append(link)
 
@@ -579,7 +579,7 @@ def plot_drone_positions(*,
                               snr_eff=snr_eff
                               ) for s in dist_device_to_drone ])
     
-    bandwidths = [float(link.bandwidth_mbps) for link in links]
+    bandwidths = [float(link.bandwidth_mbit) for link in links]
     
     # print(dist_device_to_drone)
     #print(rates_for_devices)
