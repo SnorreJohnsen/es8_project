@@ -132,11 +132,11 @@ def get_halow_module_MM8108_params(*,
             metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"] = best_scheme['receive_sensitivity']
             metadata[f"{wireless_prefix}TRANSMIT_POWER"] = best_scheme['transmit_power']
 
-def dist_comm_calc(transmit_power_dbm: float = 16,
-                   received_power_dbm: float = -74,
+def dist_comm_calc(transmit_power_dbm: float = 22,
+                   received_power_dbm: float = -85.44139,
                    transmit_gain_dbi: float = 0,
                    received_gain_dbi: float = 0,
-                   margin_loss_db: float = 0,
+                   margin_loss_db: float = 3,
                    freq_Mhz: float = 868) -> float:
     """
     default values:
@@ -160,7 +160,7 @@ def dist_comm_calc(transmit_power_dbm: float = 16,
     return dist_comm
 
 
-def shannon_inverse_bitrate(received_power_dbm: float = -74,
+def shannon_inverse_bitrate(received_power_dbm: float = -85.44139,
                             bandwidth_Mhz: float = 8,
                             noise_figure_db: float = 6,
                             snr_eff: float = 1,
@@ -190,7 +190,7 @@ def sensivity_given_range_fspl(distance_m: float,
                                 transmit_power_dbm: float = 22,
                                 transmit_gain_dbi: float = 0,
                                 received_gain_dbi: float = 0,
-                                margin_loss_db: float = 0,
+                                margin_loss_db: float = 3,
                                 freq_Mhz: float = 868) -> float:
     # convert distance to km
     distance_km = distance_m / 1000
@@ -204,7 +204,7 @@ def sensivity_given_range_fspl(distance_m: float,
 def data_rate_given_dist_comm(distance_m: float,
                               bandwidth_Mhz: float = 8,
                               transmit_power_dbm: float = 22,
-                              margin_loss_db: float = 0,
+                              margin_loss_db: float = 3,
                               eta: float = 0.79,
                               snr_eff: float = 0.14
                               ):
