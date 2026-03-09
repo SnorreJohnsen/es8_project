@@ -139,7 +139,7 @@ def place_test_devices(graph: dict, dev_coords: list[tuple[float, float, float]]
         link = {
             "source": dev["id"],
             "target": closest_drone["id"],
-            "bandwidth_mbps": data_rate_given_dist_comm(math.sqrt(dist_sq)),
+            "bandwidth_mbit": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
         }
 
         graph["links"].append(link)
@@ -183,8 +183,8 @@ def main():
     # Init batman-adv on all nodes
     rmap = get_remote_mapping([Remote()]) # running everything locally
     all_ids = rmap.keys()
-    drone_ids = list(filter(lambda x: x.startswith("ns-n"), all_ids))
-    device_ids = list(filter(lambda x: x.startswith("ns-d"), all_ids))
+    drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
+    device_ids = list(filter(lambda x: x.startswith("d"), all_ids))
 
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(device_ids)} devices")
