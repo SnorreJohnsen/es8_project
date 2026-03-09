@@ -70,7 +70,7 @@ def stop_all_tcpdump():
     sigint_all(tcpdump_procs)
 
 
-def start_tcpdump(node_name: str, out_dir: str):
+def start_tcpdump(node_name: str, ifname: str, out_dir: str):
     """
     Starts a tcpdump on a node to capture traffic
 
@@ -84,7 +84,7 @@ def start_tcpdump(node_name: str, out_dir: str):
 
     pcap_path = os.path.join(out_dir, f"{node_name}.pcap")
     cmd = ["ip", "netns", "exec", f"ns-{node_name}",
-            "tcpdump", "-i", "bat0", "-n", "-U", "-w", pcap_path]
+            "tcpdump", "-i", ifname, "-n", "-U", "-w", pcap_path]
     
     if verbosity == "verbose":
         print(f"start_tcpdump({node_name=}, {out_dir=})")
@@ -130,12 +130,21 @@ def main():
 
     # Init batman-adv on all nodes
     rmap = get_remote_mapping([Remote()]) # running everything locally
-    ids = rmap.keys()
-    mn_software._start_protocol("batman-adv", rmap, ids)
+    all_ids = rmap.keys()
+    drone_ids = list(filter(lambda x: x.startswith("ns-n"), all_ids))
+    device_ids = list(filter(lambda x: x.startswith("ns-d"), all_ids))
+    
+    if verbosity != "quiet": 
+        print(f"Running simulation on {len(drone_ids)} drones and {len(device_ids)} devices")
+
+    mn_software._start_protocol("batman-adv", rmap, drone_ids)
 
     # Start tcpdump for each node
-    for id in ids:
-        start_tcpdump(id, pcap_dir)
+    for id in drone_ids:
+        start_tcpdump(id, "bat0", pcap_dir)
+
+    for id in device_ids:
+        start_tcpdump(id, "uplink", pcap_dir)
 
     time.sleep(2)  # allow to launch tcpdumps
 
