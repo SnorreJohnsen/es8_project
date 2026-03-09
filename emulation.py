@@ -192,10 +192,7 @@ def main():
     mn_software._start_protocol("batman-adv", rmap, drone_ids)
 
     # Start tcpdump for each node
-    for id in drone_ids:
-        start_tcpdump(id, "bat0", pcap_dir)
-
-    for id in device_ids:
+    for id in all_ids:
         start_tcpdump(id, "uplink", pcap_dir)
 
     time.sleep(2)  # allow to launch tcpdumps
