@@ -461,8 +461,8 @@ def node_list(drone_positions: np.ndarray) -> list[Node]:
     nodes: list[Node] = []
 
     for i in range(len(drone_positions)):
-        id = f"{x_pos[i]:.2f}_{y_pos[i]:.2f}"
-        node = Node(id=id, x=float(x_pos[i]), y=float(y_pos[i]), z=float(z_pos[i]))
+        id = f"n{i}"
+        node = Node(id=id, x=round(float(x_pos[i]), 2), y=round(float(y_pos[i]), 2))
         nodes.append(node)
 
     return nodes
@@ -1100,14 +1100,13 @@ def main():
     device_height = 5000
     scale_factor = 1
     test_dim = (length*scale_factor, width*scale_factor)
-    #test_samples = (600, 200)                           # number of sample points on area (x, y)
-    test_samples = (30, 10)                           # number of sample points on area (x, y)
+    test_samples = (600, 200)                           # number of sample points on area (x, y)
 
-    test_tolerances = np.arange(100, 300, 100)          #tolerance in meters (min, max, stepsize)
-    test_dist_redundancy = 0                            # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.1, 0.3, 0.1)       #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 100                            # number of iterations for each dropout rate (used for histogram)
-
+    test_tolerances = np.arange(0, 150, 50)          #tolerance in meters (min, max, stepsize) 
+    test_dist_redundancy = 2500                         # distance redundancy for drone placement
+    test_dropout_rates = np.arange(0.05, 0.30, 0.05)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_iters = 1000                           # number of iterations for each dropout rate (used for histogram)
+    
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
     desired_bandwidth_Mhz = 8
