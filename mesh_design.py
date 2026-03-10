@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 import os
+import pandas as pd
 from tqdm import tqdm
 from collections import Counter
 from statistics import mean
@@ -760,11 +761,11 @@ def graph_sensitivity_phyrate(file_folder_path: str,
     fig, ax1 = plt.subplots()
 
     ax1.set_xlabel("Receive Sensitivity (dBm)")
-    ax1.set_ylabel("Data Rate (Mbps)")
+    ax1.set_ylabel("PHY Rate (Mbps)")
     ax1.plot(sensitivities, data_rates,'x', label="Datasheet MM8108",)
     ax1.plot(shannon_receive_sens, data_rates, label="Shannon")
-    ax1.plot(shannon_mod_receive_sens_optimal, data_rates, label=f"Modified Shannon Optimized snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}")
-    ax1.plot(shannon_mod_receive_sens_strict, data_rates, label=f"Modified Shannon Strict snr_eff: {snr_eff_strict}, eta: {eta_strict}")
+    ax1.plot(shannon_mod_receive_sens_optimal, data_rates, label=f"Modified Shannon optimized snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}")
+    ax1.plot(shannon_mod_receive_sens_strict, data_rates, label=f"Modified Shannon strict snr_eff: {snr_eff_strict}, eta: {eta_strict}")
     ax1.legend()
     file_path_graph = os.path.join(file_folder_path,filename)
     fig.savefig(file_path_graph,dpi=300,bbox_inches='tight')
@@ -830,33 +831,47 @@ def graph_range_phyrate(file_folder_path: str,
         for i, s in enumerate(sorted_schemes)
     ]
 
+    # Create table with deviation values
+    total_deviation_opt = 0
+    total_deviation_strict = 0
+
+    rows = []   # table storage
+
+    for x, y, z_opt, z_strict in zip(dist_comms,
+                                 data_rates,
+                                 dist_comms_mod_shannon_optimal,
+                                 dist_comms_mod_shannon_strict):
+
+        deviation_opt = x - z_opt
+        deviation_strict = x - z_strict
+
+        total_deviation_opt += abs(deviation_opt)
+        total_deviation_strict += abs(deviation_strict)
+
+        # store row for table
+        rows.append({
+            "PHY Rate (Mbps)": f"{y:.2f}",
+            "Datasheet (m)": f"{x:.2f}",
+            "Optimal (m)": f"{z_opt:.2f}",
+            "Strict (m)": f"{z_strict:.2f}",
+            "Deviation Optimal (m)": f"{deviation_opt:.2f}",
+            "Deviation Strict (m)": f"{deviation_strict:.2f}"
+        })
+
+    # averages
+    avg_deviation_opt = total_deviation_opt / len(dist_comms)
+    avg_deviation_strict = total_deviation_strict / len(dist_comms)
+
+
     # FIGURE
-    total_deviation = 0
     fig, ax1 = plt.subplots(figsize=(16, 9))
     plt.xscale('log')  # set x-axis to logarithmic
-    ax1.set_xlabel("Range (m)")
-    ax1.set_ylabel("Data Rate (Mbps)")
+    ax1.set_xlabel("Range (m)", fontsize=18)
+    ax1.set_ylabel("PHY Rate (Mbps)", fontsize=18)
+    ax1.tick_params(axis='both', which='major', labelsize=16)
     ax1.plot(dist_comms, data_rates,'x', label="Datasheet MM8108")
-    for x, y, z in zip(dist_comms, data_rates, dist_comms_mod_shannon_optimal):
-        deviation = x - z            # residual
-        ax1.annotate(f"Optimal \n ({x:.2f}, {y} \n Δ={deviation:.2f} Meter)",
-                    (x, y),
-                    textcoords="offset points",
-                    xytext=(5, 5),
-                    fontsize=8)
-        total_deviation += abs(deviation)
-    avg_deviation = total_deviation / len(dist_comms)
-    ax1.plot(dist_comms_mod_shannon_optimal, data_rates, label=f"Modified shannon MM8108 with avg deviation of {avg_deviation:.2f} Meter Optimal")
-    for x, y, z in zip(dist_comms, data_rates, dist_comms_mod_shannon_strict):
-        deviation = x - z            # residual
-        ax1.annotate(f"Strict \n ({x:.2f}, {y} \n Δ={deviation:.2f} Meter)",
-                    (x, y),
-                    textcoords="offset points",
-                    xytext=(80, 5),
-                    fontsize=8)
-        total_deviation += abs(deviation)
-    avg_deviation = total_deviation / len(dist_comms)
-    ax1.plot(dist_comms_mod_shannon_strict, data_rates, label=f"Modified shannon MM8108 with avg deviation of {avg_deviation:.2f} Meter Strict")
+    ax1.plot(dist_comms_mod_shannon_optimal, data_rates, color="green", label=f"Modified shannon MM8108 with avg deviation of {avg_deviation_opt:.2f} (m) optimal")
+    ax1.plot(dist_comms_mod_shannon_strict, data_rates, color="red", label=f"Modified shannon MM8108 with avg deviation of {avg_deviation_strict:.2f} (m) strict")
     # FOR EXP PLOT
     # # for regression curve order size 4 is used as highest without significiantly seing overfit
     # params, _ = curve_fit(exp_model,dist_comms,data_rates, p0=(max(data_rates), 0.001))   # initial guess)
@@ -876,10 +891,17 @@ def graph_range_phyrate(file_folder_path: str,
     #     total_deviation_reg += abs(deviation)
     # avg_deviation_reg = total_deviation_reg / len(dist_comms)
     # ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation_reg:.2f} Mbps")
-    ax1.legend()
+    ax1.legend(fontsize=18, loc='upper right')
     file_path_graph = os.path.join(file_folder_path,filename)
     fig.savefig(file_path_graph,dpi=300, bbox_inches = 'tight')
     plt.close(fig)
+
+    
+    # create table
+    df = pd.DataFrame(rows)
+
+    df.to_latex(f"{file_folder_path}_deviation_table.tex", index=False)
+
 
 def process_drone_mesh(*,
                        grid_prefix: str,
@@ -1198,12 +1220,12 @@ def main():
     # have to be after dont overate datarate in metadata
     if graph_plots == True:
         graph_sensitivity_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                                    filename="sensivity vs Phyrate",
+                                    filename="sensivity_vs_phyrate",
                                     desired_bandwidth_Mhz=desired_bandwidth_Mhz,
                                     eta_strict=eta,snr_eff_strict=snr_eff,
                                     )
         graph_range_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                            filename="Range vs Phyrate",
+                            filename="range_vs_phyrate",
                             desired_bandwidth_Mhz=desired_bandwidth_Mhz,
                             eta_strict=eta,snr_eff_strict=snr_eff)
 
