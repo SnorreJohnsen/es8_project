@@ -8,7 +8,7 @@ from collections import Counter
 from statistics import mean
 import json
 from dataclasses import dataclass, asdict
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, least_squares
 from mesh_design_lib import (
                             distance_calc,
                             shannon,
@@ -678,32 +678,50 @@ def shannon_fit( data_rate, snr_eff, eta,bandwidth):
         for dr in data_rate
     ])
 
-def sort_scheme_for_data_rate(desired_bandwidth_Mhz):
-    available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
+def residuals(params, data_rate, y, bandwidth):
+    snr_eff, eta = params
+    pred = shannon_fit(data_rate, snr_eff, eta, bandwidth)
+
+    r = pred - y
+
+    # penalize positive deviations strongly
+    r[r < 0] *= 5
+
+    return r
+
+
+def sort_scheme_for_data_rate(desired_bandwidth_Mhz: float,
+                              lookup_table: dict):
+    available_bandwidth = np.array(list(lookup_table.keys()))
     bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
     closest_bandwidth = int(available_bandwidth[bandwidth_index])
 
     # Get all MCS schemes for that bandwidth
-    schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
+    schemes = lookup_table[closest_bandwidth].values()
 
     # Find the sorted_scheme with data_rate closest to desired_rate_Mbps
     sorted_schemes = sorted(schemes, key=lambda s: s['data_rate'])
 
     return sorted_schemes, closest_bandwidth
 
-def graph_sensitivity_phyrate(file_folder_path: str,
+def graph_sensitivity_phyrate(metadata: dict,
+                              file_folder_path: str,
                               filename: str,
                               desired_bandwidth_Mhz: float,
-                              eta_strict: float = 0.79,
-                              snr_eff_strict: float = 0.14
+                              lookup_table:dict
                               ):
     os.makedirs(file_folder_path,exist_ok=True)
-    sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
+
+    # For desired bandwidth
+    sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz,lookup_table_halow_module_MM8108)
+
 
     # Take the values out from the lookup table
     data_rates = [s['data_rate'] for s in sorted_schemes]
     sensitivities = [s['receive_sensitivity'] for s in sorted_schemes]
 
+
+    # Standard shannon
     shannon_receive_sens = [
         shannon(
             metadata = metadata,
@@ -716,7 +734,11 @@ def graph_sensitivity_phyrate(file_folder_path: str,
         for data_rate in data_rates
     ]
 
-    # fir the best parameters for snr_eff and eta to fit the datasheet
+
+    # fit the best parameters for snr_eff and eta to fit the datasheet
+
+    # For desired MHz bandwidth
+
     popt, pcov = curve_fit(
         lambda dr, snr_eff, eta:
             shannon_fit(dr, snr_eff, eta, closest_bandwidth),
@@ -724,7 +746,6 @@ def graph_sensitivity_phyrate(file_folder_path: str,
         sensitivities,
         p0=[0.1, 0.8]
     )
-
     snr_eff_opt, eta_opt = popt
 
     fitted_sens = shannon_fit(
@@ -734,29 +755,23 @@ def graph_sensitivity_phyrate(file_folder_path: str,
         closest_bandwidth
     )
 
-    shannon_mod_receive_sens_optimal = [
-        shannon(
-            metadata = metadata,
-            data_rate_Mbps=data_rate,
-            bandwidth_Mhz=closest_bandwidth,
-            noise_figure_db=3,
-            eta=0.77,
-            snr_eff=0.17
-        )
-        for data_rate in data_rates
-    ]
+    # trying to fit curve strictly speaking, penatilties over estimating range
+    res = least_squares(
+    residuals,
+    x0=[0.1, 0.8],
+    args=(data_rates, sensitivities,closest_bandwidth)
+    )
 
-    shannon_mod_receive_sens_strict = [
-        shannon(
-            metadata = metadata,
-            data_rate_Mbps=data_rate,
-            bandwidth_Mhz=closest_bandwidth,
-            noise_figure_db=3,
-            eta=eta_strict,
-            snr_eff=snr_eff_strict
-        )
-        for data_rate in data_rates
-    ]
+    snr_eff_strict, eta_strict = res.x
+
+    strict_fitted_sens = shannon_fit(
+        data_rates,
+        snr_eff_strict,
+        eta_strict,
+        closest_bandwidth
+    )
+
+
     # create plot
     fig, ax1 = plt.subplots()
 
@@ -764,58 +779,44 @@ def graph_sensitivity_phyrate(file_folder_path: str,
     ax1.set_ylabel("PHY Rate (Mbps)")
     ax1.plot(sensitivities, data_rates,'x', label="Datasheet MM8108",)
     ax1.plot(shannon_receive_sens, data_rates, label="Shannon")
-    ax1.plot(shannon_mod_receive_sens_optimal, data_rates, label=f"Modified Shannon optimized snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}")
-    ax1.plot(shannon_mod_receive_sens_strict, data_rates, label=f"Modified Shannon strict snr_eff: {snr_eff_strict}, eta: {eta_strict}")
+    ax1.plot(fitted_sens, data_rates, label=f"Modified Shannon fitted snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}, {desired_bandwidth_Mhz} Mhz BW")
+    ax1.plot(strict_fitted_sens, data_rates, label=f"Modified Shannon strict fitted snr_eff: {snr_eff_strict:.2f}, eta: {eta_strict:.2f}, {desired_bandwidth_Mhz} Mhz BW")
+    
     ax1.legend()
     file_path_graph = os.path.join(file_folder_path,filename)
     fig.savefig(file_path_graph,dpi=300,bbox_inches='tight')
     plt.close(fig)
 
-def graph_range_phyrate(file_folder_path: str,
+    metadata[f"SNR_EFF_OPTIMAL"] = snr_eff_opt
+    metadata[f"SNR_EFF_STRICT"] = snr_eff_strict
+    metadata[f"ETA_OPTIMAL"] = eta_opt
+    metadata[f"ETA_STRICT"] = eta_strict
+
+def graph_range_phyrate(metadata: dict,
+                        file_folder_path: str,
                         filename: str,
                         desired_bandwidth_Mhz: float,
-                        eta_strict: float = 0.79,
-                        snr_eff_strict: float = 0.14,
+                        lookup_table: dict
                         ):
     data_rates = []
     dist_comms = []
 
-    sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz)
+    sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz,lookup_table)
+
+
 
     # Take the values out from the lookup table
     data_rates = [ s['data_rate'] for s in sorted_schemes]
     dist_comms= [ dist_comm_calc(s['transmit_power'],s['receive_sensitivity'],transmit_gain_dbi=0,received_gain_dbi=0,margin_loss_db=3,freq_Mhz=868) for s in sorted_schemes]
 
-    shannon_mod_receive_sens_optimal = [
-        shannon(
-            metadata = metadata,
-            data_rate_Mbps=data_rate,
-            bandwidth_Mhz=closest_bandwidth,
-            noise_figure_db=3,
-            eta=0.77,
-            snr_eff=0.17
-        )
-        for data_rate in data_rates
-    ]
-    dist_comms_mod_shannon_optimal = [
-        dist_comm_calc(
-            s['transmit_power'],
-            shannon_mod_receive_sens_optimal[i],   # use the corresponding receive sens
-            transmit_gain_dbi=0,
-            received_gain_dbi=0,
-            margin_loss_db=3,
-            freq_Mhz=868
-        )
-        for i, s in enumerate(sorted_schemes)
-    ]
     shannon_mod_receive_sens_strict = [
         shannon(
             metadata = metadata,
             data_rate_Mbps=data_rate,
             bandwidth_Mhz=closest_bandwidth,
             noise_figure_db=3,
-            eta=eta_strict,
-            snr_eff=snr_eff_strict
+            eta=metadata["ETA_STRICT"],
+            snr_eff=metadata["SNR_EFF_STRICT"]
         )
         for data_rate in data_rates
     ]
@@ -831,9 +832,34 @@ def graph_range_phyrate(file_folder_path: str,
         for i, s in enumerate(sorted_schemes)
     ]
 
+    # Created the curve based of the fitted modified shannon
+    shannon_mod_receive_sens_optimal = [
+        shannon(
+            metadata = metadata,
+            data_rate_Mbps=data_rate,
+            bandwidth_Mhz=closest_bandwidth,
+            noise_figure_db=3,
+            eta=metadata["ETA_OPTIMAL"],
+            snr_eff=metadata["SNR_EFF_OPTIMAL"]
+        )
+        for data_rate in data_rates
+    ]
+    dist_comms_mod_shannon_optimal= [
+        dist_comm_calc(
+            s['transmit_power'],
+            shannon_mod_receive_sens_optimal[i],   # use the corresponding receive sens
+            transmit_gain_dbi=0,
+            received_gain_dbi=0,
+            margin_loss_db=3,
+            freq_Mhz=868
+        )
+        for i, s in enumerate(sorted_schemes)
+    ]
+
     # Create table with deviation values
     total_deviation_opt = 0
     total_deviation_strict = 0
+    total_deviation_fitted = 0
 
     rows = []   # table storage
 
@@ -855,13 +881,12 @@ def graph_range_phyrate(file_folder_path: str,
             "Optimal (m)": f"{z_opt:.2f}",
             "Strict (m)": f"{z_strict:.2f}",
             "Deviation Optimal (m)": f"{deviation_opt:.2f}",
-            "Deviation Strict (m)": f"{deviation_strict:.2f}"
+            "Deviation Strict (m)": f"{deviation_strict:.2f}",
         })
 
     # averages
     avg_deviation_opt = total_deviation_opt / len(dist_comms)
     avg_deviation_strict = total_deviation_strict / len(dist_comms)
-
 
     # FIGURE
     fig, ax1 = plt.subplots(figsize=(16, 9))
@@ -872,6 +897,7 @@ def graph_range_phyrate(file_folder_path: str,
     ax1.plot(dist_comms, data_rates,'x', label="Datasheet MM8108")
     ax1.plot(dist_comms_mod_shannon_optimal, data_rates, color="green", label=f"Modified shannon MM8108 with avg deviation of {avg_deviation_opt:.2f} (m) optimal")
     ax1.plot(dist_comms_mod_shannon_strict, data_rates, color="red", label=f"Modified shannon MM8108 with avg deviation of {avg_deviation_strict:.2f} (m) strict")
+
     # FOR EXP PLOT
     # # for regression curve order size 4 is used as highest without significiantly seing overfit
     # params, _ = curve_fit(exp_model,dist_comms,data_rates, p0=(max(data_rates), 0.001))   # initial guess)
@@ -900,8 +926,7 @@ def graph_range_phyrate(file_folder_path: str,
     # create table
     df = pd.DataFrame(rows)
 
-    df.to_latex(f"{file_folder_path}_deviation_table.tex", index=False)
-
+    df.to_latex(f"{file_folder_path}_deviation_table_bandwidth_{desired_bandwidth_Mhz}_MHz.tex", index=False)
 
 def process_drone_mesh(*,
                        grid_prefix: str,
@@ -1219,16 +1244,17 @@ def main():
 
     # have to be after dont overate datarate in metadata
     if graph_plots == True:
-        graph_sensitivity_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                                    filename="sensivity_vs_phyrate",
-                                    desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                                    eta_strict=eta,snr_eff_strict=snr_eff,
-                                    )
-        graph_range_phyrate(file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                            filename="range_vs_phyrate",
+        graph_sensitivity_phyrate(metadata=metadata,
+                                  file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+                                  filename=f"sensivity_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz",
+                                  desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                                  lookup_table=lookup_table_halow_module_MM8108
+                                  )
+        graph_range_phyrate(metadata=metadata,
+                            file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+                            filename=f"range_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz",
                             desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                            eta_strict=eta,snr_eff_strict=snr_eff)
+                            lookup_table=lookup_table_halow_module_MM8108)
 
 if __name__ == "__main__":
     main()
-
