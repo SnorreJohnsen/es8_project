@@ -584,7 +584,7 @@ def plot_drone_positions(*,
                               freq_Mhz=metadata["FREQ_MHZ"]
                               ) for s in dist_device_to_drone ])
     
-    bandwidths = [float(link.bandwidth_mbit) for link in links]
+    phyrates = [float(link.bandwidth_mbit) for link in links]
     
     # print(dist_device_to_drone)
     #print(rates_for_devices)
@@ -601,14 +601,14 @@ def plot_drone_positions(*,
         title_text = (
         f"{title_name}\n"
         f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-        f" Device Phyrate: Min = {np.min(rates_for_devices):.2f}, Avg = {np.mean(rates_for_devices):.2f} \n"
-        f"Drone Phyrate: Min = {min(bandwidths):.2f}, Avg = {mean(bandwidths):.2f}"
+        f" Device PHYrate: Min = {np.min(rates_for_devices):.2f}, Avg = {np.mean(rates_for_devices):.2f} \n"
+        f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
         )
     else:
         title_text = (
         f"{title_name}\n"
         f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-        f"Drone Phyrate: Min = {min(bandwidths):.2f}, Avg = {mean(bandwidths):.2f}"
+        f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
         )
     
     ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold')
@@ -1167,10 +1167,10 @@ def main():
     test_dim = (length*scale_factor, width*scale_factor)
     test_samples = (30, 10)                           # number of sample points on area (x, y)
 
-    test_tolerances = np.arange(0, 99, 100)          #tolerance in meters (min, max, stepsize) 
+    test_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05, 0.10, 0.05)      #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 100                          # number of iterations for each dropout rate (used for histogram)
+    test_dropout_rates = np.arange(0.05, 0.1, 0.05)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_iters = 10                          # number of iterations for each dropout rate (used for histogram)
     
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
@@ -1185,7 +1185,7 @@ def main():
     # desired_rate_Mbps = 20
     # freq_Mhz = 868
     # transmit_power_dbm = 22
-    # lookup_table_name = "lookup_table_halow_module_MM8108"
+    # lookup_table_name = "WIFI_HALOW_MM8108"
     # lookup_table = lookup_table_halow_module_MM8108
 
     # desired_bandwidth_Mhz = 2
