@@ -597,12 +597,20 @@ def plot_drone_positions(*,
         circle = plt.Circle((x, y), dist_comm, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
         ax_drone_pos.add_patch(circle)
 
-    title_text = (
-    f"{title_name}\n"
-    f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-    f" Device Phyrate: Min = {np.min(rates_for_devices):.2f}, Avg = {np.mean(rates_for_devices):.2f} \n"
-    f"Drone Phyrate: Min = {min(bandwidths):.2f}, Avg = {mean(bandwidths):.2f}"
-)
+    if len(x_device_pos) == 1:
+        title_text = (
+        f"{title_name}\n"
+        f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
+        f" Device Phyrate: Min = {np.min(rates_for_devices):.2f}, Avg = {np.mean(rates_for_devices):.2f} \n"
+        f"Drone Phyrate: Min = {min(bandwidths):.2f}, Avg = {mean(bandwidths):.2f}"
+        )
+    else:
+        title_text = (
+        f"{title_name}\n"
+        f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
+        f"Drone Phyrate: Min = {min(bandwidths):.2f}, Avg = {mean(bandwidths):.2f}"
+        )
+    
     ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold')
     ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
     ax_drone_pos.set_ylabel("[m]", fontsize=font_size)
@@ -712,6 +720,7 @@ def graph_sensitivity_phyrate(metadata: dict,
                               filename: str,
                               desired_bandwidth_Mhz: float,
                               lookup_table:dict,
+                              lookup_table_name: str,
                               enable_plot: bool
                               ):
     os.makedirs(file_folder_path,exist_ok=True)
@@ -788,10 +797,11 @@ def graph_sensitivity_phyrate(metadata: dict,
         ax1.set_xlabel("Receive Sensitivity (dBm)", fontsize=16)
         ax1.set_ylabel("PHY Rate (Mbps)", fontsize=16)
         ax1.tick_params(axis='both', which='major', labelsize=16)
-        ax1.plot(sensitivities, data_rates,'x', label="Datasheet MM8108",)
-        ax1.plot(shannon_receive_sens, data_rates, label="Shannon")
-        ax1.plot(fitted_sens, data_rates, label=f"Modified Shannon fitted snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}, {desired_bandwidth_Mhz} Mhz BW")
-        ax1.plot(strict_fitted_sens, data_rates, label=f"Modified Shannon strict fitted snr_eff: {snr_eff_strict:.2f}, eta: {eta_strict:.2f}, {desired_bandwidth_Mhz} Mhz BW")
+        ax1.plot(shannon_receive_sens, data_rates, label="Shannon",color = "lightblue")
+        ax1.plot(sensitivities, data_rates,'x',color = "orange")
+        ax1.step(sensitivities, data_rates, where='post',color="orange", label=f"Datasheet {lookup_table_name}")
+        ax1.plot(fitted_sens, data_rates, color="green", label=f"Modified Shannon {lookup_table_name} Optimal snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}, {desired_bandwidth_Mhz} Mhz BW")
+        ax1.plot(strict_fitted_sens, data_rates,color="red", label=f"Modified Shannon {lookup_table_name} Strict snr_eff: {snr_eff_strict:.2f}, eta: {eta_strict:.2f}, {desired_bandwidth_Mhz} Mhz BW")
         
         ax1.legend(fontsize=18, loc='upper left')
         file_path_graph = os.path.join(file_folder_path,filename)
@@ -803,6 +813,7 @@ def graph_range_phyrate(metadata: dict,
                         filename: str,
                         desired_bandwidth_Mhz: float,
                         lookup_table: dict,
+                        lookup_table_name: str,
                         enable_plot: bool
                         ):
     data_rates = []
@@ -905,9 +916,10 @@ def graph_range_phyrate(metadata: dict,
         ax1.set_xlabel("Range (m)", fontsize=18)
         ax1.set_ylabel("PHY Rate (Mbps)", fontsize=18)
         ax1.tick_params(axis='both', which='major', labelsize=16)
-        ax1.plot(dist_comms, data_rates,'x', label="Datasheet MM8108")
-        ax1.plot(dist_comms_mod_shannon_optimal, data_rates, color="green", label=f"Modified shannon MM8108 with avg deviation of {avg_deviation_opt:.2f} (m) optimal")
-        ax1.plot(dist_comms_mod_shannon_strict, data_rates, color="red", label=f"Modified shannon MM8108 with avg deviation of {avg_deviation_strict:.2f} (m) strict")
+        ax1.plot(dist_comms, data_rates,'x',color = "orange")
+        ax1.step(dist_comms, data_rates, where='post', label=f"Datasheet {lookup_table_name}", color = "orange")
+        ax1.plot(dist_comms_mod_shannon_optimal, data_rates, color="green", label=f"Modified shannon {lookup_table_name} with avg deviation of {avg_deviation_opt:.2f} (m) optimal")
+        ax1.plot(dist_comms_mod_shannon_strict, data_rates, color="red", label=f"Modified shannon {lookup_table_name} with avg deviation of {avg_deviation_strict:.2f} (m) strict")
 
     # FOR EXP PLOT
     # # for regression curve order size 4 is used as highest without significiantly seing overfit
@@ -1162,33 +1174,49 @@ def main():
     
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
+
+
+    # for either wifi halow, or wifi 7
+    # REMEMBER TO CHECK THIS SO RIGHT TO DATASHEET, IF CHECKING FIT
+    
+    # WIFI HALOW PAREMETERS
+    
+    # desired_bandwidth_Mhz = 8
+    # desired_rate_Mbps = 20
+    # freq_Mhz = 868
+    # transmit_power_dbm = 22
+    # lookup_table_name = "lookup_table_halow_module_MM8108"
+    # lookup_table = lookup_table_halow_module_MM8108
+
+    # desired_bandwidth_Mhz = 2
+    # desired_rate_Mbps = 7.2
+    # freq_Mhz = 868
+    # transmit_power_dbm = 20
+    # lookup_table_name = "WIFI_HALOW_MM8108"
+    # lookup_table = lookup_table_halow_module_MM8108
+
+    # WIFI 7 PARAMETERS
+
     desired_bandwidth_Mhz = 20
     desired_rate_Mbps = 13
-    
-    # for either wifi halow, or wifi 7
-    # freq_Mhz = 868
     freq_Mhz = 6000
+    transmit_power_dbm = 22
+    lookup_table_name = "WIFI_7_GI0_8_OFDM"
+    lookup_table = lookup_table_wifi7_eht_GI0_8_OFDM
+    
+
+
     margin_loss_db = 3                                  # safety variable for "other" losses
 
-    # For wifi halow or wifi 7
-    # transmit_power_dbm = 22
-    transmit_power_dbm = 22
-    metadata[f"{wireless_prefix}TRANSMIT_POWER"] = transmit_power_dbm
 
 
-    lookup_table_name = "lookup_table_wifi7_eht_GI0_8_OFDM"
-    lookup_table = lookup_table_wifi7_eht_GI0_8_OFDM
-    # lookup_table = lookup_table_halow_module_MM8108
+
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones
     # has to be set in function process_drone_mesh
     test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
-    graph_plots = False
-    # eta = 0.79
-    # snr_eff = 0.14
-    # eta = 0.69
-    # snr_eff = 0.07
+    graph_plots = True
 
     ###############################################################################
     ###############################################################################
@@ -1203,6 +1231,7 @@ def main():
     metadata["DISTANCE_REDUNDANCY"] = test_dist_redundancy
 
     metadata["FREQ_MHZ"] = freq_Mhz
+    metadata[f"{wireless_prefix}TRANSMIT_POWER"] = transmit_power_dbm
     metadata["MARGIN_LOSS"] = margin_loss_db
 
     # Save dropout iterations used for histogram
@@ -1217,6 +1246,7 @@ def main():
                                   filename=f"sensivity_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
                                   desired_bandwidth_Mhz=desired_bandwidth_Mhz,
                                   lookup_table=lookup_table,
+                                  lookup_table_name=lookup_table_name,
                                   enable_plot = graph_plots
                                   )
 
@@ -1225,6 +1255,7 @@ def main():
                             filename=f"range_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
                             desired_bandwidth_Mhz=desired_bandwidth_Mhz,
                             lookup_table=lookup_table,
+                            lookup_table_name=lookup_table_name,
                             enable_plot = graph_plots)
 
 
@@ -1272,7 +1303,7 @@ def main():
                        dropout_iters=test_dropout_iters,
                        hist_plot= True,
                        margin_loss_db=margin_loss_db,
-                       device_grid=device_point,
+                       device_grid=device_grid,
                        grid_func=test_grid_func,
                     )
 
