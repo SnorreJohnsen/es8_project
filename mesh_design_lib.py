@@ -100,6 +100,39 @@ lookup_table_halow_module_MM8108 = {
     }
 }
 
+# for (GI=0.8 mu s) (OFDM (prior 11ax))
+lookup_table_wifi7_eht_GI0_8_OFDM = {
+    20: {  # EHT20 MHz
+        0: {"data_rate": 6.5, "receive_sensitivity": -92, "transmit_power": 22},
+        1: {"data_rate": 13, "receive_sensitivity": -90, "transmit_power": 22},
+        2: {"data_rate": 19.5, "receive_sensitivity": -88, "transmit_power": 21},
+        3: {"data_rate": 26, "receive_sensitivity": -84, "transmit_power": 21},
+        4: {"data_rate": 39, "receive_sensitivity": -81, "transmit_power": 20},
+        5: {"data_rate": 52, "receive_sensitivity": -78, "transmit_power": 20},
+        6: {"data_rate": 58.5, "receive_sensitivity": -76, "transmit_power": 19},
+        7: {"data_rate": 65, "receive_sensitivity": -74, "transmit_power": 18},
+        8: {"data_rate": 78, "receive_sensitivity": -71, "transmit_power": 18},
+    }}
+
+# for (GI=3.2 mu s) (OFDM & OFDMA (starting with 11ax))
+lookup_table_wifi7_eht_GI3_2_OFDMA = {
+    20: {  # EHT20 MHz
+        0: {"data_rate": 7.3, "receive_sensitivity": -92, "transmit_power": 22},
+        1: {"data_rate": 14.6, "receive_sensitivity": -90, "transmit_power": 22},
+        2: {"data_rate": 21.9, "receive_sensitivity": -88, "transmit_power": 21},
+        3: {"data_rate": 29.3, "receive_sensitivity": -84, "transmit_power": 21},
+        4: {"data_rate": 43.9, "receive_sensitivity": -81, "transmit_power": 20},
+        5: {"data_rate": 58.5, "receive_sensitivity": -78, "transmit_power": 20},
+        6: {"data_rate": 65.8, "receive_sensitivity": -76, "transmit_power": 19},
+        7: {"data_rate": 73.1, "receive_sensitivity": -74, "transmit_power": 18},
+        8: {"data_rate": 87.8, "receive_sensitivity": -71, "transmit_power": 18},
+        9: {"data_rate": 97.5, "receive_sensitivity": -68, "transmit_power": 17},
+        10: {"data_rate": 109.7, "receive_sensitivity": -65, "transmit_power": 17},
+        11: {"data_rate": 121.9, "receive_sensitivity": -62, "transmit_power": 17},
+        12: {"data_rate": 131.6, "receive_sensitivity": -59, "transmit_power": 16},
+        13: {"data_rate": 146.3, "receive_sensitivity": -57, "transmit_power": 16},
+    }}
+
 def get_halow_module_MM8108_params(*,
                                    metadata: dict,
                                    wireless_prefix: str ="",
