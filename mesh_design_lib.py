@@ -17,8 +17,8 @@ def shannon(metadata: dict,
             data_rate_Mbps: float,
             bandwidth_Mhz: float = 4,
             noise_figure_db: float = 6,
-            snr_eff: float = 0.14,
-            eta: float = 0.79,
+            snr_eff: float = 0.14296437445439275,
+            eta: float = 0.7886195927676991,
             wireless_prefix: str ="") -> float:
     """
     default values:
@@ -238,15 +238,16 @@ def data_rate_given_dist_comm(distance_m: float,
                               bandwidth_Mhz: float = 8,
                               transmit_power_dbm: float = 22,
                               margin_loss_db: float = 3,
-                              eta: float = 0.79,
-                              snr_eff: float = 0.14
+                              eta: float = 0.7886195927676991,
+                              snr_eff: float = 0.14296437445439275,
+                              freq_Mhz : float = 868
                               ):
     required_sens= sensivity_given_range_fspl(distance_m=distance_m,
                                transmit_power_dbm=transmit_power_dbm,
                                transmit_gain_dbi= 0,
                                received_gain_dbi= 0,
                                margin_loss_db=margin_loss_db,
-                               freq_Mhz=868)
+                               freq_Mhz=freq_Mhz)
 
     data_rate_Mbps = shannon_inverse_bitrate(received_power_dbm=required_sens,
                             bandwidth_Mhz=bandwidth_Mhz,
