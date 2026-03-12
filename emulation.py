@@ -196,6 +196,7 @@ def main():
         start_tcpdump(id, "uplink", pcap_dir)
 
     time.sleep(2)  # allow to launch tcpdumps
+    input("Press Enter to continue")
 
     stop_all_tcpdump()
     stop_all_terminals()
