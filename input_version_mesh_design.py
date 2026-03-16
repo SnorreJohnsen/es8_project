@@ -477,7 +477,8 @@ def link_list(*,
               dist_comm: float,
               margin_loss_db: float,
               eta: float = 0.79,
-              snr_eff: float = 0.14) -> list[Link]:
+              snr_eff: float = 0.14,
+              use_lookup_table: bool = False) -> list[Link]:
 
     """
     Docstring for link_list
@@ -499,23 +500,41 @@ def link_list(*,
 
             if target.id == source.id:
                continue
-
+            
             # Compute distances from drone i to all drones
             distances = (target.x - source.x)**2 + (target.y - source.y)**2 + (target.z - source.z)**2
+               
+            if use_lookup_table == False:
 
-            # if distances <= (dist_comm + 1)**2:
-            #predicted_rate= exp_model(np.sqrt(distances), scale_exp, exp_param)
-            data_rate_mbps = data_rate_given_dist_comm(distance_m=np.sqrt(distances),
-                                               bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
-                                               transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
-                                               margin_loss_db=margin_loss_db,
-                                               eta=eta,
-                                               snr_eff=snr_eff,
-                                               freq_Mhz=metadata["FREQ_MHZ"])
+                # if distances <= (dist_comm + 1)**2:
+                #predicted_rate= exp_model(np.sqrt(distances), scale_exp, exp_param)
+                data_rate_mbps = data_rate_given_dist_comm(distance_m=np.sqrt(distances),
+                                                bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+                                                transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+                                                margin_loss_db=margin_loss_db,
+                                                eta=eta,
+                                                snr_eff=snr_eff,
+                                                freq_Mhz=metadata["FREQ_MHZ"])
+            else:
+                rate_ranges = []
+
+                for key, value in metadata.items():
+                    if key.lower().endswith("_mbps_range"):
+                        rate = float(key.split("_")[0])
+                        rate_ranges.append((rate, value))
+
+                rate_ranges.sort(key=lambda x: x[1],reverse=True)  # sort by range
+
+                data_rate_mbps = 0
+                # find correct rate
+                for rate, rng in rate_ranges:
+                    if distances <= rng**2:
+                        data_rate_mbps = rate
+
             link = Link(source=source.id,
-                        target=target.id,
-                        bandwidth_mbit=f"{data_rate_mbps:.2f}")
-                    #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
+                            target=target.id,
+                            bandwidth_mbit=f"{data_rate_mbps:.2f}")
+                        #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
             links.append(link)
 
             if distances <= (dist_comm + 1)**2:
@@ -524,6 +543,7 @@ def link_list(*,
 
         num_links.append(count)
     return links, num_links
+
 
 def make_json_network(*,
                       file_name: str,
@@ -815,7 +835,8 @@ def graph_range_phyrate(metadata: dict,
                         desired_bandwidth_Mhz: float,
                         lookup_table: dict,
                         lookup_table_name: str,
-                        enable_plot: bool
+                        enable_plot: bool,
+                        save_ranges: bool = True
                         ):
     data_rates = []
     dist_comms = []
@@ -900,6 +921,8 @@ def graph_range_phyrate(metadata: dict,
             "Deviation Optimal (m)": f"{deviation_opt:.2f}",
             "Deviation Strict (m)": f"{deviation_strict:.2f}",
         })
+        if save_ranges == True:
+            metadata[f"{y:.2f}_Mbps_range"] = z_strict
 
     # averages
     avg_deviation_opt = total_deviation_opt / len(dist_comms)
@@ -959,6 +982,7 @@ def process_drone_mesh(*,
                        hist_plot: bool,
                        margin_loss_db: float,
                        device_grid: np.ndarray,
+                       link_budget_model: bool,
                        grid_func,
                        **kwargs):
     """
@@ -1058,7 +1082,8 @@ def process_drone_mesh(*,
                                                                   dist_comm=dist_comm,
                                                                   margin_loss_db= margin_loss_db,
                                                                   eta=metadata["ETA_STRICT"],
-                                                                  snr_eff=metadata["SNR_EFF_STRICT"])
+                                                                  snr_eff=metadata["SNR_EFF_STRICT"],
+                                                                  use_lookup_table=link_budget_model)
 
                 # Make array of all link counts for partial drone mesh
                 total_link_count_dropout.append(link_count_dropout)
@@ -1114,7 +1139,8 @@ def process_drone_mesh(*,
                                                   dist_comm=dist_comm,
                                                   margin_loss_db= margin_loss_db,
                                                   eta=metadata["ETA_STRICT"],
-                                                  snr_eff=metadata["SNR_EFF_STRICT"])
+                                                  snr_eff=metadata["SNR_EFF_STRICT"],
+                                                  use_lookup_table=link_budget_model)
 
         # Add number drones used in full mesh to metadata
         metadata[f"{grid_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
@@ -1221,6 +1247,8 @@ def inputs_define(*,
             desired_bandwidth_Mhz=desired_bandwidth_Mhz,
             desired_rate_Mbps=data_rate_Mbps,
             lookup_table = lookup_table)
+        
+        use_lookup_table = True
 
     elif link_budget_model== 2:
 
@@ -1239,6 +1267,7 @@ def inputs_define(*,
             wireless_prefix=wireless_prefix
         )
 
+        use_lookup_table = False
     else:
         print("No this is not a possible link budget")
         exit()  
@@ -1250,7 +1279,7 @@ def inputs_define(*,
         margin_loss_db=metadata["MARGIN_LOSS"]
     )
 
-    return dist_comm
+    return dist_comm,use_lookup_table
 
 def main():
     ###############################################################################
@@ -1346,7 +1375,7 @@ def main():
     print()
 
     if wifi_module == 1:
-        dist_comm = inputs_define(test_grid_meta_prefix = test_grid_meta_prefix,
+        dist_comm,use_lookup_table = inputs_define(test_grid_meta_prefix = test_grid_meta_prefix,
                       wireless_prefix=wireless_prefix,
                       lookup_table=lookup_table_wifi7_eht_GI0_8_OFDM,
                       lookup_table_name = "WIFI_7_GI0_8_OFDM",
@@ -1356,7 +1385,7 @@ def main():
 
 
     elif wifi_module == 2:
-        dist_comm = inputs_define(test_grid_meta_prefix = test_grid_meta_prefix,
+        dist_comm,use_lookup_table = inputs_define(test_grid_meta_prefix = test_grid_meta_prefix,
                       wireless_prefix=wireless_prefix,
                       lookup_table=lookup_table_halow_module_MM8108,
                       lookup_table_name = "WIFI_HALOW_MM8108",
@@ -1441,6 +1470,7 @@ def main():
                        hist_plot= True,
                        margin_loss_db=margin_loss_db,
                        device_grid=device_grid,
+                       link_budget_model = use_lookup_table,
                        grid_func=test_grid_func,
                     )
 
