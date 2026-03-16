@@ -577,11 +577,13 @@ def plot_drone_positions(*,
                          device_positions: np.ndarray,
                          distance: float,
                          dist_comm: float,
+                         thresholds_phyrate: list[float],
                          dist_device_to_drone: np.ndarray,
                          links: list,
                          eta: float,
                          snr_eff: float,
                          file_folder_path: str,
+                         use_lookup_table: bool,
                          font_size: float = 8.0):
 
     fig, ax_drone_pos = plt.subplots()
@@ -611,13 +613,80 @@ def plot_drone_positions(*,
     # print(dist_device_to_drone)
     #print(rates_for_devices)
 
-    for _, node in enumerate(nodes):
-        x = node.x
-        y = node.y
+    rate_ranges = []
 
-        # Draw communcation dist_comm as circle
-        circle = plt.Circle((x, y), dist_comm, fill=True, facecolor='blue', edgecolor='black', alpha=0.1)
-        ax_drone_pos.add_patch(circle)
+    for key, value in metadata.items():
+        if key.lower().endswith("_mbps_range"):
+            rate = float(key.split("_")[0])
+            rate_ranges.append((rate, value))
+
+    rate_ranges.sort(key=lambda x: x[0])
+
+    threshold_distances = []
+    matched_rates = []
+    if use_lookup_table == True:
+        for threshold in thresholds_phyrate:
+            chosen_range = None
+            for rate, rng in rate_ranges:
+                if threshold <= rate:   # round up to next supported rate
+                    chosen_range = rng
+                    chosen_rate = rate
+                    break
+
+            # if threshold larger than all available rates
+            if chosen_range is None:
+                chosen_rate, chosen_range = rate_ranges[-1]
+
+            threshold_distances.append(chosen_range)
+            matched_rates.append(chosen_rate)
+        thresholds_phyrate = matched_rates
+    else:
+        threshold_sensivities = [ shannon(
+                metadata=metadata,
+                data_rate_Mbps=threshold,
+                bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+                noise_figure_db=3,
+                eta=metadata["ETA_STRICT"],
+                snr_eff=metadata["SNR_EFF_STRICT"],
+                wireless_prefix=wireless_prefix
+            )
+            for threshold in thresholds_phyrate 
+            ]
+        
+        threshold_distances= [ dist_comm_calc(
+            transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+            received_power_dbm=threshold_sensivity,
+            freq_Mhz=metadata["FREQ_MHZ"],
+            margin_loss_db=metadata["MARGIN_LOSS"]
+        ) 
+        for threshold_sensivity in threshold_sensivities
+        ]
+
+    # assign colors (can be longer than three thresholds)
+    cmap = plt.get_cmap('viridis')
+    n_thresh = len(threshold_distances)
+    if n_thresh == 1:
+        threshold_colors = [cmap(0.5)]
+    else:
+        threshold_colors = [cmap(i/(n_thresh-1)) for i in range(n_thresh)]
+
+    sorted_thresh = sorted(zip(threshold_distances, thresholds_phyrate, threshold_colors),
+                           key=lambda x: x[0], reverse=True)
+    legend_handles = []
+   # draw smallest circles first (so bigger circles are underneath)
+    for dist, rate, color in sorted_thresh:
+        for node in nodes:
+            x, y = node.x, node.y
+            label = f"{rate:.2f} Mbps ({dist:.1f} m)"
+            circle = plt.Circle(
+                (x, y),
+                dist,
+                fill=True,
+                facecolor=color,
+                alpha=1
+            )
+            ax_drone_pos.add_patch(circle)
+            legend_handles.append(circle)
 
     if len(x_device_pos) == 1:
         title_text = (
@@ -637,7 +706,14 @@ def plot_drone_positions(*,
     ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
     ax_drone_pos.set_ylabel("[m]", fontsize=font_size)
     ax_drone_pos.set_aspect('equal', 'box')
+    ax_drone_pos.set_xlim(-10000, 40000)
+    ax_drone_pos.set_ylim(-5000, 15000)
     ax_drone_pos.tick_params(axis='both', labelsize=font_size)
+    # Create legend handles for the legend only
+    for dist, rate, color in sorted_thresh:
+        ax_drone_pos.scatter([], [], color=color, alpha=0.3,
+                            label=f"{rate:.2f} Mbps ({dist:.1f} m)")
+    ax_drone_pos.legend(title="Thresholds", loc='upper right', fontsize=8)
 
     file_path = os.path.join(file_folder_path, file_name)
     fig.savefig(file_path, dpi=300, bbox_inches='tight')
@@ -1127,11 +1203,13 @@ def process_drone_mesh(*,
                                  device_positions=device_grid,
                                  distance=drone_distance,
                                  dist_comm=dist_comm,
+                                 thresholds_phyrate = [20, 10, 1],
                                  dist_device_to_drone=dist_device_to_drone,
                                  links=link_list_dropout,
                                  eta=metadata["ETA_STRICT"],
                                  snr_eff=metadata["SNR_EFF_STRICT"],
-                                 file_folder_path=dir_origin_partial_plots)
+                                 file_folder_path=dir_origin_partial_plots,
+                                 use_lookup_table=link_budget_model)
 
         # Make node and link list for full drone mesh
         node_list_all = node_list(drone_positions=all_drone_positions)
@@ -1173,11 +1251,13 @@ def process_drone_mesh(*,
                              device_positions=device_grid,
                              distance=drone_distance,
                              dist_comm=dist_comm,
+                             thresholds_phyrate = [20, 10, 1],
                              dist_device_to_drone=dist_device_to_drone,
                              links=link_list_all,
                              eta=metadata["ETA_STRICT"],
                              snr_eff=metadata["SNR_EFF_STRICT"],
-                             file_folder_path=dir_origin_full_plots)
+                             file_folder_path=dir_origin_full_plots,
+                             use_lookup_table=link_budget_model)
 
     with open(os.path.join(dir_origin, "metadata.json"), "w") as f:
         json.dump(metadata, f)
@@ -1303,7 +1383,6 @@ def main():
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
 
-
     # for either wifi halow, or wifi 7
     # REMEMBER TO CHECK THIS SO RIGHT TO DATASHEET, IF CHECKING FIT
 
@@ -1400,8 +1479,9 @@ def main():
 
 
     print(f"The range is calculate to be {dist_comm} [m]")
-
-
+    if use_lookup_table == True:
+        print()
+        print("Warning: using low/mid/high thresholds from lookup table")
 
     # have to be after dont overate datarate in metadata
     '''
