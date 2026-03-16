@@ -523,13 +523,14 @@ def link_list(*,
                         rate = float(key.split("_")[0])
                         rate_ranges.append((rate, value))
 
-                rate_ranges.sort(key=lambda x: x[1],reverse=True)  # sort by range
-
+                rate_ranges.sort(key=lambda x: x[0], reverse=True)
                 data_rate_mbps = 0
                 # find correct rate
+
                 for rate, rng in rate_ranges:
                     if distances <= rng**2:
                         data_rate_mbps = rate
+                        break
 
             link = Link(source=source.id,
                             target=target.id,
@@ -922,7 +923,7 @@ def graph_range_phyrate(metadata: dict,
             "Deviation Strict (m)": f"{deviation_strict:.2f}",
         })
         if save_ranges == True:
-            metadata[f"{y:.2f}_Mbps_range"] = z_strict
+            metadata[f"{y:.2f}_Mbps_range"] = x
 
     # averages
     avg_deviation_opt = total_deviation_opt / len(dist_comms)
