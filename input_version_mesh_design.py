@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 import math
 import os
 import pandas as pd
@@ -582,6 +583,7 @@ def plot_drone_positions(*,
                          links: list,
                          eta: float,
                          snr_eff: float,
+                         dim: tuple [float,float],
                          file_folder_path: str,
                          use_lookup_table: bool,
                          font_size: float = 8.0):
@@ -687,7 +689,9 @@ def plot_drone_positions(*,
             )
             ax_drone_pos.add_patch(circle)
             legend_handles.append(circle)
-
+    length, width = dim
+    square = Rectangle((0, 0),length, width, edgecolor='white', fill=False)
+    ax_drone_pos.add_patch(square)
     if len(x_device_pos) == 1:
         title_text = (
         f"{title_name}\n"
@@ -713,7 +717,12 @@ def plot_drone_positions(*,
     for dist, rate, color in sorted_thresh:
         ax_drone_pos.scatter([], [], color=color, alpha=0.3,
                             label=f"{rate:.2f} Mbps ({dist:.1f} m)")
-    ax_drone_pos.legend(title="Thresholds", loc='upper right', fontsize=8)
+    ax_drone_pos.legend(
+            title="Thresholds",
+            loc='upper left',
+            bbox_to_anchor=(1.02, 1),
+            fontsize=8
+    )
 
     file_path = os.path.join(file_folder_path, file_name)
     fig.savefig(file_path, dpi=300, bbox_inches='tight')
@@ -1208,6 +1217,7 @@ def process_drone_mesh(*,
                                  links=link_list_dropout,
                                  eta=metadata["ETA_STRICT"],
                                  snr_eff=metadata["SNR_EFF_STRICT"],
+                                 dim= dim,
                                  file_folder_path=dir_origin_partial_plots,
                                  use_lookup_table=link_budget_model)
 
@@ -1256,6 +1266,7 @@ def process_drone_mesh(*,
                              links=link_list_all,
                              eta=metadata["ETA_STRICT"],
                              snr_eff=metadata["SNR_EFF_STRICT"],
+                             dim= dim,
                              file_folder_path=dir_origin_full_plots,
                              use_lookup_table=link_budget_model)
 
@@ -1377,7 +1388,7 @@ def main():
 
     test_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05, 0.1, 0.05)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_rates = np.arange(0.05, 0.3, 0.05)      #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 10                          # number of iterations for each dropout rate (used for histogram)
     
     # wireless communication parameters for MM8108-MF15457 lookup table
@@ -1481,7 +1492,7 @@ def main():
     print(f"The range is calculate to be {dist_comm} [m]")
     if use_lookup_table == True:
         print()
-        print("Warning: using low/mid/high thresholds from lookup table")
+        print("Warning: using rounded to reference thresholds from lookup table")
 
     # have to be after dont overate datarate in metadata
     '''
