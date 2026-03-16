@@ -137,14 +137,15 @@ def get_halow_module_MM8108_params(*,
                                    metadata: dict,
                                    wireless_prefix: str ="",
                                    desired_bandwidth_Mhz,
-                                   desired_rate_Mbps):
+                                   desired_rate_Mbps,
+                                   lookup_table):
     # Find closest available bandwidth
-    available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
+    available_bandwidth = np.array(list(lookup_table.keys()))
     bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
     closest_bandwidth = int(available_bandwidth[bandwidth_index])
 
     # Get all MCS schemes for that bandwidth
-    schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
+    schemes = lookup_table[closest_bandwidth].values()
 
     # Find the sorted_scheme with data_rate closest to desired_rate_Mbps
     sorted_schemes = sorted(schemes, key=lambda s: abs(s['data_rate'] - desired_rate_Mbps))
