@@ -14,7 +14,8 @@ from mesh_design_lib import data_rate_given_dist_comm
 sys.path.append('meshnet-lab/')
 import software as mn_software
 import network as mn_network
-from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals
+from network import mtu
+from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals, get_thread_id, exec
 
 # Create list of tcpdump processes
 tcpdump_procs = []
@@ -102,6 +103,18 @@ def start_tcpdump(node_name: str, ifname: str, out_dir: str):
 
     tcpdump_procs.append(proc)
 
+def ipv4_addr(device_name: str):
+    assert device_name.startswith("d"), "expects somewhat valid-looking device name (for example d0)"
+
+    lsb = int(device_name.strip("d"))+10
+    
+    assert lsb < 255, "too many devices. increase size of lab subnet"
+
+    device_ip_addr = f"10.200.100.{lsb}"
+
+    # (ip, subnet bits)
+    return device_ip_addr, 24
+
 def find_closest_node(this: dict, others: list[dict]):
 
     min_dist_sq = None
@@ -125,11 +138,50 @@ def find_closest_node(this: dict, others: list[dict]):
 
     return closest, min_dist_sq
 
-def place_test_devices(graph: dict, dev_coords: list[tuple[float, float, float]]):
+def create_device(name: str, adapter_name: str):
+    nsname = f"ns-{name}"
+    nsname_adapter = f"ns-{adapter_name}"
+    tid = get_thread_id()
+    remote = None
+    upname = "veth0"
+    downname = "lan0"
+    brname = "br-lan"
+
+    exec(tid, remote, f'ip netns add "{nsname}"')
+    exec(tid, remote, f'ip netns exec "{nsname}" ip link set dev "lo" up')
+
+    # create interface pair in device namespace
+    exec(tid, remote, f'ip netns exec "{nsname}" ip link add name "{upname}" type veth peer name "{downname}"')
+
+    # move downlink from device namespace to adapter namespace
+    exec(tid, remote, f'ip netns exec "{nsname}" ip link set "{downname}" netns "{nsname_adapter}"')
+
+    # create bridge in adapter namespace
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link add name "{brname}" type bridge')
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{brname}" up mtu {mtu}')
+
+    # disable spanning tree protocol (should be off by default anyway)
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set "{brname}" type bridge stp_state 0')
+
+    # make the bridge to act as a hub
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set "{brname}" type bridge ageing_time 0')
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set "{brname}" type bridge forward_delay 0')
+
+    # put ifaces into bridge
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set "{downname}" master "{brname}"')
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set "bat0" master "{brname}"')
+
+    device_ip_addr, subnet_bits = ipv4_addr(name)
+    # bring ifaces up
+    exec(tid, remote, f'ip netns exec "{nsname}" ip addr add "{device_ip_addr}/{subnet_bits}" dev "{upname}"')
+    exec(tid, remote, f'ip netns exec "{nsname}" ip link set dev "{upname}" up mtu {mtu}')
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{downname}" up mtu {mtu}')
+
+def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]]):
     devs = []
     for i, (x, y, z) in enumerate(dev_coords):
         dev = {
-            "id": f"d{i}",
+            "id": f"a{i}",
             "x": round(x, 2),
             "y": round(y, 2),
             "z": round(z, 2),
@@ -171,7 +223,7 @@ def main():
     with open(args.graph) as f:
         graph = json.load(f)
 
-    place_test_devices(graph, [(0, 0, 0), (25000, 9000, 3000)])
+    place_test_adapters(graph, [(0, 0, 0), (25000, 9000, 3000)])
     if verbosity == "verbose":
         print("graph")
         pprint(graph)
@@ -184,12 +236,18 @@ def main():
     rmap = get_remote_mapping([Remote()]) # running everything locally
     all_ids = rmap.keys()
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
-    device_ids = list(filter(lambda x: x.startswith("d"), all_ids))
+    adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
 
     if verbosity != "quiet":
-        print(f"Running simulation on {len(drone_ids)} drones and {len(device_ids)} devices")
+        print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
 
     mn_software._start_protocol("batman-adv", rmap, drone_ids)
+    mn_software._start_protocol("batman-adv", rmap, adapter_ids)
+
+    # add devices
+    for adapter_id in adapter_ids:
+        device_id = adapter_id.replace("a", "d")
+        create_device(device_id, adapter_id)
 
     # Start tcpdump for each node
     for id in all_ids:
