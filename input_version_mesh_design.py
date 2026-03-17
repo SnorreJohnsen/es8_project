@@ -1,6 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
+from collections import defaultdict
 import math
 import os
 import pandas as pd
@@ -729,6 +732,81 @@ def plot_drone_positions(*,
 
     plt.close(fig)
 
+def plot_drone_links(*,
+                         title_name: str,
+                         file_name: str,
+                         nodes: list,
+                         links: list,
+                         file_folder_path: str,
+                         font_size: float = 8.0):
+
+    
+    # ------------------------------
+    # Example setup:
+    # nodes = list of objects with .id, .x, .y
+    # links = list of objects with .source, .target, .bandwidth_mbit
+    # ------------------------------
+
+    # Pick one source node to focus on
+    source_node = "n0"  # replace with the source you want
+
+    # Filter links for this source
+    source_links = [link for link in links if link.source == source_node]
+
+    # Extract positions
+    x_pos = [node.x for node in nodes]
+    y_pos = [node.y for node in nodes]
+    node_dict = {node.id: (node.x, node.y) for node in nodes}
+
+    # Prepare bandwidth for coloring
+    all_bw = [float(link.bandwidth_mbit) for link in source_links]
+    norm = mcolors.Normalize(vmin=min(all_bw), vmax=max(all_bw))
+    cmap = plt.cm.viridis
+
+    fig, ax = plt.subplots(figsize=(16,9))
+    for link in sorted(source_links, key=lambda l: float(l.bandwidth_mbit)):
+        src = link.source
+        tgt = link.target
+        bw = float(link.bandwidth_mbit)
+        if bw != 0:
+            x1, y1 = node_dict[src]
+            x2, y2 = node_dict[tgt]
+            color = cmap(norm(bw))
+
+            # if abs(y1 - y2) < 1e-6:
+            #     conn_style = 'arc3,rad=0.15'
+            # else:
+            #     conn_style = 'arc3,rad=0.0'
+
+            ax.annotate(
+                '',
+                xy=(x2, y2),
+                xytext=(x1, y1),
+                arrowprops=dict(
+                    arrowstyle='->',
+                    color=color,
+                    lw=2,
+                    # connectionstyle=conn_style
+                )
+            )
+
+    # Draw nodes
+    ax.scatter(x_pos, y_pos, color='red', s=20)
+
+    # Optional colorbar
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax)
+    cbar.set_label("Bandwidth (Mbit)")
+    ax.set_xlabel("[m]", fontsize=font_size)
+    ax.set_ylabel("[m]", fontsize=font_size)
+    ax.set_aspect('equal', 'box')
+
+    file_path = os.path.join(file_folder_path, file_name)
+    fig.savefig(file_path, dpi=300, bbox_inches='tight')
+
+    plt.close(fig)
+
 def plot_histogram_drone_links(*,
                                file_name: str,
                                title_name: str,
@@ -1220,6 +1298,11 @@ def process_drone_mesh(*,
                                  dim= dim,
                                  file_folder_path=dir_origin_partial_plots,
                                  use_lookup_table=link_budget_model)
+            plot_drone_links(title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                             file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
+                             nodes=node_list_dropout,
+                             links=link_list_dropout,
+                             file_folder_path=dir_origin_partial_plots)
 
         # Make node and link list for full drone mesh
         node_list_all = node_list(drone_positions=all_drone_positions)
@@ -1269,6 +1352,12 @@ def process_drone_mesh(*,
                              dim= dim,
                              file_folder_path=dir_origin_full_plots,
                              use_lookup_table=link_budget_model)
+        
+        plot_drone_links(title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                        file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
+                        nodes=node_list_all,
+                        links=link_list_all,
+                        file_folder_path=dir_origin_full_plots)
 
     with open(os.path.join(dir_origin, "metadata.json"), "w") as f:
         json.dump(metadata, f)
@@ -1423,8 +1512,6 @@ def main():
     # lookup_table_name = "WIFI_7_GI0_8_OFDM"
     # lookup_table = lookup_table_wifi7_eht_GI0_8_OFDM
     
-
-
     margin_loss_db = 3                                  # safety variable for "other" losses
 
 
