@@ -223,7 +223,7 @@ def main():
     with open(args.graph) as f:
         graph = json.load(f)
 
-    place_test_adapters(graph, [(0, 0, 0), (25000, 9000, 3000)])
+    place_test_adapters(graph, [(0, 0, 0), (1000, 1000, 1000), (12000, 5000, 1500), (25000, 9000, 3000)])
     if verbosity == "verbose":
         print("graph")
         pprint(graph)
@@ -244,10 +244,11 @@ def main():
     mn_software._start_protocol("batman-adv", rmap, drone_ids)
     mn_software._start_protocol("batman-adv", rmap, adapter_ids)
 
-    # add devices
+    # add devices and start tcpdump
     for adapter_id in adapter_ids:
         device_id = adapter_id.replace("a", "d")
         create_device(device_id, adapter_id)
+        start_tcpdump(device_id, "veth0", pcap_dir)
 
     # Start tcpdump for each node
     for id in all_ids:
