@@ -2,10 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import matplotlib.colors as mcolors
-import matplotlib.cm as cm
-from collections import defaultdict
 import math
 import os
+import random
 import pandas as pd
 from tqdm import tqdm
 from collections import Counter
@@ -738,19 +737,34 @@ def plot_drone_links(*,
                          nodes: list,
                          links: list,
                          file_folder_path: str,
+                         source_node: str = "",
+                         threshold_phyrate_links: float = 0.0,
                          font_size: float = 8.0):
+    id_pos = [node.id for node in nodes]
 
-    
-    # ------------------------------
-    # Example setup:
-    # nodes = list of objects with .id, .x, .y
-    # links = list of objects with .source, .target, .bandwidth_mbit
-    # ------------------------------
+    # Case 1: No input, pick randomly
+    if source_node == "":
+        source_node = random.choice(id_pos)
+    else:
+        if source_node in id_pos:
+            pass  # good, source_node is valid
+        else:
+            # Count down until you find an existing ID
+            found = False
+            # Work when ids are set as "n21,22,..."
+            num = int(''.join(filter(str.isdigit, source_node)))
+            prefix = ''.join(filter(str.isalpha, source_node))
+            while num > 0:
+                candidate = f"{prefix}{num}"
+                if candidate in id_pos:
+                    source_node = candidate
+                    found = True
+                    break
+                num -= 1
+            if not found:
+                # Fallback: pick random
+                source_node = random.choice(id_pos)
 
-    # Pick one source node to focus on
-    source_node = "n0"  # replace with the source you want
-
-    # Filter links for this source
     source_links = [link for link in links if link.source == source_node]
 
     # Extract positions
@@ -768,16 +782,10 @@ def plot_drone_links(*,
         src = link.source
         tgt = link.target
         bw = float(link.bandwidth_mbit)
-        if bw != 0:
+        if bw > threshold_phyrate_links:
             x1, y1 = node_dict[src]
             x2, y2 = node_dict[tgt]
             color = cmap(norm(bw))
-
-            # if abs(y1 - y2) < 1e-6:
-            #     conn_style = 'arc3,rad=0.15'
-            # else:
-            #     conn_style = 'arc3,rad=0.0'
-
             ax.annotate(
                 '',
                 xy=(x2, y2),
@@ -785,8 +793,7 @@ def plot_drone_links(*,
                 arrowprops=dict(
                     arrowstyle='->',
                     color=color,
-                    lw=2,
-                    # connectionstyle=conn_style
+                    lw=2
                 )
             )
 
@@ -798,6 +805,13 @@ def plot_drone_links(*,
     sm.set_array([])
     cbar = plt.colorbar(sm, ax=ax)
     cbar.set_label("Bandwidth (Mbit)")
+
+    title_text = (
+    f"{title_name}\n"
+    f"Drones = {len(nodes)}, Selected source node: {source_node} \n"
+    f"Showing links with Phyrates above {threshold_phyrate_links} Mbps"
+    )
+    ax.set_title(title_text, fontsize=font_size*2, fontweight='bold')
     ax.set_xlabel("[m]", fontsize=font_size)
     ax.set_ylabel("[m]", fontsize=font_size)
     ax.set_aspect('equal', 'box')
@@ -1207,6 +1221,10 @@ def process_drone_mesh(*,
     data_rate_Mbps = metadata[f"{wireless_prefix}DATA_RATE"] 
     bandwidth_Mhz = metadata[f"{wireless_prefix}BANDWIDTH"]
 
+    # For plotting parameters set in Mbps
+    thresholds_phyrate_heatmap = [20, 10, 1]
+    threshold_phyrate_links = 0
+
     # For loop over number of tolerances
     for i in range(len(tolerances)):
 
@@ -1290,7 +1308,7 @@ def process_drone_mesh(*,
                                  device_positions=device_grid,
                                  distance=drone_distance,
                                  dist_comm=dist_comm,
-                                 thresholds_phyrate = [20, 10, 1],
+                                 thresholds_phyrate = thresholds_phyrate_heatmap,
                                  dist_device_to_drone=dist_device_to_drone,
                                  links=link_list_dropout,
                                  eta=metadata["ETA_STRICT"],
@@ -1302,6 +1320,8 @@ def process_drone_mesh(*,
                              file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
                              nodes=node_list_dropout,
                              links=link_list_dropout,
+                             source_node="n0",
+                             threshold_phyrate_links= threshold_phyrate_links,
                              file_folder_path=dir_origin_partial_plots)
 
         # Make node and link list for full drone mesh
@@ -1344,7 +1364,7 @@ def process_drone_mesh(*,
                              device_positions=device_grid,
                              distance=drone_distance,
                              dist_comm=dist_comm,
-                             thresholds_phyrate = [20, 10, 1],
+                             thresholds_phyrate = thresholds_phyrate_heatmap,
                              dist_device_to_drone=dist_device_to_drone,
                              links=link_list_all,
                              eta=metadata["ETA_STRICT"],
@@ -1357,6 +1377,8 @@ def process_drone_mesh(*,
                         file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
                         nodes=node_list_all,
                         links=link_list_all,
+                        source_node="n0",
+                        threshold_phyrate_links=threshold_phyrate_links,
                         file_folder_path=dir_origin_full_plots)
 
     with open(os.path.join(dir_origin, "metadata.json"), "w") as f:
@@ -1477,9 +1499,9 @@ def main():
 
     test_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05, 0.3, 0.05)      #dropout rate in percentage (min, max, stepsize)
+    test_dropout_rates = np.arange(0.05,0.3,0.05) #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 10                          # number of iterations for each dropout rate (used for histogram)
-    
+
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
 
