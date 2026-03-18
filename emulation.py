@@ -17,11 +17,16 @@ import network as mn_network
 from network import mtu
 from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals, get_thread_id, exec
 
-# Create list of tcpdump processes
+# List of processes for termination end of script
 tcpdump_procs = []
+iperf3_servers = []
 
+# Directories for outputs
+iperf3_dir = os.path.join("iperf3", "raw")
 pcap_dir = os.path.join("pcaps", "raw")
 
+# Global variables
+IPERF3_REF_PORT = 60000 # start port for iperf3
 
 def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
     """
@@ -96,10 +101,10 @@ def start_tcpdump(node_name: str, ifname: str, out_dir: str):
         print(" ".join(cmd))
 
     proc = subprocess.Popen(cmd,
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       start_new_session=True,
-                       close_fds=True)
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True,
+                            close_fds=True)
 
     tcpdump_procs.append(proc)
 
@@ -114,6 +119,65 @@ def ipv4_addr(device_name: str):
 
     # (ip, subnet bits)
     return device_ip_addr, 24
+
+def stop_all_iperf3_servers():
+    sigint_all(iperf3_servers)
+
+def run_iperf3_server(server_name: str):
+    server_num = int(server_name.strip("d"))
+    server_port = IPERF3_REF_PORT + server_num
+
+    server_cmd = ["ip", "netns", "exec", f"ns-{server_name}", 
+                  "iperf3", "-s", "-p", str(server_port)]
+    server_proc = subprocess.Popen(server_cmd,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+
+    iperf3_servers.append(server_proc)
+
+    if verbosity == "verbose":
+        print(f"run_iperf3_server({server_name=})")
+        print(" ".join(server_cmd))
+
+def run_iperf3_client(server_name: str,
+                      client_name: str,
+                      out_dir: str, 
+                      duration: float = 5, 
+                      udp: bool = False, 
+                      bitrate: str = ''):
+
+    # extract ip and port from server device
+    server_num = int(server_name.strip("d"))
+    server_port = IPERF3_REF_PORT + server_num
+    server_ip = f"10.200.100.{server_num+10}"
+
+    client_cmd = ["ip", "netns", "exec", f"ns-{client_name}",
+                  "iperf3", "-c", server_ip, "-p", str(server_port), "-t", str(duration), "--json"]
+
+    if verbosity == "verbose":
+        print(f"run_iperf3_client({server_name=}, {client_name=}, {out_dir=})")
+        print(" ".join(client_cmd))
+
+    # UDP option
+    if udp:
+        client_cmd += ["-u"]
+        if bitrate != '':
+            client_cmd += ["-b", bitrate]
+
+    # bitrate option if UDP was not chosen this is used for TCP
+    elif bitrate != '':
+        client_cmd += ["--bitrate", bitrate]
+
+    client_proc = subprocess.run(client_cmd,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    text=True,
+                                    start_new_session=True,
+                                    close_fds=True)
+
+    iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}.json")
+    with open(iperf3_path, "w") as f:
+        f.write(client_proc.stdout)
 
 def find_closest_node(this: dict, others: list[dict]):
 
@@ -138,7 +202,7 @@ def find_closest_node(this: dict, others: list[dict]):
 
     return closest, min_dist_sq
 
-def create_device(name: str, adapter_name: str):
+def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     nsname = f"ns-{name}"
     nsname_adapter = f"ns-{adapter_name}"
     tid = get_thread_id()
@@ -175,7 +239,7 @@ def create_device(name: str, adapter_name: str):
     # bring ifaces up
     exec(tid, remote, f'ip netns exec "{nsname}" ip addr add "{device_ip_addr}/{subnet_bits}" dev "{upname}"')
     exec(tid, remote, f'ip netns exec "{nsname}" ip link set dev "{upname}" up mtu {mtu}')
-    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{downname}" up mtu {mtu}')
+    exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{downname}" up mtu {mtu}') 
 
 def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]]):
     devs = []
@@ -223,7 +287,12 @@ def main():
     with open(args.graph) as f:
         graph = json.load(f)
 
-    place_test_adapters(graph, [(0, 0, 0), (1000, 1000, 1000), (12000, 5000, 1500), (25000, 9000, 3000)])
+    adapter_pos = [(0.0, 0.0, 0.0), 
+                   (1000.0, 10000.0, 10000.0), 
+                   (12000.0, 5000.0, 1500.0), 
+                   (25000.0, 9000.0, 3000.0)]
+
+    place_test_adapters(graph, adapter_pos)
     if verbosity == "verbose":
         print("graph")
         pprint(graph)
@@ -244,10 +313,13 @@ def main():
     mn_software._start_protocol("batman-adv", rmap, drone_ids)
     mn_software._start_protocol("batman-adv", rmap, adapter_ids)
 
+    time.sleep(30) # wait for batman to be ready
+
     # add devices and start tcpdump
     for adapter_id in adapter_ids:
         device_id = adapter_id.replace("a", "d")
         create_device(device_id, adapter_id)
+        time.sleep(0.1) # wait for device creation otherwise tcpdump wont capture
         start_tcpdump(device_id, "veth0", pcap_dir)
 
     # Start tcpdump for each node
@@ -255,8 +327,15 @@ def main():
         start_tcpdump(id, "uplink", pcap_dir)
 
     time.sleep(2)  # allow to launch tcpdumps
-    input("Press Enter to continue")
 
+    # run_iperf3(src_name="d1", dst_name="d0", out_dir=iperf3_file_path, duration=5)
+    run_iperf3_server(server_name="d0")
+    time.sleep(5) # wait for iperf3 servers to start
+    run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5)
+
+    input("Press Enter to end emulation")
+
+    stop_all_iperf3_servers()
     stop_all_tcpdump()
     stop_all_terminals()
 
