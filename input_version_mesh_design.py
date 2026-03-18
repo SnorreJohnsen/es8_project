@@ -481,6 +481,7 @@ def link_list(*,
               margin_loss_db: float,
               eta: float = 0.79,
               snr_eff: float = 0.14,
+              threshold_link: float = 0,
               use_lookup_table: bool = False) -> list[Link]:
 
     """
@@ -534,16 +535,16 @@ def link_list(*,
                     if distances <= rng**2:
                         data_rate_mbps = rate
                         break
+            if data_rate_mbps > threshold_link:
+                link = Link(source=source.id,
+                                target=target.id,
+                                bandwidth_mbit=f"{data_rate_mbps:.2f}")
+                            #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
+                links.append(link)
 
-            link = Link(source=source.id,
-                            target=target.id,
-                            bandwidth_mbit=f"{data_rate_mbps:.2f}")
-                        #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
-            links.append(link)
-
-            if distances <= (dist_comm + 1)**2:
-            # Count how many are within dist_comm (exclude itself)
-                count = count + 1
+                if distances <= (dist_comm + 1)**2:
+                # Count how many are within dist_comm (exclude itself)
+                    count = count + 1
 
         num_links.append(count)
     return links, num_links
@@ -570,6 +571,14 @@ def make_json_network(*,
 ###############################################################################
 #___________________________ PLOT FUNCITONS __________________________________#
 ###############################################################################
+
+def scale_alpha(rate,min_rate,max_rate):
+    min_alpha = 0.1
+    max_alpha = 0.4
+    if max_rate == min_rate:
+        return 0.5  # fallback if all rates are equal
+    norm = (rate - min_rate) / (max_rate - min_rate)
+    return min_alpha + norm * (max_alpha - min_alpha)
 
 def plot_drone_positions(*,
                          meta_prefix: str = "",
@@ -672,13 +681,20 @@ def plot_drone_positions(*,
     if n_thresh == 1:
         threshold_colors = [cmap(0.5)]
     else:
-        threshold_colors = [cmap(i/(n_thresh-1)) for i in range(n_thresh)]
+        threshold_colors = [cmap(1 - i/(n_thresh-1)) for i in range(n_thresh)]
 
     sorted_thresh = sorted(zip(threshold_distances, thresholds_phyrate, threshold_colors),
                            key=lambda x: x[0], reverse=True)
     legend_handles = []
-   # draw smallest circles first (so bigger circles are underneath)
+
+    min_rate = min(thresholds_phyrate)
+    max_rate = max(thresholds_phyrate)
+
+
+    # draw smallest circles first (so bigger circles are underneath)
     for dist, rate, color in sorted_thresh:
+        # to be able to see overlap, remove and set alpha = 1 and remove linewidth to get pure heatmap
+        alpha = scale_alpha(rate,min_rate,max_rate)
         for node in nodes:
             x, y = node.x, node.y
             label = f"{rate:.2f} Mbps ({dist:.1f} m)"
@@ -687,7 +703,9 @@ def plot_drone_positions(*,
                 dist,
                 fill=True,
                 facecolor=color,
-                alpha=1
+                edgecolor='black',   # edge color
+                linewidth=alpha*2,        # edge thickness
+                alpha=alpha
             )
             ax_drone_pos.add_patch(circle)
             legend_handles.append(circle)
@@ -803,7 +821,7 @@ def plot_drone_links(*,
     # Optional colorbar
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax)
+    cbar = plt.colorbar(sm, ax=ax, shrink=0.5)
     cbar.set_label("Bandwidth (Mbit)")
 
     title_text = (
@@ -820,6 +838,61 @@ def plot_drone_links(*,
     fig.savefig(file_path, dpi=300, bbox_inches='tight')
 
     plt.close(fig)
+
+def link_matrix(links: list,
+                nodes:list,
+                file_folder_path: str,
+                file_name: str):
+    node_dict = {node.id: (node.x, node.y) for node in nodes}
+    node_ids = sorted(node_dict, key=lambda x: int(x[1:]))
+
+    link_lookup = {(link.source, link.target): float(link.bandwidth_mbit) for link in links}
+
+    # colormap
+    all_bw = [float(link.bandwidth_mbit) for link in links]
+    norm = mcolors.Normalize(vmin=min(all_bw), vmax=max(all_bw))
+    cmap = plt.cm.viridis
+
+    # Build data
+    data = []
+    row_labels = []
+    col_labels = []
+
+    for nid in node_ids:
+        x, y = node_dict[nid]
+        col_labels.append(f"{nid}")
+
+    for src_id in node_ids:
+        x, y = node_dict[src_id]
+        row_labels.append(f"{src_id}")
+        row = []
+        for tgt_id in node_ids:
+            if src_id == tgt_id:
+                row.append(np.nan)  # diagonal
+            else:
+                bw = link_lookup.get((src_id, tgt_id), np.nan)
+                if bw == 0.0:
+                    bw = np.nan
+                row.append(bw)
+        data.append(row)
+
+    df = pd.DataFrame(data, index=row_labels, columns=col_labels)
+
+    # Create LaTeX strings 
+    def latex_cell(val):
+        if pd.isna(val):
+            return r"\cellcolor[RGB]{200,200,200}"  # diagonal or missing
+        color = cmap(norm(val))
+        r, g, b = int(color[0]*255), int(color[1]*255), int(color[2]*255)
+        return rf"\cellcolor[RGB]{{{r},{g},{b}}} {val:.1f}"
+
+    df_latex = df.map(latex_cell)
+
+    df_latex.to_latex(
+        f"{file_folder_path}{file_name}.tex",
+        escape=False,   # keep \cellcolor commands
+        index=True
+    )
 
 def plot_histogram_drone_links(*,
                                file_name: str,
@@ -1223,7 +1296,11 @@ def process_drone_mesh(*,
 
     # For plotting parameters set in Mbps
     thresholds_phyrate_heatmap = [20, 10, 1]
+    # both for creation of json and also of plotting indivual node links
+    # plot individual node
     threshold_phyrate_links = 0
+    # threshold for link to add to json 
+    threshold_link_mbps = threshold_phyrate_links
 
     # For loop over number of tolerances
     for i in range(len(tolerances)):
@@ -1265,6 +1342,7 @@ def process_drone_mesh(*,
                                                                   margin_loss_db= margin_loss_db,
                                                                   eta=metadata["ETA_STRICT"],
                                                                   snr_eff=metadata["SNR_EFF_STRICT"],
+                                                                  threshold_link=threshold_link_mbps,
                                                                   use_lookup_table=link_budget_model)
 
                 # Make array of all link counts for partial drone mesh
@@ -1323,6 +1401,10 @@ def process_drone_mesh(*,
                              source_node="n0",
                              threshold_phyrate_links= threshold_phyrate_links,
                              file_folder_path=dir_origin_partial_plots)
+            link_matrix(links=link_list_dropout,
+                        nodes=node_list_dropout,
+                        file_folder_path=dir_origin_partial_plots,
+                        file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_Matrix")
 
         # Make node and link list for full drone mesh
         node_list_all = node_list(drone_positions=all_drone_positions)
@@ -1332,6 +1414,7 @@ def process_drone_mesh(*,
                                                   margin_loss_db= margin_loss_db,
                                                   eta=metadata["ETA_STRICT"],
                                                   snr_eff=metadata["SNR_EFF_STRICT"],
+                                                  threshold_link=threshold_link_mbps,
                                                   use_lookup_table=link_budget_model)
 
         # Add number drones used in full mesh to metadata
@@ -1374,12 +1457,16 @@ def process_drone_mesh(*,
                              use_lookup_table=link_budget_model)
         
         plot_drone_links(title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
-                        file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
+                        file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
                         nodes=node_list_all,
                         links=link_list_all,
                         source_node="n0",
                         threshold_phyrate_links=threshold_phyrate_links,
                         file_folder_path=dir_origin_full_plots)
+        link_matrix(links=link_list_all,
+                    nodes=node_list_all,
+                    file_folder_path=dir_origin_full_plots,
+                    file_name=f"{grid_prefix}_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_Matrix")
 
     with open(os.path.join(dir_origin, "metadata.json"), "w") as f:
         json.dump(metadata, f)
