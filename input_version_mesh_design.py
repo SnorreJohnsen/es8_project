@@ -726,7 +726,7 @@ def plot_drone_positions(*,
         f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
         )
     
-    ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold')
+    ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold', x=0.35,pad=15 )  # set a bit to the left and further up
     ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
     ax_drone_pos.set_ylabel("[m]", fontsize=font_size)
     ax_drone_pos.set_aspect('equal', 'box')
@@ -739,9 +739,10 @@ def plot_drone_positions(*,
                             label=f"{rate:.2f} Mbps ({dist:.1f} m)")
     ax_drone_pos.legend(
             title="Thresholds",
-            loc='upper left',
-            bbox_to_anchor=(1.02, 1),
-            fontsize=8
+            loc='lower right',
+            bbox_to_anchor=(1.1, 1.05),
+            fontsize=8,
+            frameon=False               # optional: no box
     )
 
     file_path = os.path.join(file_folder_path, file_name)
