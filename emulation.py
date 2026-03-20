@@ -21,13 +21,10 @@ from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop
 tcpdump_procs = []
 iperf3_servers = []
 
-# Directories for outputs
+# Directory paths for outputs
 output_root = "emulation_output"
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
-
-os.makedirs(iperf3_dir, exist_ok=True)
-os.makedirs(pcap_dir, exist_ok=True)
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
@@ -304,36 +301,39 @@ def main():
     verbosity = args.verbosity
     globalTerminalGroup.setVerbosity(args.verbosity)
 
-    # Delelte pcap directory
+    # Setup output directories
     try:
         shutil.rmtree(pcap_dir)
+        shutil.rmtree(iperf3_dir)
     except FileNotFoundError as e:
         pass
 
-    # make directory for pcap files for all nodes
     os.makedirs(exist_ok=False, name=pcap_dir)
+    os.makedirs(exist_ok=False, name=iperf3_dir)
 
+    # Load mesh json
     if not os.path.isfile(args.graph):
         eprint(f'File not found: {args.graph}')
         exit(1)
     with open(args.graph) as f:
         graph = json.load(f)
 
+    if verbosity == "verbose":
+        print("graph")
+        pprint(graph)
+
+    # Place device adapters
     adapter_pos = [(0.0, 0.0, 0.0), 
                    (1000.0, 10000.0, 10000.0), 
                    (12000.0, 5000.0, 1500.0), 
                    (25000.0, 9000.0, 3000.0)]
-
     place_test_adapters(graph, adapter_pos)
-    if verbosity == "verbose":
-        print("graph")
-        pprint(graph)
 
     # Create network name spaces with links from json graph
     link_command = "tc qdisc add dev {ifname} root netem rate {bandwidth_mbit}mbit"
     mn_network.apply(graph, link_command=link_command)
 
-    # Init batman-adv on all nodes
+    # Init batman-adv on all nodes and adapters
     rmap = get_remote_mapping([Remote()]) # running everything locally
     all_ids = rmap.keys()
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
@@ -347,7 +347,7 @@ def main():
 
     time.sleep(30) # wait for batman to be ready
 
-    # add devices and start tcpdump
+    # Add devices and start tcpdump
     for adapter_id in adapter_ids:
         device_id = adapter_id.replace("a", "d")
         create_device(device_id, adapter_id)
@@ -367,6 +367,8 @@ def main():
     time.sleep(5) # wait for iperf3 servers to start
     run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, bitrate="8M")
     run_iperf3_client(server_name="d2", client_name="d3", out_dir=iperf3_dir, duration=5, udp=True, bitrate="6M")
+
+
 
     input("Press Enter to end emulation")
 
