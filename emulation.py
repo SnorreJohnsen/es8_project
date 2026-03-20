@@ -22,8 +22,12 @@ tcpdump_procs = []
 iperf3_servers = []
 
 # Directories for outputs
-iperf3_dir = os.path.join("iperf3", "raw")
-pcap_dir = os.path.join("pcaps", "raw")
+output_root = "emulation_output"
+iperf3_dir = os.path.join(output_root, "iperf3", "raw")
+pcap_dir = os.path.join(output_root, "pcaps", "raw")
+
+os.makedirs(iperf3_dir, exist_ok=True)
+os.makedirs(pcap_dir, exist_ok=True)
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
@@ -109,6 +113,10 @@ def start_tcpdump(node_name: str, ifname: str, out_dir: str):
     tcpdump_procs.append(proc)
 
 def ipv4_addr(device_name: str):
+    """
+    Create ipv4 address based on device name of form: 10.200.100.10 for d0
+    Return: ipv4 address, subnet bits
+    """
     assert device_name.startswith("d"), "expects somewhat valid-looking device name (for example d0)"
 
     lsb = int(device_name.strip("d"))+10
@@ -124,6 +132,10 @@ def stop_all_iperf3_servers():
     sigint_all(iperf3_servers)
 
 def run_iperf3_server(server_name: str):
+    """
+    Setup an iperf3 server from a device name.
+    Server port is specified from IPERF3_REF_PORT and the device number.
+    """
     server_num = int(server_name.strip("d"))
     server_port = IPERF3_REF_PORT + server_num
 
@@ -145,7 +157,14 @@ def run_iperf3_client(server_name: str,
                       duration: float = 5, 
                       udp: bool = False, 
                       bitrate: str = ''):
+    """
+    Setup iperf3 client to connect to a iperf3 server. 
+    Output client stdout to json file of naming convention {server_name}_{client_name}.json
 
+    duration: time for test [s] (default=5s)
+    udp: flag for choosing UDP test (default TCP)
+    bitrate: max bitrate stream try to achieve (default=none)
+    """
     # extract ip and port from server device
     server_num = int(server_name.strip("d"))
     server_port = IPERF3_REF_PORT + server_num
@@ -153,10 +172,6 @@ def run_iperf3_client(server_name: str,
 
     client_cmd = ["ip", "netns", "exec", f"ns-{client_name}",
                   "iperf3", "-c", server_ip, "-p", str(server_port), "-t", str(duration), "--json"]
-
-    if verbosity == "verbose":
-        print(f"run_iperf3_client({server_name=}, {client_name=}, {out_dir=})")
-        print(" ".join(client_cmd))
 
     # UDP option
     if udp:
@@ -179,8 +194,14 @@ def run_iperf3_client(server_name: str,
     with open(iperf3_path, "w") as f:
         f.write(client_proc.stdout)
 
-def find_closest_node(this: dict, others: list[dict]):
+    if verbosity == "verbose":
+        print(f"run_iperf3_client({server_name=}, {client_name=}, {out_dir=})")
+        print(" ".join(client_cmd))
 
+def find_closest_node(this: dict, others: list[dict]):
+    """
+    Finds closest node in a list of nodes.
+    """
     min_dist_sq = None
     closest = None
     for other in others:
@@ -203,6 +224,13 @@ def find_closest_node(this: dict, others: list[dict]):
     return closest, min_dist_sq
 
 def create_device(name: str, adapter_name: str, create_timeout: float = 10):
+    """
+    Creates device(d) and corresponding namespace with static ipv4 address and connects it to the adapter(a) namespace.
+    Assumes that a{j} is already set up for batman (bat0 exists and is connected to a hard interface)
+    
+    Anatomy: namespace:interface 
+    d{j}:veth0 -> a{j}:lan0 -> a{j}:br-lan -> a{j}:bat0
+    """
     nsname = f"ns-{name}"
     nsname_adapter = f"ns-{adapter_name}"
     tid = get_thread_id()
@@ -242,6 +270,10 @@ def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{downname}" up mtu {mtu}') 
 
 def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]]):
+    """
+    Place adapter at device coordiantes to connect a device to drone(node). 
+    Adapter is connected to the closest drone(node).    
+    """
     devs = []
     for i, (x, y, z) in enumerate(dev_coords):
         dev = {
@@ -330,8 +362,11 @@ def main():
 
     # run_iperf3(src_name="d1", dst_name="d0", out_dir=iperf3_file_path, duration=5)
     run_iperf3_server(server_name="d0")
+    run_iperf3_server(server_name="d2")
+
     time.sleep(5) # wait for iperf3 servers to start
-    run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5)
+    run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, bitrate="8M")
+    run_iperf3_client(server_name="d2", client_name="d3", out_dir=iperf3_dir, duration=5, udp=True, bitrate="6M")
 
     input("Press Enter to end emulation")
 
