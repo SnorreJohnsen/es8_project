@@ -635,6 +635,7 @@ def plot_drone_positions(*,
 
     rate_ranges.sort(key=lambda x: x[0])
 
+
     threshold_distances = []
     matched_rates = []
     if use_lookup_table == True:
@@ -675,6 +676,8 @@ def plot_drone_positions(*,
         for threshold_sensivity in threshold_sensivities
         ]
 
+
+
     # assign colors (can be longer than three thresholds)
     cmap = plt.get_cmap('viridis')
     n_thresh = len(threshold_distances)
@@ -682,6 +685,18 @@ def plot_drone_positions(*,
         threshold_colors = [cmap(0.5)]
     else:
         threshold_colors = [cmap(1 - i/(n_thresh-1)) for i in range(n_thresh)]
+
+
+    # Deduplicate the rates
+    seen = set()
+
+    filtered = [
+        (dist, rate, color)
+        for dist, rate, color in zip(threshold_distances, thresholds_phyrate, threshold_colors)
+        if not (rate in seen or seen.add(rate))
+    ]
+
+    threshold_distances, thresholds_phyrate, threshold_colors = map(list, zip(*filtered))
 
     sorted_thresh = sorted(zip(threshold_distances, thresholds_phyrate, threshold_colors),
                            key=lambda x: x[0], reverse=True)
@@ -1296,7 +1311,7 @@ def process_drone_mesh(*,
     bandwidth_Mhz = metadata[f"{wireless_prefix}BANDWIDTH"]
 
     # For plotting parameters set in Mbps
-    thresholds_phyrate_heatmap = [20, 10, 1]
+    thresholds_phyrate_heatmap = [data_rate_Mbps,20, 10, 1]
     # both for creation of json and also of plotting indivual node links
     # plot individual node
     threshold_phyrate_links = 0
