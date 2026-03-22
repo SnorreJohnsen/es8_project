@@ -47,54 +47,66 @@ def drone_sq_grid(dim: tuple[float, float],
                   dist: float):
 
     x_dim, y_dim = dim
+    
+    # y positions
+    n_drones_column = int(np.floor((y_dim + dist) / dist))      # use np.ceil() for edge_drones
+    y_offset = (y_dim - dist*(n_drones_column - 1)) / 2
+    y_positions = np.linspace(y_offset,
+                              y_offset+dist*(n_drones_column-1),
+                              n_drones_column)
+    
+    # x positions
+    n_drones_row = int(np.floor((x_dim + dist) / dist))         # use np.ceil() for edge_drones
+    x_offset = (x_dim - dist*(n_drones_row - 1)) / 2
+    x_positions = np.linspace(x_offset,
+                              x_offset+dist*(n_drones_row-1),
+                              n_drones_row)
 
-    col_num_drones = y_dim // dist
-    center_dist = dist * col_num_drones
-    offset =(y_dim - center_dist) /2
+    full_grid = make_grid_product(x_positions, y_positions)
 
-    x_range = np.arange(offset,x_dim+1, dist)
-    y_range = np.arange(offset,y_dim+1, dist)
-
-    return make_grid_product(x_range, y_range)
+    return full_grid
 
 def drone_triangle_grid(dim: tuple[float, float],
                         dist: float):
-
+    
+    # Parameters
     x_dim, y_dim = dim
-
-    # Angle from node in full column to adjacent node in partial column relative to x axis
     alpha = np.radians(30)
+    dist_full_partial = dist * np.cos(alpha)  # distance between full and partial column on x-axis
+    step_column = 2*dist_full_partial         # distance between two full columns on x-axis
 
-    full_col_num_drones = y_dim // dist
+    # Full columns (y positions)
+    n_drones_full_column = int(np.floor((y_dim + dist) / dist))       # number of drones within area on full column
+    y_offset_full = (y_dim - dist * (n_drones_full_column - 1)) / 2   # offset from bottom to first drone on y-axis
+    y_position_full_column = np.linspace(y_offset_full,
+                                         y_offset_full+dist*(n_drones_full_column-1),
+                                         n_drones_full_column)        # y locations full column
 
-    center_dist = dist * full_col_num_drones
-    offset =(y_dim - center_dist) /2
+    # Full columns (x positions)
+    n_full_columns = int(np.ceil((x_dim + dist) / (step_column)))     # number of full columns (use np.ceil() if you want extra column)
+    x_offset_full = (x_dim - step_column * (n_full_columns - 1)) / 2  # offset from left to first drone on x-axis
+    x_position_full_column = np.linspace(x_offset_full,
+                                         x_offset_full+step_column*(n_full_columns-1),
+                                         n_full_columns)              # x locations of full column
 
-    # Calculate y locations for full columns
-    full_cols_y_range = np.arange(offset, y_dim+1, dist)
+    # Partial columns (y positions)
+    n_drones_partial_column = n_drones_full_column - 1
+    y_offset_partial = (y_dim - dist * (n_drones_partial_column - 1)) / 2
+    y_position_partial_column = np.linspace(y_offset_partial,
+                                            y_offset_partial+dist*(n_drones_partial_column-1),
+                                            n_drones_partial_column)    
 
-    # Calculate number of full comlumns
-    full_col_x_dist = 2*dist*np.cos(alpha)
-    num_full_cols = math.ceil(x_dim / full_col_x_dist)+1
+    # Partial columns (x positions)
+    n_partial_columns = int(np.floor((x_dim + dist) / step_column)) # number of partial columns (use np.ceil() if you want extra column)
+    x_offset_partial = x_offset_full + dist_full_partial
+    x_position_partial_column = np.linspace(x_offset_partial,
+                                            x_offset_partial+step_column*(n_partial_columns-1),
+                                            n_partial_columns)
 
-    full_cols_x_range = np.linspace(0, (num_full_cols-1)*full_col_x_dist, num=num_full_cols)
-    full_col_pos = make_grid_product(full_cols_x_range, full_cols_y_range)
-
-    # Calculate number of rows in partal columns
-    part_col_num_rows = len(full_cols_y_range)-1
-
-    # linspace(start, start + step*num, num=num, endpoint=False)
-    part_cols_y_range = np.linspace(offset + dist*np.sin(alpha),
-                                    offset + dist*np.sin(alpha) + 2*dist*np.sin(alpha)*part_col_num_rows,
-                                    num=part_col_num_rows,
-                                    endpoint=False)
-    part_cols_x_range = np.linspace(dist*np.cos(alpha),
-                                    dist*np.cos(alpha) + 2*dist*np.cos(alpha)*(num_full_cols-1),
-                                    num=num_full_cols-1,
-                                    endpoint = False)
-    part_col_pos = make_grid_product(part_cols_x_range, part_cols_y_range)
-
-    full_grid = np.concat([full_col_pos, part_col_pos])
+    # Make Full Grid (combine full and partial for x and y)
+    position_full_column = make_grid_product(x_position_full_column, y_position_full_column)
+    position_partial_column = make_grid_product(x_position_partial_column, y_position_partial_column)
+    full_grid = np.concatenate([position_full_column, position_partial_column])
 
     return full_grid
 
@@ -317,18 +329,20 @@ def dropout_drones(*,
 
     # Stating number of drones in mesh
     num_drones = len(drone_positions)
-
     num_drones_dropout = round(num_drones * dropout_rate)
     drone_dropout_perc_real = num_drones_dropout/num_drones # Calculating actual dropout percentage for plot
 
     # Removing drones from drone positions in relation to dropout
     np.random.shuffle(drone_positions_result)
-    drone_positions_result = drone_positions_result[:-num_drones_dropout, :]
+    if num_drones_dropout == 0:             # Insert to avoid drone_positions_result being [] if num_dropout is 0
+        drone_positions_result = drone_positions_result
+    else:    
+        drone_positions_result = drone_positions_result[:-num_drones_dropout, :]
 
     # Writing stats to metadata
     metadata[f"{meta_prefix}DROPOUT_REAL_PERCENTAGE"] = drone_dropout_perc_real
     metadata[f"{meta_prefix}DROPOUT_NUM_DRONES"] = num_drones_dropout
-
+    
     return drone_positions_result
 
 def make_device_grid(dim: tuple[float, float],
@@ -727,6 +741,7 @@ def plot_drone_positions(*,
     length, width = dim
     square = Rectangle((0, 0),length, width, edgecolor='white', fill=False)
     ax_drone_pos.add_patch(square)
+
     if len(x_device_pos) == 1:
         title_text = (
         f"{title_name}\n"
@@ -740,7 +755,7 @@ def plot_drone_positions(*,
         f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
         f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
         )
-    
+
     ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold', x=0.35,pad=15 )  # set a bit to the left and further up
     ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
     ax_drone_pos.set_ylabel("[m]", fontsize=font_size)
@@ -1349,7 +1364,7 @@ def process_drone_mesh(*,
             # For loop over dropout iterations for histogram
             for _ in range(dropout_iters):
                 drone_positions_dropout = dropout_drones(meta_prefix=f"{grid_prefix}_{j}_", drone_positions=all_drone_positions, dropout_rate=dropout_rate)
-
+                
                 # Make node and link list for partial drone mesh with removed drones
                 node_list_dropout = node_list(drone_positions=drone_positions_dropout)
                 link_list_dropout, link_count_dropout = link_list(wireless_prefix=wireless_prefix,
@@ -1602,7 +1617,7 @@ def main():
 
     test_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05,0.3,0.05) #dropout rate in percentage (min, max, stepsize)
+    test_dropout_rates = np.arange(0.05,0.10,0.05) #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 10                          # number of iterations for each dropout rate (used for histogram)
 
     # wireless communication parameters for MM8108-MF15457 lookup table
@@ -1645,8 +1660,8 @@ def main():
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones
     # has to be set in function process_drone_mesh
-    test_grid_meta_prefix = "Square"
-    test_grid_func = drone_sq_grid
+    test_grid_meta_prefix = "Triangle"
+    test_grid_func = drone_triangle_grid
 
     ###############################################################################
     ###############################################################################
