@@ -773,15 +773,20 @@ def plot_drone_positions(*,
     square = Rectangle((0, 0),length, width, edgecolor='white', fill=False)
     ax_drone_pos.add_patch(square)
 
+    drone_height = metadata["DRONE_HEIGHT"]
+    device_height = metadata["DEVICE_HEIGHT"]
+
+    height_diff = abs(drone_height - device_height)
+
     title_text = (
     f"{title_name}\n"
     f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-    f" Device PHYrate: Min = {np.min(device_links_rate):.2f}, Avg = {np.mean(device_links_rate):.2f} \n"
-    f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
+    f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f} \n"
+    f"Device PHYrate [Mbps]: Min = {np.min(device_links_rate):.2f}, Avg = {np.mean(device_links_rate):.2f} | Height = {height_diff:.0f} [m]"
     )
 
 
-    ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold', x=0.35,pad=15 )  # set a bit to the left and further up
+    ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold', x=0.3,pad=15)  # set a bit to the left and further up
     ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
     ax_drone_pos.set_ylabel("[m]", fontsize=font_size)
     ax_drone_pos.set_aspect('equal', 'box')
@@ -885,7 +890,7 @@ def plot_drone_links(*,
     title_text = (
     f"{title_name}\n"
     f"Drones = {len(nodes)}, Selected source node: {source_node} \n"
-    f"Showing links with Phyrates above {threshold_phyrate_links} Mbps"
+    f"Showing links with Phyrates above {threshold_phyrate_links} [Mbps]"
     )
     ax.set_title(title_text, fontsize=font_size*2, fontweight='bold')
     ax.set_xlabel("[m]", fontsize=font_size)
@@ -1355,7 +1360,7 @@ def process_drone_mesh(*,
     bandwidth_Mhz = metadata[f"{wireless_prefix}BANDWIDTH"]
 
     # For plotting parameters set in Mbps
-    thresholds_phyrate_heatmap = [data_rate_Mbps,20, 10, 1]
+    thresholds_phyrate_heatmap = [data_rate_Mbps,20, 13, 3.3]
     # both for creation of json and also of plotting indivual node links
     # plot individual node
     threshold_phyrate_links = 0
@@ -1441,7 +1446,7 @@ def process_drone_mesh(*,
             plot_drone_positions(meta_prefix=f"{grid_prefix}_{j}_DROPOUT_",
                                  wireless_prefix = wireless_prefix,
                                  file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_mesh.png",
-                                 title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                                title_name=f"{grid_prefix} Mesh | Dropout = {prefix_dropout_real_perc*100:.2f}% | Tolerance = {tolerance} [m]",
                                  nodes=node_list_dropout,
                                  device_positions=device_grid,
                                  distance=drone_distance,
@@ -1454,7 +1459,7 @@ def process_drone_mesh(*,
                                  dim= dim,
                                  file_folder_path=dir_origin_partial_plots,
                                  use_lookup_table=link_budget_model)
-            plot_drone_links(title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+            plot_drone_links(title_name=f"{grid_prefix} Mesh | Dropout = {prefix_dropout_real_perc*100:.2f}% | Tolerance = {tolerance} [m]",
                              file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
                              nodes=node_list_dropout,
                              links=link_list_dropout,
@@ -1502,7 +1507,7 @@ def process_drone_mesh(*,
         plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
                              wireless_prefix=wireless_prefix,
                              file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_mesh.png",
-                             title_name=f"{grid_prefix} Mesh | tolerance = {tolerance} [m]",
+                             title_name=f"{grid_prefix} Mesh | Tolerance = {tolerance} [m]",
                              nodes=node_list_all,
                              device_positions=device_grid,
                              distance=drone_distance,
@@ -1646,7 +1651,7 @@ def main():
 
     test_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05,0.10,0.05) #dropout rate in percentage (min, max, stepsize)
+    test_dropout_rates = np.arange(0.05,0.20,0.05) #dropout rate in percentage (min, max, stepsize)
     test_dropout_iters = 10                          # number of iterations for each dropout rate (used for histogram)
 
     # wireless communication parameters for MM8108-MF15457 lookup table
@@ -1689,8 +1694,8 @@ def main():
     # Set grid type to process
     # if hexagonal grid is chosen bool variable extra_edge_drones
     # has to be set in function process_drone_mesh
-    test_grid_meta_prefix = "Triangle"
-    test_grid_func = drone_triangle_grid
+    test_grid_meta_prefix = "Square"
+    test_grid_func = drone_sq_grid
 
     ###############################################################################
     ###############################################################################
