@@ -324,6 +324,7 @@ def main():
 
     # Place device adapters
     adapter_pos = [(0.0, 0.0, 0.0), 
+                   (3000.0, 3000.0, 3000.0),
                    (1000.0, 10000.0, 10000.0), 
                    (12000.0, 5000.0, 1500.0), 
                    (25000.0, 9000.0, 3000.0)]
@@ -360,13 +361,13 @@ def main():
 
     time.sleep(2)  # allow to launch tcpdumps
 
-    # run_iperf3(src_name="d1", dst_name="d0", out_dir=iperf3_file_path, duration=5)
+    # start iperf3 test
     run_iperf3_server(server_name="d0")
-    run_iperf3_server(server_name="d2")
 
     time.sleep(5) # wait for iperf3 servers to start
-    run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, bitrate="8M")
-    run_iperf3_client(server_name="d2", client_name="d3", out_dir=iperf3_dir, duration=5, udp=True, bitrate="6M")
+    run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False)
+    time.sleep(10)
+    run_iperf3_client(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=5, udp=False)
 
 
 
