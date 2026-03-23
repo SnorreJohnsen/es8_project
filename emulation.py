@@ -291,6 +291,27 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
 
     graph["nodes"].extend(devs)
 
+def batctl_set_neigh_throughputs(graph: dict):
+    """
+    set throughput limit in both direction to a neighbour node.
+    """
+    tid = get_thread_id()
+    remote = None
+
+    for link in graph["links"]:
+        source = link["source"]
+        target = link["target"]
+        bw = float(link["bandwidth_mbit"])
+
+        # get source and target MAC address
+        bat_addr_cmd = "ip -6 -o a s bat0 | awk '{print $4}' | cut -d/ -f1"
+        source_addr = exec(tid, remote, f'ip netns exec "ns-{source}" {bat_addr_cmd}', get_output=True)[0].strip() # [0] to only get stdout
+        target_addr = exec(tid, remote, f'ip netns exec "ns-{target}" {bat_addr_cmd}', get_output=True)[0].strip()
+
+        # set throughput limit in both directions (*10 is to go from unit Mbit to 100kbit)
+        exec(tid, remote, f'ip netns exec "ns-{source}" battpctl set bat0 uplink "{target_addr}" "{int(bw*10)}"')
+        exec(tid, remote, f'ip netns exec "ns-{target}" battpctl set bat0 uplink "{source_addr}" "{int(bw*10)}"')
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("graph", help="Graph of the full network mesh (json)")
@@ -346,7 +367,10 @@ def main():
     mn_software._start_protocol("batman-adv", rmap, drone_ids)
     mn_software._start_protocol("batman-adv", rmap, adapter_ids)
 
-    time.sleep(30) # wait for batman to be ready
+    time.sleep(1) # wait for batman to be ready (30s)
+
+    # Apply throughput overide
+    batctl_set_neigh_throughputs(graph)
 
     # Add devices and start tcpdump
     for adapter_id in adapter_ids:
