@@ -83,7 +83,7 @@ def drone_triangle_grid(dim: tuple[float, float],
                                          n_drones_full_column)        # y locations full column
 
     # Full columns (x positions)
-    n_full_columns = int(np.ceil((x_dim + dist) / (step_column)))     # number of full columns (use np.ceil() if you want extra column)
+    n_full_columns = int(np.floor((x_dim + dist) / (step_column)))     # number of full columns (use np.ceil() if you want extra column)
     x_offset_full = (x_dim - step_column * (n_full_columns - 1)) / 2  # offset from left to first drone on x-axis
     x_position_full_column = np.linspace(x_offset_full,
                                          x_offset_full+step_column*(n_full_columns-1),
@@ -97,11 +97,17 @@ def drone_triangle_grid(dim: tuple[float, float],
                                             n_drones_partial_column)    
 
     # Partial columns (x positions)
-    n_partial_columns = int(np.floor((x_dim + dist) / step_column)) # number of partial columns (use np.ceil() if you want extra column)
-    x_offset_partial = x_offset_full + dist_full_partial
+    if x_offset_full + 1e-6 >= dist_full_partial: 
+        n_partial_columns = int(np.ceil((x_dim + dist) / step_column))
+        x_offset_partial= x_offset_full - dist_full_partial
+    else: 
+        n_partial_columns = int(np.floor((x_dim + dist) / step_column)) - 1 # number of partial columns (use np.ceil() if you want extra column)
+        x_offset_partial = x_offset_full + dist_full_partial
     x_position_partial_column = np.linspace(x_offset_partial,
                                             x_offset_partial+step_column*(n_partial_columns-1),
                                             n_partial_columns)
+
+    # 30000 + 5000 / 1000
 
     # Make Full Grid (combine full and partial for x and y)
     position_full_column = make_grid_product(x_position_full_column, y_position_full_column)
@@ -387,18 +393,18 @@ def calculate_device_links(*,
     # device_points[:, None, :] -> (N_points, 1, 3)
     # drone_positions[None, :, :] -> (1, N_drones, 3)
     # Result -> (N_points, N_drones)
+
+    # 
+
     diff = device_positions[:, None, :] - drone_positions[None, :, :]
-    distances_sq = np.sum(diff**2, axis=2)                                  # euclidean distance
-    min_dist_sq_per_device = np.min(distances_sq, axis=1)                   # find shortest distance for each device
-    min_dist_per_device= np.sqrt(min_dist_sq_per_device)
-    
 
+    dist_sq = np.sum(diff**2, axis=2)  # shape: (num_devices, num_drones)
+    closest_idx = np.argmin(dist_sq, axis=1)
+    min_dist_sq = dist_sq[np.arange(dist_sq.shape[0]), closest_idx]
 
-
-    # This need to be removed here after 
 
     # Count links per device point
-    links_per_device = np.sum(distances_sq <= dist_comm**2, axis=1)
+    links_per_device = np.sum(dist_sq <= dist_comm**2, axis=1)
 
     # Saving min and mean in dict for drone plot
     metadata[f"{meta_prefix}MIN_DEVICE_LINKS"] = float(np.min(links_per_device))
@@ -411,7 +417,7 @@ def calculate_device_links(*,
     # Save area covered percentage to metadata
     metadata[f"{meta_prefix}AREA_COVERED"] = covered_points / total_points
 
-    return min_dist_per_device
+    return min_dist_sq
 
 def is_network_fully_connected(nodes: list[Node],
                                links: list[Link]) -> bool:
@@ -625,20 +631,45 @@ def plot_drone_positions(*,
         ax_drone_pos.plot(x_device_pos, y_device_pos, 'o', color = 'green', markersize=1)
     ax_drone_pos.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
     
+    device_links_rate = []
+    if not use_lookup_table:
+    # dist_device_to_drone should already be squared distances
+        for dist_sq in dist_device_to_drone:
+            dist = np.sqrt(dist_sq)  # only here
 
-    rates_for_devices= np.array([ data_rate_given_dist_comm(s,
-                              bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
-                              transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
-                              margin_loss_db=metadata["MARGIN_LOSS"],
-                              eta=eta,
-                              snr_eff=snr_eff,
-                              freq_Mhz=metadata["FREQ_MHZ"]
-                              ) for s in dist_device_to_drone ])
-    
+            data_rate_mbps = data_rate_given_dist_comm(
+                distance_m=dist,
+                bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+                transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+                margin_loss_db=metadata["MARGIN_LOSS"],
+                eta=eta,
+                snr_eff=snr_eff,
+                freq_Mhz=metadata["FREQ_MHZ"]
+            )
+
+            device_links_rate.append(round(float(data_rate_mbps), 2))
+    else:
+        rate_ranges = []
+        for key, value in metadata.items():
+            if key.lower().endswith("_mbps_range"):
+                rate = float(key.split("_")[0])
+                rate_ranges.append((rate, value))
+
+        rate_ranges.sort(key=lambda x: x[0], reverse=True)
+
+        for dist_sq in dist_device_to_drone:
+            data_rate_mbps = 0
+
+            for rate, rng in rate_ranges:
+                if dist_sq <= rng**2:
+                    data_rate_mbps = rate
+                    break
+            device_links_rate.append(data_rate_mbps)
+
     phyrates = [float(link.bandwidth_mbit) for link in links]
-    
-    # print(dist_device_to_drone)
-    #print(rates_for_devices)
+    if not phyrates:
+        phyrates = [0]
+
 
     rate_ranges = []
 
@@ -742,19 +773,13 @@ def plot_drone_positions(*,
     square = Rectangle((0, 0),length, width, edgecolor='white', fill=False)
     ax_drone_pos.add_patch(square)
 
-    if len(x_device_pos) == 1:
-        title_text = (
-        f"{title_name}\n"
-        f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-        f" Device PHYrate: Min = {np.min(rates_for_devices):.2f}, Avg = {np.mean(rates_for_devices):.2f} \n"
-        f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
-        )
-    else:
-        title_text = (
-        f"{title_name}\n"
-        f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-        f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
-        )
+    title_text = (
+    f"{title_name}\n"
+    f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
+    f" Device PHYrate: Min = {np.min(device_links_rate):.2f}, Avg = {np.mean(device_links_rate):.2f} \n"
+    f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f}"
+    )
+
 
     ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold', x=0.35,pad=15 )  # set a bit to the left and further up
     ax_drone_pos.set_xlabel("[m]", fontsize=font_size)
@@ -823,6 +848,8 @@ def plot_drone_links(*,
 
     # Prepare bandwidth for coloring
     all_bw = [float(link.bandwidth_mbit) for link in source_links]
+    if not all_bw:
+        all_bw = [0]
     norm = mcolors.Normalize(vmin=min(all_bw), vmax=max(all_bw))
     cmap = plt.cm.viridis
 
@@ -881,6 +908,8 @@ def link_matrix(links: list,
 
     # colormap
     all_bw = [float(link.bandwidth_mbit) for link in links]
+    if not all_bw:
+        all_bw = [0]
     norm = mcolors.Normalize(vmin=min(all_bw), vmax=max(all_bw))
     cmap = plt.cm.viridis
 
@@ -1458,7 +1487,7 @@ def process_drone_mesh(*,
                           links=link_list_all)
 
         # Calculating links from devices to drones for full drone mesh
-        calculate_device_links(meta_prefix=f"{grid_prefix}_ALL_",
+        dist_device_to_drone_full = calculate_device_links(meta_prefix=f"{grid_prefix}_ALL_",
                                nodes=node_list_all,
                                dist_comm=dist_comm,
                                device_positions=device_grid)
@@ -1479,7 +1508,7 @@ def process_drone_mesh(*,
                              distance=drone_distance,
                              dist_comm=dist_comm,
                              thresholds_phyrate = thresholds_phyrate_heatmap,
-                             dist_device_to_drone=dist_device_to_drone,
+                             dist_device_to_drone=dist_device_to_drone_full,
                              links=link_list_all,
                              eta=metadata["ETA_STRICT"],
                              snr_eff=metadata["SNR_EFF_STRICT"],
@@ -1610,7 +1639,7 @@ def main():
     length = 30000
     width = 10000
     drone_height = 500
-    device_height = 1
+    device_height = 5000
     scale_factor = 1
     test_dim = (length*scale_factor, width*scale_factor)
     test_samples = (30, 10)                           # number of sample points on area (x, y)
