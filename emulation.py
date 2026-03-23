@@ -304,13 +304,13 @@ def batctl_set_neigh_throughputs(graph: dict):
         bw = float(link["bandwidth_mbit"])
 
         # get source and target MAC address
-        bat_addr_cmd = "ip -o -brief link show uplink | awk '{print $3}'"
-        source_addr = exec(tid, remote, f'ip netns exec "ns-{source}" {bat_addr_cmd}', get_output=True)[0].strip() # [0] to only get stdout
-        target_addr = exec(tid, remote, f'ip netns exec "ns-{target}" {bat_addr_cmd}', get_output=True)[0].strip()
+        bat_mac_cmd = "ip -o -brief link show uplink | awk '{print $3}'"
+        source_mac = exec(tid, remote, f'ip netns exec "ns-{source}" {bat_mac_cmd}', get_output=True)[0].strip() # [0] to only get stdout
+        target_mac = exec(tid, remote, f'ip netns exec "ns-{target}" {bat_mac_cmd}', get_output=True)[0].strip()
 
         # set throughput limit in both directions (*10 is to go from unit Mbit to 100kbit)
-        exec(tid, remote, f'ip netns exec "ns-{source}" battpctl set bat0 uplink {target_addr} {int(bw*10)}')
-        exec(tid, remote, f'ip netns exec "ns-{target}" battpctl set bat0 uplink {source_addr} {int(bw*10)}')
+        exec(tid, remote, f'ip netns exec "ns-{source}" battpctl set bat0 uplink {target_mac} {int(bw*10)}')
+        exec(tid, remote, f'ip netns exec "ns-{target}" battpctl set bat0 uplink {source_mac} {int(bw*10)}')
 
 def main():
     parser = argparse.ArgumentParser()
