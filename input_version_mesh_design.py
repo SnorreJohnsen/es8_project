@@ -765,8 +765,11 @@ def plot_drone_positions(*,
                 fill=True,
                 facecolor=color,
                 edgecolor='black',   # edge color
-                linewidth=alpha*2,        # edge thickness
-                alpha=alpha
+                linewidth=alpha*2,   # edge thickness
+                alpha=alpha 
+                # for getting pure heatmap change to and remove edgedcolor and linewidth
+                # alpha = 1,
+
             )
             ax_drone_pos.add_patch(circle)
             legend_handles.append(circle)
@@ -1140,7 +1143,7 @@ def graph_sensitivity_phyrate(metadata: dict,
         ax1.plot(strict_fitted_sens, data_rates,color="red", label=f"Modified Shannon {lookup_table_name} Strict snr_eff: {snr_eff_strict:.2f}, eta: {eta_strict:.2f}, {desired_bandwidth_Mhz} Mhz BW")
         
         ax1.legend(fontsize=18, loc='upper left')
-        file_path_graph = os.path.join(file_folder_path,filename)
+        file_path_graph = os.path.join(file_folder_path, filename + ".png")
         fig.savefig(file_path_graph,dpi=300,bbox_inches='tight')
         plt.close(fig)
 
@@ -1275,7 +1278,7 @@ def graph_range_phyrate(metadata: dict,
     # avg_deviation_reg = total_deviation_reg / len(dist_comms)
     # ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation_reg:.2f} Mbps")
         ax1.legend(fontsize=18, loc='upper right')
-        file_path_graph = os.path.join(file_folder_path,filename)
+        file_path_graph = os.path.join(file_folder_path, filename + ".png")
         fig.savefig(file_path_graph,dpi=300, bbox_inches = 'tight')
         plt.close(fig)
 
@@ -1380,7 +1383,7 @@ def process_drone_mesh(*,
         # For loop over number of dropouts
         bar_dropout_rates = tqdm(dropout_rates)
         for j, dropout_rate in enumerate(bar_dropout_rates):
-            bar_dropout_rates.set_description(f"Processing {grid_prefix} mesh tol={tolerance} | all rates {dropout_rates} | current dropout={dropout_rate:.2f}")
+            bar_dropout_rates.set_description(f"Processing {grid_prefix} mesh tol={tolerance} | all dropout rates {dropout_rates} | current dropout={dropout_rate:.2f}")
 
             # Iterate over dropout rates and add to metadata
             #dropout_rate = dropout_rates[j]
@@ -1542,11 +1545,11 @@ def inputs_define(*,
         metadata,
         freq_Mhz,
         enable_graph_plots: bool = True):
+    metadata["FREQ_MHZ"] = freq_Mhz
 
     available_bandwidth = list(lookup_table.keys())
     while True:
         print(f"Bandwidth possibilities {available_bandwidth}")
-        metadata["FREQ_MHZ"] = freq_Mhz
 
         desired_bandwidth_Mhz = int(input("Bandwidth: "))
         print()
@@ -1642,6 +1645,100 @@ def inputs_define(*,
     )
 
     return dist_comm,use_lookup_table
+
+def argument_define(*,
+                    test_grid_meta_prefix: str,
+                    wireless_prefix: str = '',
+                    lookup_table: dict,
+                    lookup_table_name: str,
+                    desired_bandwidth_Mhz: float,
+                    data_rate_Mbps: float,
+                    freq_Mhz: float,
+                    enable_graph_plots: bool = True,
+                    link_budget_model: str,
+                    transmit_power_dbm: float
+                    ):
+    metadata["FREQ_MHZ"] = freq_Mhz
+
+    available_bandwidth = list(lookup_table.keys())
+    if desired_bandwidth_Mhz not in available_bandwidth:
+        print(f"WARNING: Bandwidth possibilities are: {available_bandwidth}. NOT : {desired_bandwidth_Mhz}")
+        exit()
+
+    graph_sensitivity_phyrate(
+    metadata=metadata,
+    file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+    filename=f"sensivity_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
+    desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+    lookup_table=lookup_table,
+    lookup_table_name = lookup_table_name,
+    enable_plot=enable_graph_plots
+    )
+
+    graph_range_phyrate(
+        metadata=metadata,
+        file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+        filename=f"range_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
+        desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+        lookup_table=lookup_table,
+        lookup_table_name = lookup_table_name,
+        enable_plot=enable_graph_plots
+    )
+    if link_budget_model == "shannon":
+        metadata[f"{wireless_prefix}TRANSMIT_POWER"] = transmit_power_dbm
+
+        if transmit_power_dbm is None:
+            print(f"WARNING: TRANSMIT POWER IS NOT SET WHICH IS NESSACARY FOR SHANNON")
+            print()
+            exit()
+
+        shannon_mod_receive_sens_strict = shannon(
+            metadata=metadata,
+            data_rate_Mbps=data_rate_Mbps,
+            bandwidth_Mhz=desired_bandwidth_Mhz,
+            noise_figure_db=3,
+            eta=metadata["ETA_STRICT"],
+            snr_eff=metadata["SNR_EFF_STRICT"],
+            wireless_prefix=wireless_prefix
+        )
+        use_lookup_table = False
+
+    elif link_budget_model == "datasheet":
+        schemes = lookup_table[desired_bandwidth_Mhz]
+        data_rates = [v["data_rate"] for v in schemes.values()]
+        if data_rate_Mbps not in data_rates:
+            print(f"Warning: NOT AN DATA RATE IN DATASHEET IN {lookup_table_name} : {data_rate_Mbps} Mbps")
+            data_rate_Mbps = min(data_rates, key=lambda x: abs(x - data_rate_Mbps))
+            print(f"CHANGED TO A RATE OF: {data_rate_Mbps} Mbps ")
+            print()
+
+        get_halow_module_MM8108_params(
+        metadata = metadata,
+        wireless_prefix=wireless_prefix,
+        desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+        desired_rate_Mbps=data_rate_Mbps,
+        lookup_table = lookup_table
+        )
+        use_lookup_table = True
+        
+        actually_transmitpower = metadata[f"{wireless_prefix}TRANSMIT_POWER"]
+        if transmit_power_dbm is not None and actually_transmitpower != transmit_power_dbm:
+            print(f"WARNING: TRANSMIT POWER WILL NOT BE USED, BECUASE ALREADY SPECIFIED FROM DATASHEET: {transmit_power_dbm} Instead set to {actually_transmitpower}")
+            print()
+        if actually_transmitpower == transmit_power_dbm:
+            print(f"WARNING: TRANSMIT POWER WILL NOT BE USED, HOWEVER YOU LUCKY, BECUASE IT'S THE SAME OF: {actually_transmitpower}")
+            print()
+    else:
+        print(f"Warning: NOT AN LINK BUDGET OPTION : {link_budget_model}")
+        exit()
+
+    dist_comm = dist_comm_calc(
+            transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+            received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"],
+            freq_Mhz=freq_Mhz,
+            margin_loss_db=metadata["MARGIN_LOSS"]
+        )
+    return dist_comm,use_lookup_table      
 
 def main():
     parser = argparse.ArgumentParser()
@@ -1807,169 +1904,36 @@ def main():
             test_grid_func = drone_triangle_grid
         else:
             print(f"Warning: NOT AN GRID TYPE : {grid}")
+            print()
             exit()
 
         if wifi_module == "halow":
             freq_Mhz = 868
-            metadata["FREQ_MHZ"] = freq_Mhz
-            lookup_table = lookup_table_halow_module_MM8108
-
-            available_bandwidth = list(lookup_table.keys())
-            if desired_bandwidth_Mhz not in available_bandwidth:
-                print(f"WARNING: Bandwidth possibilities are: {available_bandwidth}. NOT : {desired_bandwidth_Mhz}")
-                exit()
-
-            graph_sensitivity_phyrate(
-            metadata=metadata,
-            file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-            filename=f"sensivity_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_WIFI_HALOW_MM8108",
-            desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-            lookup_table=lookup_table,
-            lookup_table_name = "WIFI_HALOW_MM8108",
-            enable_plot=Enable_debug_plots
-            )
-
-            graph_range_phyrate(
-                metadata=metadata,
-                file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                filename=f"range_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_WIFI_HALOW_MM8108",
-                desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                lookup_table=lookup_table,
-                lookup_table_name = "WIFI_HALOW_MM8108",
-                enable_plot=Enable_debug_plots
-            )
-            if link_budget_model == "shannon":
-                metadata[f"{wireless_prefix}TRANSMIT_POWER"] = transmit_power_dbm
-
-                if transmit_power_dbm is None:
-                    print(f"WARNING: TRANSMIT POWER IS NOT SET WHICH IS NESSACARY FOR SHANNON")
-                    print()
-                    exit()
-
-                shannon_mod_receive_sens_strict = shannon(
-                    metadata=metadata,
-                    data_rate_Mbps=data_rate_Mbps,
-                    bandwidth_Mhz=desired_bandwidth_Mhz,
-                    noise_figure_db=3,
-                    eta=metadata["ETA_STRICT"],
-                    snr_eff=metadata["SNR_EFF_STRICT"],
-                    wireless_prefix=wireless_prefix
-                )
-                use_lookup_table = False
-
-            elif link_budget_model == "datasheet":
-                schemes = lookup_table[desired_bandwidth_Mhz]
-                data_rates = [v["data_rate"] for v in schemes.values()]
-                if data_rate_Mbps not in data_rates:
-                    print(f"Warning: NOT AN DATA RATE IN DATASHEET IN WIFI_HALOW_MM8108 : {data_rate_Mbps} Mbps")
-                    data_rate_Mbps = min(data_rates, key=lambda x: abs(x - data_rate_Mbps))
-                    print(f"CHANGED TO A RATE OF: {data_rate_Mbps} Mbps ")
-
-                get_halow_module_MM8108_params(
-                metadata = metadata,
-                wireless_prefix=wireless_prefix,
-                desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                desired_rate_Mbps=data_rate_Mbps,
-                lookup_table = lookup_table
-                )
-                use_lookup_table = True
-                
-                actually_transmitpower = metadata[f"{wireless_prefix}TRANSMIT_POWER"]
-                if transmit_power_dbm is not None and actually_transmitpower != transmit_power_dbm:
-                    print(f"WARNING: TRANSMIT POWER WILL NOT BE USED, BECUASE ALREADY SPECIFIED FROM DATASHEET: {transmit_power_dbm} Instead set to {actually_transmitpower}")
-                    print()
-                if actually_transmitpower == transmit_power_dbm:
-                    print(f"WARNING: TRANSMIT POWER WILL NOT BE USED, HOWEVER YOU LUCKY, BECUASE IT'S THE SAME OF: {actually_transmitpower}")
-                    print()
-
-            else:
-                print(f"Warning: NOT AN LINK BUDGET OPTION : {link_budget_model}")
-                exit()
+            dist_comm,use_lookup_table = argument_define(test_grid_meta_prefix=test_grid_meta_prefix,
+                                                        wireless_prefix='',
+                                                        lookup_table=lookup_table_halow_module_MM8108,
+                                                        lookup_table_name="WIFI_HALOW_MM8108",
+                                                        desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                                                        data_rate_Mbps= data_rate_Mbps,
+                                                        freq_Mhz=freq_Mhz,
+                                                        enable_graph_plots=Enable_debug_plots,
+                                                        link_budget_model=link_budget_model,
+                                                        transmit_power_dbm=transmit_power_dbm)
         elif wifi_module == "7":
             freq_Mhz = 6000
-            metadata["FREQ_MHZ"] = freq_Mhz
-            lookup_table = lookup_table_wifi7_eht_GI0_8_OFDM
-
-            available_bandwidth = list(lookup_table.keys())
-            if desired_bandwidth_Mhz not in available_bandwidth:
-                
-                print(f"Bandwidth possibilities {available_bandwidth}")
-                exit()
-
-
-            graph_sensitivity_phyrate(
-            metadata=metadata,
-            file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-            filename=f"sensivity_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_WIFI_7_GI0_8_OFDM",
-            desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-            lookup_table=lookup_table,
-            lookup_table_name = "WIFI_7_GI0_8_OFDM",
-            enable_plot=Enable_debug_plots
-            )
-
-            graph_range_phyrate(
-                metadata=metadata,
-                file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
-                filename=f"range_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_WIFI_7_GI0_8_OFDM",
-                desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                lookup_table=lookup_table,
-                lookup_table_name = "WIFI_7_GI0_8_OFDM",
-                enable_plot=Enable_debug_plots
-            )
-            if link_budget_model == "shannon":
-                metadata[f"{wireless_prefix}TRANSMIT_POWER"] = transmit_power_dbm
-
-                if transmit_power_dbm is None:
-                    print(f"WARNING: TRANSMIT POWER IS NOT SET WHICH IS NESSACARY FOR SHANNON")
-                    print()
-                    exit()
-
-                shannon_mod_receive_sens_strict = shannon(
-                    metadata=metadata,
-                    data_rate_Mbps=data_rate_Mbps,
-                    bandwidth_Mhz=desired_bandwidth_Mhz,
-                    noise_figure_db=3,
-                    eta=metadata["ETA_STRICT"],
-                    snr_eff=metadata["SNR_EFF_STRICT"],
-                    wireless_prefix=wireless_prefix
-                )
-                use_lookup_table = False
-
-            elif link_budget_model == "datasheet":
-                schemes = lookup_table[desired_bandwidth_Mhz]
-                data_rates = [v["data_rate"] for v in schemes.values()]
-                if data_rate_Mbps not in data_rates:
-                    print(f"Warning: NOT AN DATA RATE IN DATASHEET IN WIFI_HALOW_MM8108 : {data_rate_Mbps} Mbps")
-                    data_rate_Mbps = min(data_rates, key=lambda x: abs(x - data_rate_Mbps))
-                    print(f"CHANGED TO A RATE OF: {data_rate_Mbps} Mbps ")
-                get_halow_module_MM8108_params(
-                metadata = metadata,
-                wireless_prefix=wireless_prefix,
-                desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                desired_rate_Mbps=data_rate_Mbps,
-                lookup_table = lookup_table
-                )
-                use_lookup_table = True
-
-                actually_transmitpower = metadata[f"{wireless_prefix}TRANSMIT_POWER"]
-                if transmit_power_dbm is not None and actually_transmitpower != transmit_power_dbm:
-                    print(f"WARNING: TRANSMIT POWER WILL NOT BE USED, BECUASE ALREADY SPECIFIED FROM DATASHEET: {transmit_power_dbm} Instead set to {actually_transmitpower}")
-                    print()
-                if actually_transmitpower == transmit_power_dbm:
-                    print(f"WARNING: TRANSMIT POWER WILL NOT BE USED, HOWEVER YOU LUCKY, BECUASE IT'S THE SAME OF: {actually_transmitpower}")
-                    print()
-            else:
-                print(f"Warning: NOT AN LINK BUDGET OPTION : {link_budget_model}")
-                exit()
+            dist_comm,use_lookup_table = argument_define(test_grid_meta_prefix=test_grid_meta_prefix,
+                                                        wireless_prefix='',
+                                                        lookup_table=lookup_table_wifi7_eht_GI0_8_OFDM,
+                                                        lookup_table_name="WIFI_7_GI0_8_OFDM",
+                                                        desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                                                        data_rate_Mbps= data_rate_Mbps,
+                                                        freq_Mhz=freq_Mhz,
+                                                        enable_graph_plots=Enable_debug_plots,
+                                                        link_budget_model=link_budget_model,
+                                                        transmit_power_dbm=transmit_power_dbm)
         else:
             print(f"Warning: NOT AN AVAILABLE WIFI MODULE : {wifi_module}")
             exit()
-        dist_comm = dist_comm_calc(
-            transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
-            received_power_dbm=metadata[f"{wireless_prefix}RECEIVED_SENSITIVITY"],
-            freq_Mhz=freq_Mhz,
-            margin_loss_db=metadata["MARGIN_LOSS"]
-        )
 
     print(f"The range is calculate to be {dist_comm} [m]")
     if use_lookup_table == True:
