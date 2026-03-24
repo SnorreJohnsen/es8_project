@@ -1060,8 +1060,6 @@ def graph_sensitivity_phyrate(metadata: dict,
                               lookup_table_name: str,
                               enable_plot: bool
                               ):
-    os.makedirs(file_folder_path,exist_ok=True)
-
     # For desired bandwidth
     sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz,lookup_table)
 
@@ -1127,7 +1125,7 @@ def graph_sensitivity_phyrate(metadata: dict,
     metadata[f"ETA_STRICT"] = eta_strict
 
     if enable_plot == True:
-
+        os.makedirs(file_folder_path,exist_ok=True)
         # create plot
         fig, ax1 = plt.subplots(figsize=(16, 9))
 
@@ -1211,46 +1209,41 @@ def graph_range_phyrate(metadata: dict,
         for i, s in enumerate(sorted_schemes)
     ]
 
-    # Create table with deviation values
-    total_deviation_opt = 0
-    total_deviation_strict = 0
-
-    rows = []   # table storage
-
-    for x, y, z_opt, z_strict in zip(dist_comms,
-                                 data_rates,
-                                 dist_comms_mod_shannon_optimal,
-                                 dist_comms_mod_shannon_strict):
-
-        deviation_opt = x - z_opt
-        deviation_strict = x - z_strict
-
-        total_deviation_opt += abs(deviation_opt)
-        total_deviation_strict += abs(deviation_strict)
-
-        # store row for table
-        rows.append({
-            "PHY Rate (Mbps)": f"{y:.2f}",
-            "Datasheet (m)": f"{x:.2f}",
-            "Optimal (m)": f"{z_opt:.2f}",
-            "Strict (m)": f"{z_strict:.2f}",
-            "Deviation Optimal (m)": f"{deviation_opt:.2f}",
-            "Deviation Strict (m)": f"{deviation_strict:.2f}",
-        })
-        if save_ranges == True:
-            metadata[f"{y:.2f}_Mbps_range"] = x
-
-    # averages
-    avg_deviation_opt = total_deviation_opt / len(dist_comms)
-    avg_deviation_strict = total_deviation_strict / len(dist_comms)
-
-    # create table
-    df = pd.DataFrame(rows)
-
-    df.to_latex(f"{file_folder_path}_table_bandwidth_{desired_bandwidth_Mhz}_MHz.tex", index=False)
 
     # FIGURE
     if enable_plot == True:
+        os.makedirs(file_folder_path,exist_ok=True)
+
+        # Create table with deviation values
+        total_deviation_opt = 0
+        total_deviation_strict = 0
+        rows = []   # table storage
+        for x, y, z_opt, z_strict in zip(dist_comms,
+                                    data_rates,
+                                    dist_comms_mod_shannon_optimal,
+                                    dist_comms_mod_shannon_strict):
+            deviation_opt = x - z_opt
+            deviation_strict = x - z_strict
+            total_deviation_opt += abs(deviation_opt)
+            total_deviation_strict += abs(deviation_strict)
+            # store row for table
+            rows.append({
+                "PHY Rate (Mbps)": f"{y:.2f}",
+                "Datasheet (m)": f"{x:.2f}",
+                "Optimal (m)": f"{z_opt:.2f}",
+                "Strict (m)": f"{z_strict:.2f}",
+                "Deviation Optimal (m)": f"{deviation_opt:.2f}",
+                "Deviation Strict (m)": f"{deviation_strict:.2f}",
+            })
+            if save_ranges == True:
+                metadata[f"{y:.2f}_Mbps_range"] = x
+        # averages
+        avg_deviation_opt = total_deviation_opt / len(dist_comms)
+        avg_deviation_strict = total_deviation_strict / len(dist_comms)
+        # create table
+        df = pd.DataFrame(rows)
+        df.to_latex(f"{file_folder_path}_table_bandwidth_{desired_bandwidth_Mhz}_MHz.tex", index=False)
+
         fig, ax1 = plt.subplots(figsize=(16, 9))
         plt.xscale('log')  # set x-axis to logarithmic
         ax1.set_xlabel("Range (m)", fontsize=18)
@@ -1295,10 +1288,10 @@ def process_drone_mesh(*,
                        drone_distance_redundancy: float,
                        dropout_rates: np.ndarray,
                        dropout_iters: int,
-                       hist_plot: bool,
                        margin_loss_db: float,
                        device_grid: np.ndarray,
                        link_budget_model: bool,
+                       debug_plots: bool,
                        grid_func,
                        **kwargs):
     """
@@ -1344,18 +1337,21 @@ def process_drone_mesh(*,
     #                     (after drone removal)
 
     dir_origin = f"./{grid_prefix}_mesh_design_out"
-    dir_origin_full_plots = os.path.join(dir_origin, "full/plots/")
     dir_origin_full_json = os.path.join(dir_origin, "full/json/")
-    dir_origin_partial_plots = os.path.join(dir_origin, "partial/plots/")
     dir_origin_partial_json = os.path.join(dir_origin, "partial/json/")
 
     # Chech if output is valid else make it
     os.makedirs(dir_origin, exist_ok=True)
-    os.makedirs(dir_origin_full_plots, exist_ok=True)
     os.makedirs(dir_origin_full_json, exist_ok=True)
-    os.makedirs(dir_origin_partial_plots, exist_ok=True)
     os.makedirs(dir_origin_partial_json, exist_ok=True)
 
+    if debug_plots == True:
+        dir_origin_full_plots = os.path.join(dir_origin, "full/plots/")
+        dir_origin_partial_plots = os.path.join(dir_origin, "partial/plots/")
+
+        os.makedirs(dir_origin_full_plots, exist_ok=True)
+        os.makedirs(dir_origin_partial_plots, exist_ok=True)
+        
     data_rate_Mbps = metadata[f"{wireless_prefix}DATA_RATE"] 
     bandwidth_Mhz = metadata[f"{wireless_prefix}BANDWIDTH"]
 
@@ -1430,46 +1426,47 @@ def process_drone_mesh(*,
                               links=link_list_dropout)
 
             # Calculating links from devices to drones for partial drone mesh
-            dist_device_to_drone= calculate_device_links(meta_prefix= f"{grid_prefix}_{j}_DROPOUT_",
-                                   nodes=node_list_dropout,
-                                   dist_comm=dist_comm,
-                                   device_positions=device_grid)
+            if debug_plots == True:
+                dist_device_to_drone= calculate_device_links(meta_prefix= f"{grid_prefix}_{j}_DROPOUT_",
+                                    nodes=node_list_dropout,
+                                    dist_comm=dist_comm,
+                                    device_positions=device_grid)
 
-            # Histogram and drone position plots over total iterations
-            if hist_plot == True:
+                # Histogram and drone position plots over total iterations
+                
                 plot_histogram_drone_links(file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram.png",
-                                            title_name=f"{grid_prefix} Histogram | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
-                                            drone_link_count=total_link_count_dropout,
-                                            iterations=dropout_iters,
-                                            file_folder_path=dir_origin_partial_plots)
+                                                title_name=f"{grid_prefix} Histogram | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                                                drone_link_count=total_link_count_dropout,
+                                                iterations=dropout_iters,
+                                                file_folder_path=dir_origin_partial_plots)
 
-            plot_drone_positions(meta_prefix=f"{grid_prefix}_{j}_DROPOUT_",
-                                 wireless_prefix = wireless_prefix,
-                                 file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_mesh.png",
-                                title_name=f"{grid_prefix} Mesh | Dropout = {prefix_dropout_real_perc*100:.2f}% | Tolerance = {tolerance} [m]",
-                                 nodes=node_list_dropout,
-                                 device_positions=device_grid,
-                                 distance=drone_distance,
-                                 dist_comm=dist_comm,
-                                 thresholds_phyrate = thresholds_phyrate_heatmap,
-                                 dist_device_to_drone=dist_device_to_drone,
-                                 links=link_list_dropout,
-                                 eta=metadata["ETA_STRICT"],
-                                 snr_eff=metadata["SNR_EFF_STRICT"],
-                                 dim= dim,
-                                 file_folder_path=dir_origin_partial_plots,
-                                 use_lookup_table=link_budget_model)
-            plot_drone_links(title_name=f"{grid_prefix} Mesh | Dropout = {prefix_dropout_real_perc*100:.2f}% | Tolerance = {tolerance} [m]",
-                             file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
-                             nodes=node_list_dropout,
-                             links=link_list_dropout,
-                             source_node="n0",
-                             threshold_phyrate_links= threshold_phyrate_links,
-                             file_folder_path=dir_origin_partial_plots)
-            link_matrix(links=link_list_dropout,
-                        nodes=node_list_dropout,
-                        file_folder_path=dir_origin_partial_plots,
-                        file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_Matrix")
+                plot_drone_positions(meta_prefix=f"{grid_prefix}_{j}_DROPOUT_",
+                                    wireless_prefix = wireless_prefix,
+                                    file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_mesh.png",
+                                    title_name=f"{grid_prefix} Mesh | Dropout = {prefix_dropout_real_perc*100:.2f}% | Tolerance = {tolerance} [m]",
+                                    nodes=node_list_dropout,
+                                    device_positions=device_grid,
+                                    distance=drone_distance,
+                                    dist_comm=dist_comm,
+                                    thresholds_phyrate = thresholds_phyrate_heatmap,
+                                    dist_device_to_drone=dist_device_to_drone,
+                                    links=link_list_dropout,
+                                    eta=metadata["ETA_STRICT"],
+                                    snr_eff=metadata["SNR_EFF_STRICT"],
+                                    dim= dim,
+                                    file_folder_path=dir_origin_partial_plots,
+                                    use_lookup_table=link_budget_model)
+                plot_drone_links(title_name=f"{grid_prefix} Mesh | Dropout = {prefix_dropout_real_perc*100:.2f}% | Tolerance = {tolerance} [m]",
+                                file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
+                                nodes=node_list_dropout,
+                                links=link_list_dropout,
+                                source_node="n0",
+                                threshold_phyrate_links= threshold_phyrate_links,
+                                file_folder_path=dir_origin_partial_plots)
+                link_matrix(links=link_list_dropout,
+                            nodes=node_list_dropout,
+                            file_folder_path=dir_origin_partial_plots,
+                            file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_Matrix")
 
         # Make node and link list for full drone mesh
         node_list_all = node_list(drone_positions=all_drone_positions)
@@ -1491,47 +1488,47 @@ def process_drone_mesh(*,
                           nodes=node_list_all,
                           links=link_list_all)
 
-        # Calculating links from devices to drones for full drone mesh
-        dist_device_to_drone_full = calculate_device_links(meta_prefix=f"{grid_prefix}_ALL_",
-                               nodes=node_list_all,
-                               dist_comm=dist_comm,
-                               device_positions=device_grid)
+        if debug_plots == True:
+            # Calculating links from devices to drones for full drone mesh
+            dist_device_to_drone_full = calculate_device_links(meta_prefix=f"{grid_prefix}_ALL_",
+                                nodes=node_list_all,
+                                dist_comm=dist_comm,
+                                device_positions=device_grid)
 
-        # Histogram and drone position plots over full drone mesh
-        if hist_plot == True:
+            # Histogram and drone position plots over full drone mesh
             plot_histogram_drone_links(file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram.png",
-                                    title_name=f"{grid_prefix} Histogram | tolerance = {tolerance} [m]",
-                                    drone_link_count=link_count_all,
-                                    file_folder_path=dir_origin_full_plots)
+                                        title_name=f"{grid_prefix} Histogram | tolerance = {tolerance} [m]",
+                                        drone_link_count=link_count_all,
+                                        file_folder_path=dir_origin_full_plots)
 
-        plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
-                             wireless_prefix=wireless_prefix,
-                             file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_mesh.png",
-                             title_name=f"{grid_prefix} Mesh | Tolerance = {tolerance} [m]",
-                             nodes=node_list_all,
-                             device_positions=device_grid,
-                             distance=drone_distance,
-                             dist_comm=dist_comm,
-                             thresholds_phyrate = thresholds_phyrate_heatmap,
-                             dist_device_to_drone=dist_device_to_drone_full,
-                             links=link_list_all,
-                             eta=metadata["ETA_STRICT"],
-                             snr_eff=metadata["SNR_EFF_STRICT"],
-                             dim= dim,
-                             file_folder_path=dir_origin_full_plots,
-                             use_lookup_table=link_budget_model)
-        
-        plot_drone_links(title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
-                        file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
+            plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
+                                wireless_prefix=wireless_prefix,
+                                file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_mesh.png",
+                                title_name=f"{grid_prefix} Mesh | Tolerance = {tolerance} [m]",
+                                nodes=node_list_all,
+                                device_positions=device_grid,
+                                distance=drone_distance,
+                                dist_comm=dist_comm,
+                                thresholds_phyrate = thresholds_phyrate_heatmap,
+                                dist_device_to_drone=dist_device_to_drone_full,
+                                links=link_list_all,
+                                eta=metadata["ETA_STRICT"],
+                                snr_eff=metadata["SNR_EFF_STRICT"],
+                                dim= dim,
+                                file_folder_path=dir_origin_full_plots,
+                                use_lookup_table=link_budget_model)
+            
+            plot_drone_links(title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                            file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
+                            nodes=node_list_all,
+                            links=link_list_all,
+                            source_node="n0",
+                            threshold_phyrate_links=threshold_phyrate_links,
+                            file_folder_path=dir_origin_full_plots)
+            link_matrix(links=link_list_all,
                         nodes=node_list_all,
-                        links=link_list_all,
-                        source_node="n0",
-                        threshold_phyrate_links=threshold_phyrate_links,
-                        file_folder_path=dir_origin_full_plots)
-        link_matrix(links=link_list_all,
-                    nodes=node_list_all,
-                    file_folder_path=dir_origin_full_plots,
-                    file_name=f"{grid_prefix}_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_Matrix")
+                        file_folder_path=dir_origin_full_plots,
+                        file_name=f"{grid_prefix}_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_Matrix")
 
     with open(os.path.join(dir_origin, "metadata.json"), "w") as f:
         json.dump(metadata, f)
@@ -1726,6 +1723,14 @@ def main():
     wifi_module = int(input("Enter number: "))
     print()
 
+    print("Desire of Debug Plots")
+    print("1 = Only Json File")
+    print("2 = Json File and Debug Plots")
+    debug_int= int(input("Enter number: "))
+    Enable_debug_plots = (debug_int == 2)
+    print()
+
+
     if wifi_module == 1:
         dist_comm,use_lookup_table = inputs_define(test_grid_meta_prefix = test_grid_meta_prefix,
                       wireless_prefix=wireless_prefix,
@@ -1733,7 +1738,7 @@ def main():
                       lookup_table_name = "WIFI_7_GI0_8_OFDM",
                       metadata=metadata,
                       freq_Mhz = 6000,
-                      enable_graph_plots=True)
+                      enable_graph_plots=Enable_debug_plots)
 
 
     elif wifi_module == 2:
@@ -1743,7 +1748,7 @@ def main():
                       lookup_table_name = "WIFI_HALOW_MM8108",
                       metadata=metadata,
                       freq_Mhz = 868,
-                      enable_graph_plots=True)
+                      enable_graph_plots=Enable_debug_plots)
     
     else:
         print("No this is not a possible option !!!!")
@@ -1820,11 +1825,11 @@ def main():
                        drone_distance_redundancy=test_dist_redundancy,
                        dropout_rates=test_dropout_rates,
                        dropout_iters=test_dropout_iters,
-                       hist_plot= True,
                        margin_loss_db=margin_loss_db,
                        device_grid=device_grid,
                        link_budget_model = use_lookup_table,
-                       grid_func=test_grid_func,
+                       debug_plots = Enable_debug_plots,
+                       grid_func=test_grid_func
                     )
 
 if __name__ == "__main__":
