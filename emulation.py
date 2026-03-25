@@ -17,6 +17,11 @@ import network as mn_network
 from network import mtu
 from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals, get_thread_id, exec
 
+# check if programs used are available
+if shutil.which("iperf3") is None:
+    print("ERROR: iperf3 is not installed or not in PATH.")
+    sys.exit(1)
+
 # List of processes for termination end of script
 tcpdump_procs = []
 iperf3_servers = []
@@ -168,33 +173,29 @@ def run_iperf3_client(server_name: str,
     server_port = IPERF3_REF_PORT + server_num
     server_ip = f"10.200.100.{server_num+10}"
 
-    client_cmd = ["ip", "netns", "exec", f"ns-{client_name}",
-                  "iperf3", "-c", server_ip, "-p", str(server_port), "-t", str(duration), "--json"]
-
-    # UDP option
-    if udp:
-        client_cmd += ["-u"]
-        if bitrate != '':
-            client_cmd += ["-b", bitrate]
-
-    # bitrate option if UDP was not chosen this is used for TCP
-    elif bitrate != '':
-        client_cmd += ["--bitrate", bitrate]
-
-    client_proc = subprocess.run(client_cmd,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    text=True,
-                                    start_new_session=True,
-                                    close_fds=True)
-
     iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}.json")
-    with open(iperf3_path, "w") as f:
-        f.write(client_proc.stdout)
+    iperf3_args = ["-c", server_ip, "-p", server_port, "-t", duration, "--json"]
+    if udp:
+        iperf3_args.append("-u")
+    if bitrate:
+        iperf3_args.append("--bitrate")
+        iperf3_args.append(bitrate)
+
+    iperf3_args.append("--logfile")
+    iperf3_args.append(iperf3_path)
+    client_cmd = ["ip", "netns", "exec", f"ns-{client_name}", "iperf3"] + iperf3_args
+    client_cmd = [f"{x}" for x in client_cmd]
 
     if verbosity == "verbose":
         print(f"run_iperf3_client({server_name=}, {client_name=}, {out_dir=})")
         print(" ".join(client_cmd))
+
+    subprocess.Popen(client_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    start_new_session=True,
+                    close_fds=True)
 
 def find_closest_node(this: dict, others: list[dict]):
     """
@@ -409,7 +410,7 @@ def main():
 
     if verbosity != "quiet":
         print("Wait for batman-adv to be ready")
-    time.sleep(2) # wait for batman to be ready (30s)
+    time.sleep(30) # wait for batman to be ready (30s)
 
     # Apply throughput override
     # batctl_set_neigh_throughputs(graph)
@@ -429,11 +430,13 @@ def main():
 
     # start iperf3 test
     run_iperf3_server(server_name="d0")
-
+    run_iperf3_server(server_name="d2")
     time.sleep(5) # wait for iperf3 servers to start
+
     run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False)
-    time.sleep(10)
-    run_iperf3_client(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=5, udp=False)
+    time.sleep(0.1)
+    run_iperf3_client(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=5, udp=False, bitrate="2M")
+    run_iperf3_client(server_name="d2", client_name="d3", out_dir=iperf3_dir, duration=5, udp=True, bitrate="8M")
 
 
 

@@ -14,6 +14,7 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             batctl
+            iperf3
             (python3.withPackages
               (ps: with ps; [ numpy matplotlib tqdm scipy pandas ]))
           ];
