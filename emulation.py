@@ -25,6 +25,7 @@ iperf3_servers = []
 output_root = "emulation_output"
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
+node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
@@ -312,6 +313,36 @@ def batctl_set_neigh_throughputs(graph: dict):
         exec(tid, remote, f'ip netns exec "ns-{source}" battpctl set bat0 uplink {target_mac} {int(bw*10)}')
         exec(tid, remote, f'ip netns exec "ns-{target}" battpctl set bat0 uplink {source_mac} {int(bw*10)}')
 
+def get_node_addrs(node_id: str, cmd: str):
+    tid = get_thread_id()
+    remote = None
+
+    raw = exec(tid, remote, f'ip netns exec "ns-{node_id}" {cmd}', get_output=True)[0]
+    if raw:
+        pairs = map(lambda x: x.split(" "), raw.splitlines())
+        return {k:v for k, v in filter(lambda x: len(x) == 2, pairs)}
+    else:
+        return {}
+
+def get_all_addrs(graph: dict, extra_ids: list[str]):
+    """
+    Get all mac, ipv4, ipv6 for a node and output in a json file.
+    """
+    addrs_json = {}
+
+    get_macs_cmd = "ip -o -brief link show | awk '{print $1, $3}'"
+    get_ipv6_cmd = "ip -6 -brief a | awk '{print $1, $3}'"
+    get_ipv4_cmd = "ip -4 -brief a | awk '{print $1, $3}'"
+    ids = [n["id"] for n in graph["nodes"]]
+    for node_id in ids+extra_ids:
+        addrs_json[node_id] = {
+            "ipv4": get_node_addrs(node_id, get_ipv4_cmd),
+            "ipv6": get_node_addrs(node_id, get_ipv6_cmd),
+            "mac": get_node_addrs(node_id, get_macs_cmd) 
+            }
+    with open(node_addrs_json_path, "w") as f:
+        json.dump(addrs_json, f)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("graph", help="Graph of the full network mesh (json)")
@@ -366,17 +397,28 @@ def main():
 
     mn_software._start_protocol("batman-adv", rmap, drone_ids)
     mn_software._start_protocol("batman-adv", rmap, adapter_ids)
-    time.sleep(30) # wait for batman to be ready (30s)
 
-    # Apply throughput overide
-    batctl_set_neigh_throughputs(graph)
-    time.sleep(10) # wait for moving average in throughput override
-
-    # Add devices and start tcpdump
+    device_ids = []
     for adapter_id in adapter_ids:
         device_id = adapter_id.replace("a", "d")
+        device_ids.append(device_id)
         create_device(device_id, adapter_id)
-        time.sleep(0.1) # wait for device creation otherwise tcpdump wont capture
+
+    # Make json files for IP addrs and MAC addrs overview
+    get_all_addrs(graph, device_ids)
+
+    if verbosity != "quiet":
+        print("Wait for batman-adv to be ready")
+    time.sleep(2) # wait for batman to be ready (30s)
+
+    # Apply throughput override
+    # batctl_set_neigh_throughputs(graph)
+    # if verbosity != "quiet":
+    #     print("Wait for throughput override")
+    # time.sleep(10) # wait for moving average in throughput override
+
+    # Add devices and start tcpdump
+    for device_id in device_ids:
         start_tcpdump(device_id, "veth0", pcap_dir)
 
     # Start tcpdump for each node
