@@ -518,9 +518,11 @@ def link_list(*,
     """
 
     links: list[Link] = []
-    num_links = []
+    num_links_video = []
+    num_links_cmd = []
     for source in nodes:
         count = 0
+        count_cmd = 0
         for target in nodes:
 
             if target.id == source.id:
@@ -533,43 +535,149 @@ def link_list(*,
 
                 # if distances <= (dist_comm + 1)**2:
                 #predicted_rate= exp_model(np.sqrt(distances), scale_exp, exp_param)
-                data_rate_mbps = data_rate_given_dist_comm(distance_m=np.sqrt(distances),
+                links, count, count_cmd = link_shannon(
+                             distance_sq = distances,
+                             eta = eta,
+                             snr_eff = snr_eff,
+                             margin_loss_db = margin_loss_db,
+                             links = links,
+                             target=target,
+                             source = source,
+                             threshold_link=threshold_link,
+                             count = count,
+                             count_cmd=count_cmd
+                             )
+            else:
+                links, count, count_cmd = link_datasheet(distance_sq =distances,
+                                                                          links = links,
+                                                                          target = target,
+                                                                          source = source,
+                                                                          threshold_link=threshold_link,
+                                                                          count = count,
+                                                                          count_cmd=count_cmd
+                                                                           )
+         
+        num_links_video.append(count)
+        num_links_cmd.append(count_cmd)
+        
+    return links, num_links_video,num_links_cmd
+
+def link_shannon(
+                 distance_sq: float,
+                 eta: float,
+                 snr_eff: float,
+                 margin_loss_db: float,
+                 links: list,
+                 target,
+                 source,
+                 threshold_link: float,
+                 count: int,
+                 count_cmd: int,
+                 wireless_prefix: str = ""):
+
+    data_rate_mbps = data_rate_given_dist_comm(distance_m=distance_sq,
                                                 bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
                                                 transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
                                                 margin_loss_db=margin_loss_db,
                                                 eta=eta,
                                                 snr_eff=snr_eff,
                                                 freq_Mhz=metadata["FREQ_MHZ"])
-            else:
-                rate_ranges = []
+    
+    rngs = []
+    for s in [20,0.1]:
+        shannon_mod_receive_sens_strict = shannon(
+                metadata = metadata,
+                data_rate_Mbps=s,
+                bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+                noise_figure_db=3,
+                eta=metadata["ETA_STRICT"],
+                snr_eff=metadata["SNR_EFF_STRICT"]
+            )
+        rng = dist_comm_calc(
+                metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+                shannon_mod_receive_sens_strict,   # use the corresponding receive sens
+                transmit_gain_dbi=0,
+                received_gain_dbi=0,
+                margin_loss_db=3,
+                freq_Mhz=metadata["FREQ_MHZ"]
+            )
+        rngs.append(rng)
+    rng_video, rng_100_kbps= rngs
 
-                for key, value in metadata.items():
-                    if key.lower().endswith("_mbps_range"):
-                        rate = float(key.split("_")[0])
-                        rate_ranges.append((rate, value))
+    metadata["histogram_low_rate"] = 0.1
+    metadata["histogram_high_rate"] = 20
 
-                rate_ranges.sort(key=lambda x: x[0], reverse=True)
-                data_rate_mbps = 0
-                # find correct rate
 
-                for rate, rng in rate_ranges:
-                    if distances <= rng**2:
-                        data_rate_mbps = rate
-                        break
-            if data_rate_mbps > threshold_link:
+    if data_rate_mbps > threshold_link:
                 link = Link(source=source.id,
                                 target=target.id,
                                 bandwidth_mbit=f"{data_rate_mbps:.2f}")
                             #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
                 links.append(link)
 
-                if distances <= (dist_comm + 1)**2:
+                if distance_sq <= (rng_video + 1)**2:
                 # Count how many are within dist_comm (exclude itself)
                     count = count + 1
+                
+                if distance_sq <= (rng_100_kbps + 1)**2:
+                    count_cmd = count_cmd + 1
 
-        num_links.append(count)
-    return links, num_links
+    return links, count, count_cmd
 
+def link_datasheet(distance_sq: float,
+                   links: list,
+                   target,
+                   source,
+                   threshold_link: float,
+                   count: int,
+                   count_cmd: int,
+                   wireless_prefix: str = ""
+                   ):
+    rate_ranges = []
+    for key, value in metadata.items():
+        if key.lower().endswith("_mbps_range"):
+            rate = float(key.split("_")[0])
+            rate_ranges.append((rate, value))
+
+    rate_ranges.sort(key=lambda x: x[0], reverse=True)
+    data_rate_mbps = 0
+    # find correct rate
+
+    for rate, rng in rate_ranges:
+        if distance_sq <= rng**2:
+            data_rate_mbps = rate
+            break
+
+    results = []
+    for r in [20, 0.1]:
+        for rate, rng in reversed(rate_ranges):
+            if rate >= r:
+                results.append((rate, rng))
+                break
+        else:
+            # fallback if nothing >= r
+            results.append(rate_ranges[-1])
+
+    (rng_video_rate, rng_video), (rng_100_rate, rng_100_kbps) = results
+    metadata["histogram_low_rate"] = rng_100_rate
+    metadata["histogram_high_rate"] = rng_video_rate
+
+    if data_rate_mbps > threshold_link:
+        link = Link(source=source.id,
+                        target=target.id,
+                        bandwidth_mbit=f"{data_rate_mbps:.2f}")
+                    #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
+        links.append(link)
+
+        if distance_sq <= (rng_video + 1)**2:
+        # Count how many are within dist_comm (exclude itself)
+            count = count + 1
+        
+        if distance_sq <= (rng_100_kbps + 1)**2:
+            count_cmd = count_cmd + 1
+
+
+    return links, count, count_cmd
 
 def make_json_network(*,
                       file_name: str,
@@ -1391,7 +1499,7 @@ def process_drone_mesh(*,
 
             # Create array for total number of link count for dropout networks
             total_link_count_dropout = []
-
+            total_link_count_dropout_cmd = []
             # Create variable for network is fully connected percentage
             connected_count = 0
 
@@ -1401,7 +1509,7 @@ def process_drone_mesh(*,
                 
                 # Make node and link list for partial drone mesh with removed drones
                 node_list_dropout = node_list(drone_positions=drone_positions_dropout)
-                link_list_dropout, link_count_dropout = link_list(wireless_prefix=wireless_prefix,
+                link_list_dropout, link_count_dropout,link_count_dropout_cmd = link_list(wireless_prefix=wireless_prefix,
                                                                   nodes=node_list_dropout,
                                                                   dist_comm=dist_comm,
                                                                   margin_loss_db= margin_loss_db,
@@ -1412,7 +1520,7 @@ def process_drone_mesh(*,
 
                 # Make array of all link counts for partial drone mesh
                 total_link_count_dropout.append(link_count_dropout)
-
+                total_link_count_dropout_cmd.append(link_count_dropout_cmd)
                 # Check if the remaining network after dropout is fully connected
                 if is_network_fully_connected(node_list_dropout, link_list_dropout):
                     connected_count += 1
@@ -1437,10 +1545,16 @@ def process_drone_mesh(*,
                                     device_positions=device_grid)
 
                 # Histogram and drone position plots over total iterations
-                
-                plot_histogram_drone_links(file_name=f"{grid_prefix}_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram.png",
-                                                title_name=f"{grid_prefix} Histogram | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                video_rate= metadata["histogram_high_rate"]
+                cmd_rate= metadata["histogram_low_rate"]
+                plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram.png",
+                                                title_name=f"{grid_prefix} Video {video_rate} Mbps Histogram | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
                                                 drone_link_count=total_link_count_dropout,
+                                                iterations=dropout_iters,
+                                                file_folder_path=dir_origin_partial_plots)
+                plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram.png",
+                                                title_name=f"{grid_prefix} Command {cmd_rate} Mbps Histogram | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+                                                drone_link_count=total_link_count_dropout_cmd,
                                                 iterations=dropout_iters,
                                                 file_folder_path=dir_origin_partial_plots)
 
@@ -1474,7 +1588,7 @@ def process_drone_mesh(*,
 
         # Make node and link list for full drone mesh
         node_list_all = node_list(drone_positions=all_drone_positions)
-        link_list_all, link_count_all = link_list(wireless_prefix=wireless_prefix,
+        link_list_all, link_count_all,link_count_all_cmd = link_list(wireless_prefix=wireless_prefix,
                                                   nodes=node_list_all,
                                                   dist_comm=dist_comm,
                                                   margin_loss_db= margin_loss_db,
@@ -1500,11 +1614,15 @@ def process_drone_mesh(*,
                                 device_positions=device_grid)
 
             # Histogram and drone position plots over full drone mesh
-            plot_histogram_drone_links(file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram.png",
-                                        title_name=f"{grid_prefix} Histogram | tolerance = {tolerance} [m]",
+            plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram.png",
+                                        title_name=f"{grid_prefix} Video {video_rate} Mbps Histogram | tolerance = {tolerance} [m]",
                                         drone_link_count=link_count_all,
                                         file_folder_path=dir_origin_full_plots)
-
+            plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram.png",
+                                        title_name=f"{grid_prefix} Command {cmd_rate} Mbps Histogram | tolerance = {tolerance} [m]",
+                                        drone_link_count=link_count_all_cmd,
+                                        file_folder_path=dir_origin_full_plots)
+            
             plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
                                 wireless_prefix=wireless_prefix,
                                 file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_mesh.png",
