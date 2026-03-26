@@ -7,6 +7,8 @@ import signal
 import time
 import shutil
 import math
+import re
+import errno
 from pprint import pprint
 
 from mesh_design_lib import data_rate_given_dist_comm
@@ -17,10 +19,54 @@ import network as mn_network
 from network import mtu
 from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals, get_thread_id, exec
 
+## Check for dependencies
+ok = True
 # check if programs used are available
-if shutil.which("iperf3") is None:
-    print("ERROR: iperf3 is not installed or not in PATH.")
-    sys.exit(1)
+dependencies = ["iperf3", "batctl", "battpctl"]
+for dep in dependencies:
+    if shutil.which(dep) is None:
+        print(f"ERROR: {dep} is not installed or not in PATH.")
+        ok = False
+
+# check if superuser
+if os.geteuid() != 0:
+    print("ERROR: user is not super user")
+    ok = False
+
+# check if batman_adv patched version is loaded
+def batadv_patch_loaded() -> bool:
+    # Check if batman_adv loaded
+    loaded = False
+    result = subprocess.run("lsmod", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    for line in result.stdout.splitlines():
+        modname = line.split(b" ")[0]
+        if modname == b"batman_adv":
+            loaded = True
+            break
+    if not loaded:
+        print("ERROR: batman_adv is not loaded")
+        return False
+    
+    # Check if batman_adv is patched version
+    patched = False
+    result = subprocess.run(["dmesg", "-fkern", "-Lnever", "-linfo"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    batadv_loaded_regex = br"B\.A\.T\.M\.A\.N\. advanced .* loaded$"
+    matches = [line for line in result.stdout.splitlines() if re.search(batadv_loaded_regex, line)]
+    if len(matches) > 0:
+        batadv_patched_regex = br"^\[.*\] batman_adv: B\.A\.T\.M\.A\.N\. advanced \d{4}\.\d patched \(compatibility version \d+\) loaded$"
+        patched = bool(re.fullmatch(batadv_patched_regex, matches[-1]))
+    if not patched:
+        print("ERROR: batman_adv is not patched version")
+        return False
+
+    return loaded and patched
+
+if not batadv_patch_loaded():
+    print("ERROR: batman_adv patched version is not loaded. User is responsible for loading patched version of batman_adv.")
+    ok = False
+
+if not ok:
+    sys.exit(-errno.EINVAL)
 
 # List of processes for termination end of script
 tcpdump_procs = []
@@ -191,8 +237,8 @@ def run_iperf3_client(server_name: str,
         print(" ".join(client_cmd))
 
     subprocess.Popen(client_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     text=True,
                     start_new_session=True,
                     close_fds=True)
@@ -413,10 +459,10 @@ def main():
     time.sleep(30) # wait for batman to be ready (30s)
 
     # Apply throughput override
-    # batctl_set_neigh_throughputs(graph)
-    # if verbosity != "quiet":
-    #     print("Wait for throughput override")
-    # time.sleep(10) # wait for moving average in throughput override
+    batctl_set_neigh_throughputs(graph)
+    if verbosity != "quiet":
+        print("Wait for throughput override")
+    time.sleep(10) # wait for moving average in throughput override
 
     # Add devices and start tcpdump
     for device_id in device_ids:
