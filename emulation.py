@@ -180,13 +180,13 @@ def ipv4_addr(device_name: str):
 def stop_all_iperf3_servers():
     sigint_all(iperf3_servers)
 
-def run_iperf3_server(server_name: str):
+def run_iperf3_server(server_name: str, client_name: str):
     """
-    Setup an iperf3 server from a device name.
+    Setup an iperf3 server from a client name.
     Server port is specified from IPERF3_REF_PORT and the device number.
     """
-    server_num = int(server_name.strip("d"))
-    server_port = IPERF3_REF_PORT + server_num
+    client_num = int(client_name.strip("d"))
+    server_port = IPERF3_REF_PORT + client_num
 
     server_cmd = ["ip", "netns", "exec", f"ns-{server_name}", 
                   "iperf3", "-s", "-p", str(server_port)]
@@ -215,8 +215,10 @@ def run_iperf3_client(server_name: str,
     bitrate: max bitrate stream try to achieve (default=none)
     """
     # extract ip and port from server device
+    client_num = int(client_name.strip("d"))
+    server_port = IPERF3_REF_PORT + client_num
+
     server_num = int(server_name.strip("d"))
-    server_port = IPERF3_REF_PORT + server_num
     server_ip = f"10.200.100.{server_num+10}"
 
     iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}.json")
@@ -242,6 +244,18 @@ def run_iperf3_client(server_name: str,
                     text=True,
                     start_new_session=True,
                     close_fds=True)
+
+def run_iperf3_connection(server_name: str, 
+                          client_name: str,
+                          out_dir: str, 
+                          duration: float = 5, 
+                          udp: bool = False, 
+                          bitrate: str = ''):
+    """
+    run iperf3 connection from two device name spaces.
+    """
+    run_iperf3_server(server_name, client_name)
+    run_iperf3_client(server_name, client_name, out_dir, duration, udp, bitrate)
 
 def find_closest_node(this: dict, others: list[dict]):
     """
@@ -475,15 +489,14 @@ def main():
     time.sleep(2)  # allow to launch tcpdumps
 
     # start iperf3 test
-    run_iperf3_server(server_name="d0")
-    run_iperf3_server(server_name="d2")
-    time.sleep(5) # wait for iperf3 servers to start
-
-    run_iperf3_client(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False)
-    time.sleep(0.1)
-    run_iperf3_client(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=5, udp=False, bitrate="2M")
-    run_iperf3_client(server_name="d2", client_name="d3", out_dir=iperf3_dir, duration=5, udp=True, bitrate="8M")
-
+    run_iperf3_connection(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False, bitrate="2M")
+    run_iperf3_connection(server_name="d0", client_name="d2", out_dir=iperf3_dir, duration=6, udp=True, bitrate="2M")
+    run_iperf3_connection(server_name="d0", client_name="d3", out_dir=iperf3_dir, duration=7, udp=False, bitrate="3M")
+    run_iperf3_connection(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=8, udp=True, bitrate="3M")
+    run_iperf3_connection(server_name="d1", client_name="d0", out_dir=iperf3_dir, duration=9, udp=False, bitrate="4M")
+    run_iperf3_connection(server_name="d1", client_name="d2", out_dir=iperf3_dir, duration=10, udp=True, bitrate="4M")
+    run_iperf3_connection(server_name="d1", client_name="d3", out_dir=iperf3_dir, duration=11, udp=False, bitrate="5M")
+    run_iperf3_connection(server_name="d1", client_name="d4", out_dir=iperf3_dir, duration=12, udp=True, bitrate="5M")
 
 
     input("Press Enter to end emulation")
