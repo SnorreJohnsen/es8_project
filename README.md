@@ -22,3 +22,11 @@ sudo python3 emulation.py ...
 ```
 
 Note that `emulation.py` depends on numpy.
+
+## Dependencies
+
+- `iperf3`
+- `battpctl`
+- `batman-patch`
+- `numpy`
+- `batctl`
