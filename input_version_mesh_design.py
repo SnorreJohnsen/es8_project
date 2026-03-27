@@ -1386,40 +1386,40 @@ def graph_range_phyrate(metadata: dict,
         for i, s in enumerate(sorted_schemes)
     ]
 
+    os.makedirs(file_folder_path,exist_ok=True)
+
+    # Create table with deviation values
+    total_deviation_opt = 0
+    total_deviation_strict = 0
+    rows = []   # table storage
+    for x, y, z_opt, z_strict in zip(dist_comms,
+                                data_rates,
+                                dist_comms_mod_shannon_optimal,
+                                dist_comms_mod_shannon_strict):
+        deviation_opt = x - z_opt
+        deviation_strict = x - z_strict
+        total_deviation_opt += abs(deviation_opt)
+        total_deviation_strict += abs(deviation_strict)
+        # store row for table
+        rows.append({
+            "PHY Rate (Mbps)": f"{y:.2f}",
+            "Datasheet (m)": f"{x:.2f}",
+            "Optimal (m)": f"{z_opt:.2f}",
+            "Strict (m)": f"{z_strict:.2f}",
+            "Deviation Optimal (m)": f"{deviation_opt:.2f}",
+            "Deviation Strict (m)": f"{deviation_strict:.2f}",
+        })
+        if save_ranges == True:
+            metadata[f"{y:.2f}_Mbps_range"] = x
+    # averages
+    avg_deviation_opt = total_deviation_opt / len(dist_comms)
+    avg_deviation_strict = total_deviation_strict / len(dist_comms)
+    # create table
+    df = pd.DataFrame(rows)
+    df.to_latex(f"{file_folder_path}_table_bandwidth_{desired_bandwidth_Mhz}_MHz.tex", index=False)
 
     # FIGURE
     if enable_plot == True:
-        os.makedirs(file_folder_path,exist_ok=True)
-
-        # Create table with deviation values
-        total_deviation_opt = 0
-        total_deviation_strict = 0
-        rows = []   # table storage
-        for x, y, z_opt, z_strict in zip(dist_comms,
-                                    data_rates,
-                                    dist_comms_mod_shannon_optimal,
-                                    dist_comms_mod_shannon_strict):
-            deviation_opt = x - z_opt
-            deviation_strict = x - z_strict
-            total_deviation_opt += abs(deviation_opt)
-            total_deviation_strict += abs(deviation_strict)
-            # store row for table
-            rows.append({
-                "PHY Rate (Mbps)": f"{y:.2f}",
-                "Datasheet (m)": f"{x:.2f}",
-                "Optimal (m)": f"{z_opt:.2f}",
-                "Strict (m)": f"{z_strict:.2f}",
-                "Deviation Optimal (m)": f"{deviation_opt:.2f}",
-                "Deviation Strict (m)": f"{deviation_strict:.2f}",
-            })
-            if save_ranges == True:
-                metadata[f"{y:.2f}_Mbps_range"] = x
-        # averages
-        avg_deviation_opt = total_deviation_opt / len(dist_comms)
-        avg_deviation_strict = total_deviation_strict / len(dist_comms)
-        # create table
-        df = pd.DataFrame(rows)
-        df.to_latex(f"{file_folder_path}_table_bandwidth_{desired_bandwidth_Mhz}_MHz.tex", index=False)
 
         fig, ax1 = plt.subplots(figsize=(16, 9))
         plt.xscale('log')  # set x-axis to logarithmic
@@ -1954,6 +1954,12 @@ def main():
     
     parser.add_argument("-t","--transmitpower",type=float, 
                         help ="Only possible/nessacary if using shannon link budget")
+    parser.add_argument("-tol","--tolerances", type = str,
+                        help = "Set tolreances, Single value like 10 or comma-separated like 10,20,30, Default = 10")
+    parser.add_argument("-drop","--dropout_rates", type = str,
+                        help = "Set dropout rates Single value like 10 or comma-separated like 10,20,30, Default = 0.05, 0.1, 0.15, 0.2")
+    parser.add_argument("-iter","--iterations", type = int,
+                        help = "Set amount of times each Dropout is ran, Default = 100 ")
 
     args = parser.parse_args()
 
@@ -1969,10 +1975,10 @@ def main():
     test_dim = (length*scale_factor, width*scale_factor)
     test_samples = (30, 10)                           # number of sample points on area (x, y)
 
-    test_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
+    default_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0                         # distance redundancy for drone placement
-    test_dropout_rates = np.arange(0.05,0.20,0.05) #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 100                         # number of iterations for each dropout rate (used for histogram)
+    default_dropout_rates = np.arange(0.05,0.20,0.05) #dropout rate in percentage (min, max, stepsize)
+    default_drop_iter = 100                         # number of iterations for each dropout rate (used for histogram)
 
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
@@ -1994,8 +2000,6 @@ def main():
     metadata["DRONE_HEIGHT"] = drone_height
     metadata["DEVICE_HEIGHT"] = device_height
     metadata["SAMPLES"] = str(test_samples)
-    metadata["TOLERANCES"] = str(test_tolerances)
-    metadata["DROPOUT_RATES"] = str(test_dropout_rates)
     metadata["DISTANCE_REDUNDANCY"] = test_dist_redundancy
 
     #metadata["FREQ_MHZ"] = freq_Mhz
@@ -2003,7 +2007,9 @@ def main():
     metadata["MARGIN_LOSS"] = margin_loss_db
 
     # Save dropout iterations used for histogram
-    metadata["DROPOUT_ITERATIONS"] = test_dropout_iters
+    metadata["TOLERANCES"] = str(default_tolerances)
+    metadata["DROPOUT_RATES"] = str(default_dropout_rates)
+    metadata["DROPOUT_ITERATIONS"] = default_drop_iter
 
     # Calculate values for modelling wireless commmunication from wifi halow module
     # These values are the same for all grid types
@@ -2082,9 +2088,31 @@ def main():
         link_budget_model = args.link_budget.strip().lower() if args.link_budget else None
         data_rate_Mbps = args.datarate
         transmit_power_dbm = args.transmitpower
+        tol = args.tolerances
+        dropout_iter = args.iterations
+        drop_rates = args.dropout_rates
+        if tol is not None:
+            default_tolerances = np.array([float(x) for x in tol.split(",")])
+        if dropout_iter is not None:
+            default_drop_iter = dropout_iter
+        if  drop_rates is not None:
+            default_dropout_rates = np.array([float(x) for x in drop_rates.split(",")])
+            for i in range(len(default_dropout_rates)):
+                rate = default_dropout_rates[i]
+                if rate > 1 and rate <= 100:
+                    print()
+                    print(f"WARNING: dropout rate {rate} is not in range 0 to 1")
+                    default_dropout_rates[i] = rate / 100
+                    print(f"EXPECTED: you meant to write {default_dropout_rates[i]}")
+                if rate > 100:
+                    print()
+                    print(f"WARNING: THE RATES ARE SUPPORTED FOR 0.0 to 1.0, {rate} IS NOT WITHIN RANGE")
+                    exit()
 
+        metadata["TOLERANCES"] = str(default_tolerances)
+        metadata["DROPOUT_RATES"] = str(default_dropout_rates)
+        metadata["DROPOUT_ITERATIONS"] = default_drop_iter
         print()
-
         if grid == "square":
             test_grid_meta_prefix = "Square"
             test_grid_func = drone_sq_grid
@@ -2141,10 +2169,10 @@ def main():
                        dist_comm=dist_comm,
                        dim=test_dim,
                        drone_height=drone_height,
-                       tolerances=test_tolerances,
+                       tolerances=default_tolerances,
                        drone_distance_redundancy=test_dist_redundancy,
-                       dropout_rates=test_dropout_rates,
-                       dropout_iters=test_dropout_iters,
+                       dropout_rates=default_dropout_rates,
+                       dropout_iters=default_drop_iter,
                        margin_loss_db=margin_loss_db,
                        device_grid=device_grid,
                        link_budget_model = use_lookup_table,
