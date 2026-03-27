@@ -421,7 +421,7 @@ def calculate_device_links(*,
     return min_dist_sq
 
 def is_network_fully_connected(nodes: list[Node],
-                               links: list[Link]) -> bool:
+                               dist: float) -> bool:
     """
     Docstring for is_network_fully_connected
 
@@ -432,34 +432,99 @@ def is_network_fully_connected(nodes: list[Node],
     Returns:
     True if the network is fully connected.
     """
+    # checking if all nodes are reachable from each source
+    for source in nodes:
 
-    # If no drones in network return true
-    if len(nodes) == 0:
-        return True
+        # setup my start reachable source
+        cluster = [[source.x, source.y, source.z]]
+        visited = {source.id}
+        changed = True
 
-    # Build adjacency list
-    adjacency = {node.id: [] for node in nodes}
+        while changed:
+            changed = False
 
-    # Add links to other nodes in both directions since network is undirected
-    for link in links:
-        adjacency[link.source].append(link.target)
-        adjacency[link.target].append(link.source)
+            # check which targets i can reach given updated cluster
+            for target in nodes:
+                if target.id in visited:
+                    continue
 
-    # BFS algorithm
-    start_node = nodes[0].id                    # Set start node
-    visited = set([start_node])                 # Mark start node as visited, set([start_node]) = {start_node}
-    queue = [start_node]                        # Place start node in queue to explore
+                for cx, cy, cz in cluster:
+                    dx = target.x - cx
+                    dy = target.y - cy
+                    dz = target.z - cz
+
+                    if dx*dx + dy*dy + dz*dz <= dist**2:
+                        cluster.append([target.x, target.y, target.z])
+                        visited.add(target.id)
+                        changed = True
+                        break
+        if len(cluster) != len(nodes):
+            return False
+    return True
+                
+def checking_max_phyrate_fully_connected(nodes: list[Node],
+                                         dist_comm: float,
+                                         base_rate: float,
+                                         wireless_prefix: str = '',
+                                         use_lookup_table: bool = False) -> bool:
+    
+    # check for dist_comm
+    # if not reachable check less distance
+    # continue until found or return fail
+
+    dist = dist_comm
+
+    reached = is_network_fully_connected(nodes=nodes,dist = dist_comm)
+    if reached is True:
+        return base_rate
+    else:
+        if use_lookup_table is True:
+            rate_ranges = []
+            for key, value in metadata.items():
+                if key.lower().endswith("_mbps_range"):
+                    rate = float(key.split("_")[0])
+
+                    if rate < base_rate:
+                        rate_ranges.append((rate, value))
+            rate_ranges.sort(key=lambda x: x[0], reverse=True)
+
+            for rate, dist in rate_ranges:
+                reached = is_network_fully_connected(nodes=nodes,dist = dist)
+                if reached:
+                    return rate
+            return 0
+        
+        if use_lookup_table is False:
+            rates = np.arange(base_rate, 0, -1)
+
+            for rate in rates:
+                shannon_mod_receive_sens_strict = shannon(
+                metadata = metadata,
+                data_rate_Mbps=rate,
+                bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
+                noise_figure_db=3,
+                eta=metadata["ETA_STRICT"],
+                snr_eff=metadata["SNR_EFF_STRICT"]
+                )
+                dist = dist_comm_calc(
+                        metadata[f"{wireless_prefix}TRANSMIT_POWER"],
+                        shannon_mod_receive_sens_strict,   # use the corresponding receive sens
+                        transmit_gain_dbi=0,
+                        received_gain_dbi=0,
+                        margin_loss_db=3,
+                        freq_Mhz=metadata["FREQ_MHZ"]
+                    )
+            
+                reached = is_network_fully_connected(nodes=nodes,dist = dist)
+
+                if reached:
+                    return rate
+            return 0
+                
 
 
-    while queue:
-        current = queue.pop(0)                  # Take next node in queue to explore
-        for neighbor in adjacency[current]:     # Look at all drones connected to it
-            if neighbor not in visited:         # If neighbor not visited it is new so
-                visited.add(neighbor)           # Mark the new node as visited
-                queue.append(neighbor)          # Add it to queue to explore later
 
-    return len(visited) == len(nodes)
-
+    pass
 ###############################################################################
 #_____________________ NETWORK LISTS (JSON) __________________________________#
 ###############################################################################
@@ -1501,10 +1566,11 @@ def process_drone_mesh(*,
             total_link_count_dropout = []
             total_link_count_dropout_cmd = []
             # Create variable for network is fully connected percentage
-            connected_count = 0
+            total_reachable_phyrate = 0
+            reachable_phyrates = []
 
             # For loop over dropout iterations for histogram
-            for _ in range(dropout_iters):
+            for i in range(dropout_iters):
                 drone_positions_dropout = dropout_drones(meta_prefix=f"{grid_prefix}_{j}_", drone_positions=all_drone_positions, dropout_rate=dropout_rate)
                 
                 # Make node and link list for partial drone mesh with removed drones
@@ -1522,11 +1588,16 @@ def process_drone_mesh(*,
                 total_link_count_dropout.append(link_count_dropout)
                 total_link_count_dropout_cmd.append(link_count_dropout_cmd)
                 # Check if the remaining network after dropout is fully connected
-                if is_network_fully_connected(node_list_dropout, link_list_dropout):
-                    connected_count += 1
+                if debug_plots == True:
+                    reachable_phyrate = checking_max_phyrate_fully_connected(nodes=node_list_dropout,dist_comm=dist_comm, base_rate= data_rate_Mbps, use_lookup_table=link_budget_model)
+                    total_reachable_phyrate = total_reachable_phyrate + reachable_phyrate
+                    reachable_phyrates.append(reachable_phyrate)
 
+            if debug_plots == True:
                 # Calculate the connected percentage of given dropout mesh
-                metadata[f"{grid_prefix}_{j}_CONNECTED_PERCENTAGE"] = connected_count / dropout_iters
+                metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_AVERAGE"] = total_reachable_phyrate / dropout_iters
+                metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_MIN"] = min(reachable_phyrates)
+                metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_MAX"] = max(reachable_phyrates)
 
             # Metaprefix for file names
             prefix_dropout_real_perc = metadata[f"{grid_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
@@ -1901,7 +1972,7 @@ def main():
     test_tolerances = np.arange(10, 15, 5)          #tolerance in meters (min, max, stepsize) 
     test_dist_redundancy = 0                         # distance redundancy for drone placement
     test_dropout_rates = np.arange(0.05,0.20,0.05) #dropout rate in percentage (min, max, stepsize)
-    test_dropout_iters = 10                          # number of iterations for each dropout rate (used for histogram)
+    test_dropout_iters = 100                         # number of iterations for each dropout rate (used for histogram)
 
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
