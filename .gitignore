@@ -3,4 +3,6 @@
 __pycache__/
 **/__pycache__/
 pcaps/
+iperf3/
+emulation_output/
 .venv/

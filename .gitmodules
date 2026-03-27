@@ -1,0 +1,6 @@
+[submodule "meshnet-lab"]
+	path = meshnet-lab
+	url = https://github.com/mwarning/meshnet-lab
+[submodule "batman-patch"]
+	path = batman-patch
+	url = git@github.com:mhtoribio/batman-patch
