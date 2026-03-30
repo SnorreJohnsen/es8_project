@@ -758,13 +758,17 @@ def link_shannon(
     count_cmd: int, Updated count of links above the low data rate (command).
     """
 
-    data_rate_mbps = data_rate_given_dist_comm(distance_m=distance_sq,
+    distance = np.sqrt(distance_sq)
+
+    data_rate_mbps = data_rate_given_dist_comm(distance_m=distance,
                                                 bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
                                                 transmit_power_dbm=metadata[f"{wireless_prefix}TRANSMIT_POWER"],
                                                 margin_loss_db=margin_loss_db,
                                                 eta=eta,
                                                 snr_eff=snr_eff,
                                                 freq_Mhz=metadata["FREQ_MHZ"])
+    
+
     
     rngs = []
     for s in [20,0.1]:
@@ -1246,12 +1250,12 @@ def plot_drone_links(*,
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = plt.colorbar(sm, ax=ax, shrink=0.5)
-    cbar.set_label("Bandwidth (Mbit)")
+    cbar.set_label("PHYrate (Mbps)")
 
     title_text = (
     f"{title_name}\n"
     f"Drones = {len(nodes)}, Selected source node: {source_node} \n"
-    f"Showing links with Phyrates above {threshold_phyrate_links} [Mbps]"
+    f"Showing links with PHYrates above {threshold_phyrate_links} [Mbps]"
     )
     ax.set_title(title_text, fontsize=font_size*2, fontweight='bold')
     ax.set_xlabel("[m]", fontsize=font_size)
