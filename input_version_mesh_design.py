@@ -37,7 +37,7 @@ class Link:
     source: str
     target: str
     bandwidth_mbit: str
-    loss: str
+    packet_loss: str
 
 ###############################################################################
 #__________________________ DRONE MESH GRIDS _________________________________#
@@ -108,8 +108,6 @@ def drone_triangle_grid(dim: tuple[float, float],
     x_position_partial_column = np.linspace(x_offset_partial,
                                             x_offset_partial+step_column*(n_partial_columns-1),
                                             n_partial_columns)
-
-    # 30000 + 5000 / 1000
 
     # Make Full Grid (combine full and partial for x and y)
     position_full_column = make_grid_product(x_position_full_column, y_position_full_column)
@@ -488,7 +486,8 @@ def checking_max_phyrate_fully_connected(nodes: list[Node],
     nodes: List of nodes contataining of drone positions in a given mesh
     dist_comm: Theoretical communication distance of drone in meters
     base_rate: Base phyrate (the phyrate used for creating mesh)
-    use_lookup_table: bool for using lookup table (True for datasheet, False for shannon)
+    wireless_prefix: str, prefix string prepended to metadata keys. Default = ""
+    use_lookup_table: bool, for using lookup table (True for datasheet, False for shannon)
 
     Return:
     The maximum phyrate for a fully connected mesh
@@ -795,7 +794,7 @@ def link_shannon(
                 link = Link(source=source.id,
                                 target=target.id,
                                 bandwidth_mbit=f"{data_rate_mbps:.2f}",
-                                loss = "0.1")
+                                packet_loss = "10") # 10%
                 links.append(link)
 
                 if distance_sq <= (rng_video + 1)**2:
@@ -869,10 +868,10 @@ def link_datasheet(distance_sq: float,
 
     if data_rate_mbps > threshold_link:
         link = Link(source=source.id,
-                        target=target.id,
-                        bandwidth_mbit=f"{data_rate_mbps:.2f}",
-                        loss="0.1")
-                    #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
+                    target=target.id,
+                    bandwidth_mbit=f"{data_rate_mbps:.2f}",
+                    packet_loss="10") # 10%
+                    # data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
         links.append(link)
 
         if distance_sq <= (rng_video + 1)**2:
