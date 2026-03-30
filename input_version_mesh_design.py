@@ -1419,12 +1419,14 @@ def graph_range_phyrate(metadata: dict,
     # averages
     avg_deviation_opt = total_deviation_opt / len(dist_comms)
     avg_deviation_strict = total_deviation_strict / len(dist_comms)
-    # create table
-    df = pd.DataFrame(rows)
-    df.to_latex(f"{file_folder_path}_table_bandwidth_{desired_bandwidth_Mhz}_MHz.tex", index=False)
+
 
     # FIGURE
     if enable_plot == True:
+
+        # create table
+        df = pd.DataFrame(rows)
+        df.to_latex(f"{file_folder_path}_table_bandwidth_{desired_bandwidth_Mhz}_MHz.tex", index=False)
 
         fig, ax1 = plt.subplots(figsize=(16, 9))
         plt.xscale('log')  # set x-axis to logarithmic
