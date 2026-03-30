@@ -37,7 +37,7 @@ class Link:
     source: str
     target: str
     bandwidth_mbit: str
-    packet_loss: str
+    loss: str
 
 ###############################################################################
 #__________________________ DRONE MESH GRIDS _________________________________#
@@ -322,13 +322,17 @@ def dropout_drones(*,
     Docstring for dropout_drones
 
     Inputs:
+    -------
     meta_prefix: prefix string prepended to metadata keys
     drone_positions: Nx2 numpy array (not mutated)
     dropout_rate: percentage of drones which are removed (0..1)
 
-    Returns: Mx2 numpy array of drones left after dropout.
-    Return array originates from copy of drone_positions.
+    Returns:
+    -------
+    Mx2 numpy array of drones left after dropout.
+    Return array originating from copy of drone_positions.
     """
+
     if dropout_rate > 1 or dropout_rate < 0:
         print(f"dropout_drones: Invalid {dropout_rate=}")
         exit(-1)
@@ -356,6 +360,17 @@ def dropout_drones(*,
 def make_device_grid(dim: tuple[float, float],
                      z_height: float,
                      sample_resolution: tuple[float, float]):
+    """
+    Docstring for make_device_grid
+    
+    Inputs:
+    dim: Dimensions [x, y] of the area the drone mesh need to cover
+    z_height: Device height [z]
+    sample_resolution: Sample resolution [x, y] i.e. how many sample points inside the dimensions
+
+    Returns: 
+    device_positions: NDArray with grid of device positions
+    """
 
     x_dim, y_dim = dim
     x_sample_res, y_sample_res = sample_resolution
@@ -378,14 +393,15 @@ def calculate_device_links(*,
     Docstring for calculate_device_links
 
     Inputs:
-    grid_name: Name of grid used for file and plot name
+    meta_prefix: prefix string prepended to metadata keys
     nodes: List of nodes contataining of drone positions in a given mesh
-    dim: Dimensions [x, y] of the area the drone mesh need to cover
-    sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
+    dist_comm: Theoretical communication distance of drone in meters
+    device_positions: NDArray with grid of device positions
 
     Returns:
     Saves min and max device links to metadata
     Saves percentage of area covered to metadata
+    Saves the minimum squared distance between two nodes
     """
 
     # Extract drone position from list -> shape (N_points, 2)
@@ -395,15 +411,11 @@ def calculate_device_links(*,
     # device_points[:, None, :] -> (N_points, 1, 3)
     # drone_positions[None, :, :] -> (1, N_drones, 3)
     # Result -> (N_points, N_drones)
-
-    # 
-
     diff = device_positions[:, None, :] - drone_positions[None, :, :]
 
     dist_sq = np.sum(diff**2, axis=2)  # shape: (num_devices, num_drones)
     closest_idx = np.argmin(dist_sq, axis=1)
     min_dist_sq = dist_sq[np.arange(dist_sq.shape[0]), closest_idx]
-
 
     # Count links per device point
     links_per_device = np.sum(dist_sq <= dist_comm**2, axis=1)
@@ -427,12 +439,13 @@ def is_network_fully_connected(nodes: list[Node],
     Docstring for is_network_fully_connected
 
     Inputs:
-    nodes: List of nodes contataining of drone positions in a given mesh
-    links: List of drone links
+    nodes: List of nodes containing drone positions in a given mesh
+    dist: Distance between two nodes (square), Distance used to calculate intersection (triangle)
 
     Returns:
     True if the network is fully connected.
     """
+
     # checking if all nodes are reachable from each source
     for source in nodes:
 
@@ -468,6 +481,21 @@ def checking_max_phyrate_fully_connected(nodes: list[Node],
                                          base_rate: float,
                                          wireless_prefix: str = '',
                                          use_lookup_table: bool = False) -> bool:
+    """
+    Docstring for checking_max_phyrate_fully_connected
+    
+    Input:
+    nodes: List of nodes contataining of drone positions in a given mesh
+    dist_comm: Theoretical communication distance of drone in meters
+    base_rate: Base phyrate (the phyrate used for creating mesh)
+    use_lookup_table: bool for using lookup table (True for datasheet, False for shannon)
+
+    Return:
+    The maximum phyrate for a fully connected mesh
+    base_rate: If fully connected for dist_comm (base_rate is the maximum phyrate)
+    rate: If not fully connected for dist_comm, checks at lower distances (rate is the maximum phyrate)
+    If no distance returns fully connected mesh, return 0  
+    """
     
     # check for dist_comm
     # if not reachable check less distance
@@ -521,17 +549,59 @@ def checking_max_phyrate_fully_connected(nodes: list[Node],
                 if reached:
                     return rate
             return 0
-                
 
+def scale_alpha(rate,min_rate,max_rate):
+    min_alpha = 0.1
+    max_alpha = 0.4
+    if max_rate == min_rate:
+        return 0.5  # fallback if all rates are equal
+    norm = (rate - min_rate) / (max_rate - min_rate)
+    return min_alpha + norm * (max_alpha - min_alpha)
 
+def shannon_fit( data_rate, snr_eff, eta,bandwidth):
+    # Use the closest_bandwidth (assume constant) and fixed noise figure
+    return np.array([
+        shannon(
+            metadata = metadata,
+            data_rate_Mbps=dr,
+            bandwidth_Mhz=bandwidth,
+            noise_figure_db=3,
+            eta=eta,
+            snr_eff=snr_eff
+        )
+        for dr in data_rate
+    ])
 
-    pass
+def residuals(params, data_rate, y, bandwidth):
+    snr_eff, eta = params
+    pred = shannon_fit(data_rate, snr_eff, eta, bandwidth)
+
+    r = pred - y
+
+    # penalize positive deviations strongly
+    r[r < 0] *= 5
+
+    return r
+
+def sort_scheme_for_data_rate(desired_bandwidth_Mhz: float,
+                              lookup_table: dict):
+    available_bandwidth = np.array(list(lookup_table.keys()))
+    bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
+    closest_bandwidth = int(available_bandwidth[bandwidth_index])
+
+    # Get all MCS schemes for that bandwidth
+    schemes = lookup_table[closest_bandwidth].values()
+
+    # Find the sorted_scheme with data_rate closest to desired_rate_Mbps
+    sorted_schemes = sorted(schemes, key=lambda s: s['data_rate'])
+
+    return sorted_schemes, closest_bandwidth
+
 ###############################################################################
 #_____________________ NETWORK LISTS (JSON) __________________________________#
 ###############################################################################
 
 def node_list(drone_positions: np.ndarray) -> list[Node]:
-
     """
     Docstring for node_list
 
@@ -543,8 +613,8 @@ def node_list(drone_positions: np.ndarray) -> list[Node]:
     """
 
     # Sort drone positions by x then y
-    sorted_pos_indences = np.lexsort((drone_positions[:,1],  #secondary key (y)
-                                      drone_positions[:,0])) #primary key (x)
+    sorted_pos_indences = np.lexsort((drone_positions[:,1],  # secondary key (y)
+                                      drone_positions[:,0])) # primary key (x)
 
     drone_positions = drone_positions[sorted_pos_indences]
 
@@ -576,11 +646,14 @@ def link_list(*,
 
     Inputs:
     nodes: list of sorted N Node classes of drone IDs and positions
-    dist_comm: Communication distance of drone in meters
+    dist_comm: Theoretical communication distance of drone in meters
+    threshold_link: float,
+    use_lookup_table: bool for using lookup table (True for datasheet, False for shannon)
 
     Returns:
     links: list of N Link classes with sources and respective targets
-    num_links: Nx1 numpy array of links for each drone
+    num_links_video: Nx1 numpy array of links for each drone
+    num_links_cmd: 
     """
 
     links: list[Link] = []
@@ -626,7 +699,7 @@ def link_list(*,
         num_links_video.append(count)
         num_links_cmd.append(count_cmd)
         
-    return links, num_links_video,num_links_cmd
+    return links, num_links_video, num_links_cmd
 
 def link_shannon(
                  distance_sq: float,
@@ -640,6 +713,31 @@ def link_shannon(
                  count: int,
                  count_cmd: int,
                  wireless_prefix: str = ""):
+    """
+    Docstring for link_shannon:
+
+    Inputs:
+    --------
+    distance_sq : float, Squared distance between the source and target nodes (m^2).
+    eta : float, Spectral efficiency factor used in the Shannon calculation.
+    snr_eff : float, Effective signal-to-noise ratio used in the Shannon calculation.
+    margin_loss_db : float, Additional loss margin in dB applied to the link budget.
+    links : list, valid Link objects will be appended to this list.
+    target : object, Target node object. Must have an `id` attribute.
+    source : object, Source node object. Must have an `id` attribute.
+    threshold_link : float, Minimum required data rate (Mbps) for a link to be considered valid.
+    count : int, Counter for links with phyrate above the "video" communication range.
+    count_cmd : int, Counter for links with phyrate above the "command" communication range.
+    wireless_prefix : str, optional
+        Prefix used to access wireless-specific parameters in the metadata
+        dictionary (e.g., "UAV_", "GROUND_"). Default is "".
+
+    Returns:
+    -------
+    links : list, Updated list of Link objects that satisfy the threshold condition.
+    count : int, Updated count of links above the high data rate (video).
+    count_cmd : int, Updated count of links above the low data rate (command).
+    """
 
     data_rate_mbps = data_rate_given_dist_comm(distance_m=distance_sq,
                                                 bandwidth_Mhz=metadata[f"{wireless_prefix}BANDWIDTH"],
@@ -673,17 +771,15 @@ def link_shannon(
     metadata["histogram_low_rate"] = 0.1
     metadata["histogram_high_rate"] = 20
 
-
     if data_rate_mbps > threshold_link:
                 link = Link(source=source.id,
                                 target=target.id,
                                 bandwidth_mbit=f"{data_rate_mbps:.2f}",
-                                packet_loss = "0.1")
-                            #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
+                                loss = "0.1")
                 links.append(link)
 
                 if distance_sq <= (rng_video + 1)**2:
-                # Count how many are within dist_comm (exclude itself)
+                    # Count how many are within dist_comm (exclude itself)
                     count = count + 1
                 
                 if distance_sq <= (rng_100_kbps + 1)**2:
@@ -700,6 +796,28 @@ def link_datasheet(distance_sq: float,
                    count_cmd: int,
                    wireless_prefix: str = ""
                    ):
+    
+    """
+    Docstring for link_datasheet:
+
+    Inputs:
+    --------
+    distance_sq : float, Squared distance between the source and target nodes (m^2).
+    links : list, valid Link objects will be appended to this list.
+    target : object, Target node object. Must have an `id` attribute.
+    source : object, Source node object. Must have an `id` attribute.
+    threshold_link : float, Minimum required data rate (Mbps) for a link to be included in JSON.
+    count : int, Counter for links with phyrate above the "video" communication range.
+    count_cmd : int, Counter for links with phyrate above the "command" communication range.
+    wireless_prefix : str, optional. Default is "".
+
+    Returns:
+    -------
+    links : list, Updated list of Link objects that satisfy the threshold condition.
+    count : int, Updated count of links above the high data rate (video).
+    count_cmd : int, Updated count of links above the low data rate (command).
+    """
+
     rate_ranges = []
     for key, value in metadata.items():
         if key.lower().endswith("_mbps_range"):
@@ -733,7 +851,7 @@ def link_datasheet(distance_sq: float,
         link = Link(source=source.id,
                         target=target.id,
                         bandwidth_mbit=f"{data_rate_mbps:.2f}",
-                        packet_loss="0.1")
+                        loss="0.1")
                     #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
         links.append(link)
 
@@ -753,10 +871,20 @@ def make_json_network(*,
                       nodes: list,
                       links: list):
     """
-    Docstring for make_json_network
+    Docstring for make_json_network:
 
+    Inputs:
+    --------
+    file_name : str, Name of the JSON file to be created.
+    file_folder_path : str, Path to the folder where the JSON file will be saved.
+    nodes : list, List of node objects (dataclasses) to be included in the network.
+    links : list, List of link objects (dataclasses) to be included in the network.
 
+    Returns:
+    -------
+    Writes the network structure (nodes and links) to a JSON file.
     """
+
     network = dict()
 
     network["nodes"] = [asdict(i) for i in nodes]
@@ -766,16 +894,8 @@ def make_json_network(*,
         json.dump(network, f)
 
 ###############################################################################
-#___________________________ PLOT FUNCITONS __________________________________#
+#___________________________ PLOT FUNCTIONS __________________________________#
 ###############################################################################
-
-def scale_alpha(rate,min_rate,max_rate):
-    min_alpha = 0.1
-    max_alpha = 0.4
-    if max_rate == min_rate:
-        return 0.5  # fallback if all rates are equal
-    norm = (rate - min_rate) / (max_rate - min_rate)
-    return min_alpha + norm * (max_alpha - min_alpha)
 
 def plot_drone_positions(*,
                          meta_prefix: str = "",
@@ -796,6 +916,34 @@ def plot_drone_positions(*,
                          use_lookup_table: bool,
                          font_size: float = 8.0):
 
+    """
+    Docstring for plot_drone_positions:
+
+    Inputs:
+    --------
+    meta_prefix : str, optional. Default is "".
+    wireless_prefix : str, optional. Default is "".
+    title_name : str, Title of the plot.
+    file_name : str, Name of the file where the plot will be saved.
+    nodes : list, List of node objects. Each node must have [x,y] attributes.
+    device_positions : np.ndarray, Array of device positions with shape (N, 2).
+    distance : float, Distance between drones (used for display in title).
+    dist_comm : float, Communication distance threshold (used for display in title).
+    thresholds_phyrate : list[float], List of PHY rate thresholds (Mbps) used to draw coverage regions.
+    dist_device_to_drone : np.ndarray, Array of squared distances between devices and drones (m^2).
+    links : list, List of Link objects containing bandwidth information.
+    eta : float, Spectral efficiency factor used in the Shannon calculation.
+    snr_eff : float, Effective signal-to-noise ratio used in the Shannon calculation.
+    dim : tuple[float, float], Dimensions (length, width) of the plotted area.
+    file_folder_path : str, Path to the folder where the plot will be saved.
+    use_lookup_table : bool, If True, uses predefined rate-distance lookup table; otherwise uses Shannon model.
+    font_size : float, optional
+
+    Returns:
+    -------
+    Generates and saves a plot visualizing drone positions, device positions, communication ranges, and PHY rate thresholds.
+    """
+
     fig, ax_drone_pos = plt.subplots()
 
     # Plot drone positions as dots form node list
@@ -810,7 +958,7 @@ def plot_drone_positions(*,
     
     device_links_rate = []
     if not use_lookup_table:
-    # dist_device_to_drone should already be squared distances
+        # dist_device_to_drone should already be squared distances
         for dist_sq in dist_device_to_drone:
             dist = np.sqrt(dist_sq)  # only here
 
@@ -847,7 +995,6 @@ def plot_drone_positions(*,
     if not phyrates:
         phyrates = [0]
 
-
     rate_ranges = []
 
     for key, value in metadata.items():
@@ -856,7 +1003,6 @@ def plot_drone_positions(*,
             rate_ranges.append((rate, value))
 
     rate_ranges.sort(key=lambda x: x[0])
-
 
     threshold_distances = []
     matched_rates = []
@@ -897,8 +1043,6 @@ def plot_drone_positions(*,
         ) 
         for threshold_sensivity in threshold_sensivities
         ]
-
-
 
     # assign colors (can be longer than three thresholds)
     cmap = plt.get_cmap('viridis')
@@ -999,6 +1143,25 @@ def plot_drone_links(*,
                          source_node: str = "",
                          threshold_phyrate_links: float = 0.0,
                          font_size: float = 8.0):
+    """
+    Docstring for plot_drone_links:
+
+    Inputs:
+    --------
+    title_name: str, Title of the plot.
+    file_name: str, Name of the file where the plot will be saved.
+    nodes: list, List of node objects. Each node must have [id, x, y] attributes.
+    links: list, List of Link objects containing source, target, and bandwidth information.
+    file_folder_path: str, Path to the folder where the plot will be saved.
+    source_node: str, optional. Default is "".
+    threshold_phyrate_links: float, Minimum PHY rate (Mbps) required for links to be displayed.
+    font_size: float, optional
+
+    Returns:
+    -------
+    Generates and saves a plot visualizing links from a selected source node, where link color represents bandwidth.
+    """
+
     id_pos = [node.id for node in nodes]
 
     # Case 1: No input, pick randomly
@@ -1086,6 +1249,22 @@ def link_matrix(links: list,
                 nodes:list,
                 file_folder_path: str,
                 file_name: str):
+    """
+    Docstring for link_matrix:
+
+    Inputs:
+    --------
+    links: list, List of Link objects containing source, target, and bandwidth information.
+    nodes: list, List of node objects. Each node must have [id, x, y] attributes.
+    file_folder_path: str, Path to the folder where the LaTeX file will be saved.
+    file_name: str, Name of the LaTeX file (without extension).
+
+    Returns:
+    -------
+    Generates and saves a LaTeX table representing the link bandwidth matrix,
+    where each cell is color-coded based on the PHY rate between nodes.
+    """
+
     node_dict = {node.id: (node.x, node.y) for node in nodes}
     node_ids = sorted(node_dict, key=lambda x: int(x[1:]))
 
@@ -1146,6 +1325,24 @@ def plot_histogram_drone_links(*,
                                iterations: int = 1,
                                file_folder_path: str,
                                font_size: float = 16.0):
+    
+    """
+    Docstring for plot_histogram_drone_links:
+
+    Inputs:
+    --------
+    file_name: str, Name of the file where the histogram will be saved.
+    title_name: str, Title of the histogram plot.
+    drone_link_count: list, List containing the number of links per drone.
+        Can be a flat list or a list of lists (e.g., from multiple iterations).
+    iterations: int, Number of iterations used to average the histogram values. Default is 1.
+    file_folder_path: str, Path to the folder where the plot will be saved.
+    font_size: float, optional
+
+    Returns:
+    -------
+    Generates and saves a histogram showing the distribution of the number of links per drone.
+    """
 
     # Build histogram of # drones and # links
     fig_hist, ax_hist = plt.subplots(figsize=(8,5))
@@ -1195,45 +1392,6 @@ def plot_histogram_drone_links(*,
     fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
     plt.close(fig_hist)
 
-def shannon_fit( data_rate, snr_eff, eta,bandwidth):
-    # Use the closest_bandwidth (assume constant) and fixed noise figure
-    return np.array([
-        shannon(
-            metadata = metadata,
-            data_rate_Mbps=dr,
-            bandwidth_Mhz=bandwidth,
-            noise_figure_db=3,
-            eta=eta,
-            snr_eff=snr_eff
-        )
-        for dr in data_rate
-    ])
-
-def residuals(params, data_rate, y, bandwidth):
-    snr_eff, eta = params
-    pred = shannon_fit(data_rate, snr_eff, eta, bandwidth)
-
-    r = pred - y
-
-    # penalize positive deviations strongly
-    r[r < 0] *= 5
-
-    return r
-
-def sort_scheme_for_data_rate(desired_bandwidth_Mhz: float,
-                              lookup_table: dict):
-    available_bandwidth = np.array(list(lookup_table.keys()))
-    bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
-    closest_bandwidth = int(available_bandwidth[bandwidth_index])
-
-    # Get all MCS schemes for that bandwidth
-    schemes = lookup_table[closest_bandwidth].values()
-
-    # Find the sorted_scheme with data_rate closest to desired_rate_Mbps
-    sorted_schemes = sorted(schemes, key=lambda s: s['data_rate'])
-
-    return sorted_schemes, closest_bandwidth
-
 def graph_sensitivity_phyrate(metadata: dict,
                               file_folder_path: str,
                               filename: str,
@@ -1242,14 +1400,30 @@ def graph_sensitivity_phyrate(metadata: dict,
                               lookup_table_name: str,
                               enable_plot: bool
                               ):
+    """
+    Docstring for graph_sensitivity_phyrate:
+
+    Inputs:
+    --------
+    metadata : dict, Dictionary containing system parameters.
+    file_folder_path : str, Path to the folder where the plot will be saved.
+    filename : str, Name of the output file (without extension).
+    desired_bandwidth_Mhz : float, Desired bandwidth used to select the closest scheme from the lookup table.
+    lookup_table : dict, Lookup table containing modulation schemes with data rates and sensitivities.
+    lookup_table_name : str, Name of the lookup table (used for labeling in the plot).
+    enable_plot : bool, If True, generates and saves the sensitivity vs PHY rate plot.
+
+    Returns:
+    -------
+    Updates metadata with fitted Shannon parameters (optimal and strict) and optionally generates and saves a plot comparing datasheet values with Shannon-based models.
+    """
+
     # For desired bandwidth
     sorted_schemes, closest_bandwidth = sort_scheme_for_data_rate(desired_bandwidth_Mhz,lookup_table)
-
 
     # Take the values out from the lookup table
     data_rates = [s['data_rate'] for s in sorted_schemes]
     sensitivities = [s['receive_sensitivity'] for s in sorted_schemes]
-
 
     # Standard shannon
     shannon_receive_sens = [
@@ -1264,11 +1438,8 @@ def graph_sensitivity_phyrate(metadata: dict,
         for data_rate in data_rates
     ]
 
-
     # fit the best parameters for snr_eff and eta to fit the datasheet
-
     # For desired MHz bandwidth
-
     popt, pcov = curve_fit(
         lambda dr, snr_eff, eta:
             shannon_fit(dr, snr_eff, eta, closest_bandwidth),
@@ -1331,9 +1502,28 @@ def graph_range_phyrate(metadata: dict,
                         desired_bandwidth_Mhz: float,
                         lookup_table: dict,
                         lookup_table_name: str,
-                        enable_plot: bool,
-                        save_ranges: bool = True
+                        enable_plot: bool
                         ):
+    """
+    Docstring for graph_range_phyrate:
+
+    Inputs:
+    --------
+    metadata : dict, Dictionary containing system parameters (e.g., frequency, fitted Shannon parameters).
+    file_folder_path : str, Path to the folder where output files (plot and table) will be saved.
+    filename : str, Name of the output plot file (without extension).
+    desired_bandwidth_Mhz : float, Desired bandwidth used to select the closest scheme from the lookup table.
+    lookup_table : dict, Lookup table containing modulation schemes with data rates, transmit power, and sensitivities.
+    lookup_table_name : str, Name of the lookup table (used for labeling in the plot).
+    enable_plot : bool, If True, generates and saves the range vs PHY rate plot and LaTeX table.
+
+    Returns:
+    -------
+    Updates metadata with communication ranges per PHY rate and optionally
+    generates and saves a plot and LaTeX table comparing datasheet values with
+    modified Shannon-based models.
+    """
+
     data_rates = []
     dist_comms = []
 
@@ -1414,12 +1604,11 @@ def graph_range_phyrate(metadata: dict,
             "Deviation Optimal (m)": f"{deviation_opt:.2f}",
             "Deviation Strict (m)": f"{deviation_strict:.2f}",
         })
-        if save_ranges == True:
-            metadata[f"{y:.2f}_Mbps_range"] = x
+        metadata[f"{y:.2f}_Mbps_range"] = x
+    
     # averages
     avg_deviation_opt = total_deviation_opt / len(dist_comms)
     avg_deviation_strict = total_deviation_strict / len(dist_comms)
-
 
     # FIGURE
     if enable_plot == True:
@@ -1438,33 +1627,18 @@ def graph_range_phyrate(metadata: dict,
         ax1.plot(dist_comms_mod_shannon_optimal, data_rates, color="green", label=f"Modified shannon {lookup_table_name} with avg deviation of {avg_deviation_opt:.2f} (m) optimal")
         ax1.plot(dist_comms_mod_shannon_strict, data_rates, color="red", label=f"Modified shannon {lookup_table_name} with avg deviation of {avg_deviation_strict:.2f} (m) strict")
 
-    # FOR EXP PLOT
-    # # for regression curve order size 4 is used as highest without significiantly seing overfit
-    # params, _ = curve_fit(exp_model,dist_comms,data_rates, p0=(max(data_rates), 0.001))   # initial guess)
-    # scale_exp, exp_param = params
-    # # for plotting regression
-    # x_line = np.linspace(min(dist_comms), 30000, 200)
-    # y_line = exp_model(x_line, scale_exp, exp_param)
-    # total_deviation_reg = 0
-    # for x, y in zip(dist_comms, data_rates):
-    #     predicted_rate = exp_model(x,scale_exp, exp_param)
-    #     deviation = y - predicted_rate            # residual
-    #     ax1.annotate(f"({x:.2f}, {y} \n Δ={deviation:.2f} Mbps)",
-    #                 (x, y),
-    #                 textcoords="offset points",
-    #                 xytext=(5, 5),
-    #                 fontsize=8)
-    #     total_deviation_reg += abs(deviation)
-    # avg_deviation_reg = total_deviation_reg / len(dist_comms)
-    # ax1.plot(x_line, y_line, label=f"Regression curve with avg deviation of {avg_deviation_reg:.2f} Mbps")
         ax1.legend(fontsize=18, loc='upper right')
         file_path_graph = os.path.join(file_folder_path, filename + ".png")
         fig.savefig(file_path_graph,dpi=300, bbox_inches = 'tight')
         plt.close(fig)
 
+###############################################################################
+#___________________________ EXECUTIVE FUNCTIONS _____________________________#
+###############################################################################
+
 def process_drone_mesh(*,
                        grid_prefix: str,
-                       wireless_prefix:str,
+                       wireless_prefix: str = "",
                        dist_comm: float,
                        dim: tuple[float, float],
                        drone_height: float,
@@ -1479,25 +1653,34 @@ def process_drone_mesh(*,
                        grid_func,
                        **kwargs):
     """
-    Docstring for process_drone_mesh
+    Docstring for process_drone_mesh:
 
     Inputs:
-    grid_prefix: Name for plot title, file name and folder for given grid type
-    dist_comm: Communication distance of drone in meters
-    dim: Dimensions [x, y] of the area the drone mesh need to cover
-    height: Drone height [z]
-    sample_resolution: Sample resolution [x, y] ie. how many sample points inside the dimensions
-    tolerances: Tx1 numpy array of distance tolerances used for calculating distance between drones
-    drone_distance_redundancy: Distance redundancy used in calc_distance function for placing drones in grid
-    dropout_rates: Nx1 numpy array of percentages of drones which are removed (0..1)
-    dropout_iters: Number of iterations for each dropout rate (used for histogram)
-    grid_func: Grid functions which outputs numpy array of drone positions in given grid type
-    grid_func_kwargs: Input dimentions only, distance is calculated in this function
+    --------
+    grid_prefix: str, Name prefix used for plot titles, file names, and folders for a given grid type.
+    wireless_prefix: str, Default = ""
+    dist_comm: float, Communication distance of drones in meters.
+    dim: tuple[float, float], Dimensions [x, y] of the area to be covered by the drone mesh.
+    drone_height: float, Altitude (z-axis) of the drones in meters.
+    tolerances: np.ndarray, Array of distance tolerances.
+    drone_distance_redundancy: float, Redundancy factor applied to drone spacing calculation.
+    dropout_rates: np.ndarray, Array of dropout percentages (0–1) for simulating partial mesh scenarios.
+    dropout_iters: int, Number of iterations per dropout rate (used for histograms and statistics).
+    margin_loss_db: float, Margin loss in dB for link calculations.
+    device_grid: np.ndarray, Positions of devices to calculate drone-to-device connectivity.
+    link_budget_model: bool, If True, use lookup-table-based link budget; otherwise use calculated link model.
+    debug_plots: bool, If True, generates and saves detailed plots (histograms, drone positions, links).
+    grid_func: function, Function that generates drone positions for the specified grid type; must accept dim and dist as inputs.
+    **kwargs: dict, Additional keyword arguments passed to grid_func.
 
     Returns:
-    Saves drone position plots for both full drone mesh and one partial drone mesh(after dropout) in .png file
-    Saves histogram of drone link count for both full drone mesh and total link count for (dropout_iters) partial drone meshes fro each tolerance in .png file
-    Saves drone network graph of full drone mesh and one example of a partial drone mesh after dropout in a .json file
+    --------
+    None, Saves full and partial drone mesh outputs including:
+    - Drone position plots (.png) for full and partial meshes.
+    - Histograms of drone link counts (.png) for full and partial meshes.
+    - Drone network graphs (.json) for full and partial meshes.
+    - Link matrices (.tex) for LaTeX visualization.
+    - Updates metadata.json with drone statistics, connectivity percentages, dropout rates, and number of drones.
     """
 
     # Create folder structure for mesh output
@@ -1541,7 +1724,7 @@ def process_drone_mesh(*,
 
     # For plotting parameters set in Mbps
     thresholds_phyrate_heatmap = [data_rate_Mbps,20, 13, 3.3]
-    # both for creation of json and also of plotting indivual node links
+    # both for creation of json and also of plotting individual node links
     # plot individual node
     threshold_phyrate_links = 0
     # threshold for link to add to json 
@@ -1741,6 +1924,7 @@ def inputs_define(*,
         metadata,
         freq_Mhz,
         enable_graph_plots: bool = True):
+    
     metadata["FREQ_MHZ"] = freq_Mhz
 
     available_bandwidth = list(lookup_table.keys())
