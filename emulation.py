@@ -411,7 +411,7 @@ def set_node_down(node_name: str):
     assumes namespace for node is already created
     """
     rmap = get_remote_mapping([Remote()]) # for running locally
-    mn_software._stop_protocol("batman-adv", rmap, node_name)
+    mn_software._stop_protocol("batman-adv", rmap, [node_name])
 
 def set_node_up(node_name: str):
     """
@@ -420,7 +420,7 @@ def set_node_up(node_name: str):
     assumes namespace for node is already created
     """
     rmap = get_remote_mapping([Remote()]) # for running locally
-    mn_software._start_protocol("batman-adv", rmap, node_name)
+    mn_software._start_protocol("batman-adv", rmap, [node_name])
 
 def main():
     parser = argparse.ArgumentParser()
