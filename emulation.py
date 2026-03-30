@@ -404,6 +404,24 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
     with open(node_addrs_json_path, "w") as f:
         json.dump(addrs_json, f)
 
+def set_node_down(node_name: str):
+    """
+    stop batman-adv protocol to simulate node leaving mesh network
+    
+    assumes namespace for node is already created
+    """
+    rmap = get_remote_mapping([Remote()]) # for running locally
+    mn_software._stop_protocol("batman-adv", rmap, node_name)
+
+def set_node_up(node_name: str):
+    """
+    start batman-adv protocol to simulate node entering mesh network
+    
+    assumes namespace for node is already created
+    """
+    rmap = get_remote_mapping([Remote()]) # for running locally
+    mn_software._start_protocol("batman-adv", rmap, node_name)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("graph", help="Graph of the full network mesh (json)")
@@ -488,15 +506,10 @@ def main():
 
     time.sleep(2)  # allow to launch tcpdumps
 
-    # start iperf3 test
-    run_iperf3_connection(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False, bitrate="2M")
-    run_iperf3_connection(server_name="d0", client_name="d2", out_dir=iperf3_dir, duration=6, udp=True, bitrate="2M")
-    run_iperf3_connection(server_name="d0", client_name="d3", out_dir=iperf3_dir, duration=7, udp=False, bitrate="3M")
-    run_iperf3_connection(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=8, udp=True, bitrate="3M")
-    run_iperf3_connection(server_name="d1", client_name="d0", out_dir=iperf3_dir, duration=9, udp=False, bitrate="4M")
-    run_iperf3_connection(server_name="d1", client_name="d2", out_dir=iperf3_dir, duration=10, udp=True, bitrate="4M")
-    run_iperf3_connection(server_name="d1", client_name="d3", out_dir=iperf3_dir, duration=11, udp=False, bitrate="5M")
-    run_iperf3_connection(server_name="d1", client_name="d4", out_dir=iperf3_dir, duration=12, udp=True, bitrate="5M")
+    input("Press Enter to bring node down")
+    set_node_down("n0")
+    input("Press Enter to bring node up")
+    set_node_up("n0")
 
 
     input("Press Enter to end emulation")
