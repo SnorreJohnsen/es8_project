@@ -36,8 +36,8 @@ class Node:
 class Link:
     source: str
     target: str
-    bandwidth_mbit: str
-    packet_loss: str
+    phyrate_mbps: str
+    loss_percent: str
 
 ###############################################################################
 #__________________________ DRONE MESH GRIDS _________________________________#
@@ -793,8 +793,8 @@ def link_shannon(
     if data_rate_mbps > threshold_link:
                 link = Link(source=source.id,
                                 target=target.id,
-                                bandwidth_mbit=f"{data_rate_mbps:.2f}",
-                                packet_loss = "10") # 10%
+                                phyrate_mbps=f"{data_rate_mbps:.2f}",
+                                loss_percent = "10") # 10%
                 links.append(link)
 
                 if distance_sq <= (rng_video + 1)**2:
@@ -869,8 +869,8 @@ def link_datasheet(distance_sq: float,
     if data_rate_mbps > threshold_link:
         link = Link(source=source.id,
                     target=target.id,
-                    bandwidth_mbit=f"{data_rate_mbps:.2f}",
-                    packet_loss="10") # 10%
+                    phyrate_mbps=f"{data_rate_mbps:.2f}",
+                    loss_percent="10") # 10%
                     # data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
         links.append(link)
 
@@ -1010,7 +1010,7 @@ def plot_drone_positions(*,
                     break
             device_links_rate.append(data_rate_mbps)
 
-    phyrates = [float(link.bandwidth_mbit) for link in links]
+    phyrates = [float(link.phyrate_mbps) for link in links]
     if not phyrates:
         phyrates = [0]
 
@@ -1213,17 +1213,17 @@ def plot_drone_links(*,
     node_dict = {node.id: (node.x, node.y) for node in nodes}
 
     # Prepare bandwidth for coloring
-    all_bw = [float(link.bandwidth_mbit) for link in source_links]
+    all_bw = [float(link.phyrate_mbps) for link in source_links]
     if not all_bw:
         all_bw = [0]
     norm = mcolors.Normalize(vmin=min(all_bw), vmax=max(all_bw))
     cmap = plt.cm.viridis
 
     fig, ax = plt.subplots(figsize=(16,9))
-    for link in sorted(source_links, key=lambda l: float(l.bandwidth_mbit)):
+    for link in sorted(source_links, key=lambda l: float(l.phyrate_mbps)):
         src = link.source
         tgt = link.target
-        bw = float(link.bandwidth_mbit)
+        bw = float(link.phyrate_mbps)
         if bw > threshold_phyrate_links:
             x1, y1 = node_dict[src]
             x2, y2 = node_dict[tgt]
@@ -1286,10 +1286,10 @@ def link_matrix(links: list,
     node_dict = {node.id: (node.x, node.y) for node in nodes}
     node_ids = sorted(node_dict, key=lambda x: int(x[1:]))
 
-    link_lookup = {(link.source, link.target): float(link.bandwidth_mbit) for link in links}
+    link_lookup = {(link.source, link.target): float(link.phyrate_mbps) for link in links}
 
     # colormap
-    all_bw = [float(link.bandwidth_mbit) for link in links]
+    all_bw = [float(link.phyrate_mbps) for link in links]
     if not all_bw:
         all_bw = [0]
     norm = mcolors.Normalize(vmin=min(all_bw), vmax=max(all_bw))
