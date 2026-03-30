@@ -1142,10 +1142,10 @@ def plot_histogram_drone_links(*,
                                drone_link_count: list,
                                iterations: int = 1,
                                file_folder_path: str,
-                               font_size: float = 8.0):
+                               font_size: float = 16.0):
 
     # Build histogram of # drones and # links
-    fig_hist, ax_hist = plt.subplots()
+    fig_hist, ax_hist = plt.subplots(figsize=(8,5))
 
     # Flatten if input is list of lists
     if any(isinstance(i, list) for i in drone_link_count):
@@ -1179,13 +1179,15 @@ def plot_histogram_drone_links(*,
             height,
             f'{float(height)}',
             ha='center',
-            va='bottom'
+            va='bottom',
+            fontsize = font_size
             )
 
     # Show only integer ticks (only existing values)
     ax_hist.set_xticks(range(np.max(x_values)+1))
     ax_hist.set_xlim(-0.5, np.max(x_values)+0.5)
-
+    ax_hist.set_ylim(0, np.max(y_values)+0.15*np.max(y_values))
+    ax_hist.tick_params(axis='both', labelsize=font_size*0.9)
     file_path_hist = os.path.join(file_folder_path, file_name)
     fig_hist.savefig(file_path_hist, dpi=300, bbox_inches='tight')
     plt.close(fig_hist)
