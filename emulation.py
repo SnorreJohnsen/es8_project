@@ -346,7 +346,8 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
         link = {
             "source": dev["id"],
             "target": closest_drone["id"],
-            "bandwidth_mbit": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
+            "phyrate_mbps": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
+            "loss_percent": 10,
         }
 
         graph["links"].append(link)
@@ -363,7 +364,7 @@ def batctl_set_neigh_throughputs(graph: dict):
     for link in graph["links"]:
         source = link["source"]
         target = link["target"]
-        bw = float(link["bandwidth_mbit"])
+        bw = float(link["phyrate_mbps"])
 
         # get source and target MAC address
         bat_mac_cmd = "ip -o -brief link show uplink | awk '{print $3}'"
@@ -462,7 +463,7 @@ def main():
     place_test_adapters(graph, adapter_pos)
 
     # Create network name spaces with links from json graph
-    link_command = "tc qdisc add dev {ifname} root netem rate {bandwidth_mbit}mbit"
+    link_command = "./emulation_scripts/tc.sh '{action}' '{ifname}' '{loss_percent}' '{phyrate_mbps}'"
     mn_network.apply(graph, link_command=link_command)
 
     # Init batman-adv on all nodes and adapters
