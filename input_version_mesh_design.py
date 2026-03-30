@@ -37,6 +37,7 @@ class Link:
     source: str
     target: str
     bandwidth_mbit: str
+    packet_loss: str
 
 ###############################################################################
 #__________________________ DRONE MESH GRIDS _________________________________#
@@ -620,8 +621,8 @@ def link_list(*,
                                                                           threshold_link=threshold_link,
                                                                           count = count,
                                                                           count_cmd=count_cmd
-                                                                           )
-         
+                                                                           )   
+    
         num_links_video.append(count)
         num_links_cmd.append(count_cmd)
         
@@ -676,7 +677,8 @@ def link_shannon(
     if data_rate_mbps > threshold_link:
                 link = Link(source=source.id,
                                 target=target.id,
-                                bandwidth_mbit=f"{data_rate_mbps:.2f}")
+                                bandwidth_mbit=f"{data_rate_mbps:.2f}",
+                                packet_loss = "0.1")
                             #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
                 links.append(link)
 
@@ -730,7 +732,8 @@ def link_datasheet(distance_sq: float,
     if data_rate_mbps > threshold_link:
         link = Link(source=source.id,
                         target=target.id,
-                        bandwidth_mbit=f"{data_rate_mbps:.2f}")
+                        bandwidth_mbit=f"{data_rate_mbps:.2f}",
+                        packet_loss="0.1")
                     #   data_rate=str(metadata[f"{wireless_prefix}DATA_RATE"]))
         links.append(link)
 
