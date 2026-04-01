@@ -509,6 +509,16 @@ def main():
         start_tcpdump(id, "uplink", pcap_dir)
 
     time.sleep(2)  # allow to launch tcpdumps
+    
+    input("Press Enter to perform iperf3 streams")
+    run_iperf3_connection(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False, bitrate="2M")
+    run_iperf3_connection(server_name="d0", client_name="d2", out_dir=iperf3_dir, duration=6, udp=True, bitrate="2M")
+    run_iperf3_connection(server_name="d0", client_name="d3", out_dir=iperf3_dir, duration=7, udp=False, bitrate="3M")
+    run_iperf3_connection(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=8, udp=True, bitrate="3M")
+    run_iperf3_connection(server_name="d1", client_name="d0", out_dir=iperf3_dir, duration=9, udp=False, bitrate="4M")
+    run_iperf3_connection(server_name="d1", client_name="d2", out_dir=iperf3_dir, duration=10, udp=True, bitrate="4M")
+    run_iperf3_connection(server_name="d1", client_name="d3", out_dir=iperf3_dir, duration=11, udp=False, bitrate="5M")
+    run_iperf3_connection(server_name="d1", client_name="d4", out_dir=iperf3_dir, duration=12, udp=True, bitrate="5M")
 
     input("Press Enter to bring node down")
     set_node_down("n0")
