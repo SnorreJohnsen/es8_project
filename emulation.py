@@ -77,6 +77,7 @@ output_root = "emulation_output"
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
 node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
+graph_json_path = os.path.join(output_root, "graph.json")
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
@@ -461,6 +462,8 @@ def main():
                    (12000.0, 5000.0, 1500.0), 
                    (25000.0, 9000.0, 3000.0)]
     place_test_adapters(graph, adapter_pos)
+    with open(graph_json_path, "w") as f:
+        json.dump(graph, f)
 
     # Create network name spaces with links from json graph
     link_command = "./emulation_scripts/tc.sh '{action}' '{ifname}' '{loss_percent}' '{phyrate_mbps}'"
