@@ -9,9 +9,11 @@ import shutil
 import math
 import re
 import errno
+import random
 from pprint import pprint
 
 from mesh_design_lib import data_rate_given_dist_comm
+from drop_model import DropoutParams, MultipleDroneSim
 
 sys.path.append('meshnet-lab/')
 import software as mn_software
@@ -424,6 +426,28 @@ def set_node_up(node_name: str):
     rmap = get_remote_mapping([Remote()]) # for running locally
     mn_software._start_protocol("batman-adv", rmap, [node_name])
 
+def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams):
+    """
+    nodes: list of node names
+    t_start_step: linear step size for offsetting drones by different start time [s]
+    t_sim_end: end time for simulation [s]
+    params: dropout model parameters
+
+    returns: list[tuple[float, str, State]]
+    dropout update schedule entries for nodes with [time, drone name, new state]
+    """
+    sims = MultipleDroneSim(
+            names = nodes,
+            t_start_step = t_start_step,
+            params = params, 
+            )
+
+    sims.stepuntil(t_sim_end)
+    return sims.get()
+
+def run_sim_sched():
+    pass
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("graph", help="Graph of the full network mesh (json)")
@@ -474,6 +498,21 @@ def main():
     all_ids = rmap.keys()
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
     adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
+
+    # set Dropout model parameters and generate schedule
+    dropout_params = DropoutParams(
+                    failure_probability = 0.001,
+                    replacement_distribution_sampler = lambda : 100*random.random()+50,
+                    time_step = 10,
+                    fly_up_time = 30,
+                    fly_down_time = 30,
+                    desired_fly_time = 900,
+                    recharging_time = 700,
+            )
+    gen_dropout_sched(nodes=drone_ids,
+                      t_start_step=50,
+                      t_sim_end=1000,
+                      params=dropout_params)
 
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")

@@ -10,10 +10,8 @@ class State(Enum):
     FLYING_DOWN = auto()
     DOWN = auto()
 
-@dataclass
-class DropoutModel:
-    # Model parameters
-    name: str
+@dataclass(frozen=True)
+class DropoutParams:
     failure_probability: float
     replacement_distribution_sampler: Callable[[], float]
     time_step: float
@@ -22,57 +20,62 @@ class DropoutModel:
     desired_fly_time: float
     recharging_time: float
 
-    # Model internals
-    state: State = State.FLYING_UP
-    time_state_enter: float = 0
-    sim_time: float = 0
-    replacement_delay: float = 0
+class DropoutModel:
+    # Model parameters
+    name: str
+    params: DropoutParams
 
     # Model outputs
-    sched: list[tuple[float, str, State]] = field(default_factory=list) # updates only
+    _sched: list[tuple[float, str, State]] # updates only
 
-    def set_time_init(self, init_time):
-        if len(self.sched) != 0 and self.sim_time != 0 and self.time_state_enter != 0:
-            raise Exception("Sim time override can only be called once before simulation start and never after")
-        self.sim_time = init_time
-        self.time_state_enter = init_time
-        self.sched.append((self.sim_time, self.name, self.state))
+    # Model internals
+    _state: State = State.FLYING_UP
+    _time_state_enter: float = 0
+    _sim_time: float = 0
+    _replacement_delay: float = 0
+
+    def __init__(self, name: str, params: DropoutParams, init_time: float = 0) -> None:
+        self.name = name
+        self.params = params
+        self._sim_time = init_time
+        self._time_state_enter = init_time
+        self._sched = [(self._sim_time, self.name, self._state)]
 
     def change_state(self, new_state):
-        self.sched.append((self.sim_time, self.name, new_state))
+        self._sched.append((self._sim_time, self.name, new_state))
 
-        self.state = new_state
-        self.time_state_enter = self.sim_time
+        self._state = new_state
+        self._time_state_enter = self._sim_time
 
-        if self.state == State.DOWN:
-            self.replacement_delay = self.replacement_distribution_sampler()
+        if self._state == State.DOWN:
+            self._replacement_delay = self.params.replacement_distribution_sampler()
 
     def step_state_machine(self, time_in_state):
-        if self.state == State.RECHARGING:
-            if time_in_state >= self.recharging_time:
+        if self._state == State.RECHARGING:
+            if time_in_state >= self.params.recharging_time:
                 self.change_state(State.FLYING_UP)
 
-        elif self.state == State.FLYING_UP:
-            if time_in_state >= self.fly_up_time:
+        elif self._state == State.FLYING_UP:
+            if time_in_state >= self.params.fly_up_time:
                 self.change_state(State.UP)
 
-        elif self.state == State.UP:
-            if time_in_state >= (self.desired_fly_time - self.fly_up_time - self.fly_down_time):
+        elif self._state == State.UP:
+            if time_in_state >= (self.params.desired_fly_time - self.params.fly_up_time - self.params.fly_down_time):
                 self.change_state(State.FLYING_DOWN)
-            elif random.random() < self.failure_probability:
+            elif random.random() < self.params.failure_probability:
                 self.change_state(State.DOWN)
 
-        elif self.state == State.FLYING_DOWN:
-            if time_in_state >= self.fly_down_time:
+        elif self._state == State.FLYING_DOWN:
+            if time_in_state >= self.params.fly_down_time:
                 self.change_state(State.RECHARGING)
 
-        elif self.state == State.DOWN:
-            if time_in_state >= self.replacement_delay:
+        elif self._state == State.DOWN:
+            if time_in_state >= self._replacement_delay:
                 self.change_state(State.FLYING_UP)
 
     def step(self):
-        self.sim_time += self.time_step
-        time_in_state = self.sim_time - self.time_state_enter
+        self._sim_time += self.params.time_step
+        time_in_state = self._sim_time - self._time_state_enter
 
         self.step_state_machine(time_in_state)
 
@@ -81,24 +84,18 @@ class DropoutModel:
             self.step()
 
     def stepuntil(self, t: float):
-        while self.sim_time < t:
+        while self._sim_time < t:
             self.step()
 
     def get(self):
-        return self.sched
+        return self._sched
 
 class MultipleDroneSim:
     sims: list[DropoutModel]
 
     def __init__(self, 
                  t_start_step: float,
-                 failure_probability: float,
-                 replacement_distribution_sampler: Callable[[], float],
-                 time_step: float,
-                 fly_up_time: float,
-                 fly_down_time: float,
-                 desired_fly_time: float,
-                 recharging_time: float,
+                 params: DropoutParams,
                  n: int | None = None, 
                  names: list[str] | None = None
                  ):
@@ -121,15 +118,9 @@ class MultipleDroneSim:
         for name, t_start in zip(names, t_start_ar):
             m = DropoutModel(
                     name = name,
-                    failure_probability=failure_probability,
-                    replacement_distribution_sampler=replacement_distribution_sampler,
-                    time_step=time_step,
-                    fly_up_time=fly_up_time,
-                    fly_down_time=fly_down_time,
-                    desired_fly_time=desired_fly_time,
-                    recharging_time=recharging_time,
+                    params = params,
+                    init_time = t_start,
                     )
-            m.set_time_init(t_start)
             sims.append(m)
 
         self.sims = sims
@@ -160,16 +151,19 @@ class MultipleDroneSim:
 
 def main():
     from pprint import pprint
+    params = DropoutParams(
+                    failure_probability = 0.001,
+                    replacement_distribution_sampler = lambda : 100*random.random()+50,
+                    time_step = 10,
+                    fly_up_time = 30,
+                    fly_down_time = 30,
+                    desired_fly_time = 900,
+                    recharging_time = 700,
+            )
     sims = MultipleDroneSim(
             names = [f"n{i}" for i in range(5)],
             t_start_step = 50,
-            failure_probability = 0.001,
-            replacement_distribution_sampler = lambda : 100*random.random()+50,
-            time_step = 10,
-            fly_up_time = 30,
-            fly_down_time = 30,
-            desired_fly_time = 900,
-            recharging_time = 700,
+            params = params, 
             )
 
     sims.stepuntil(2000)
