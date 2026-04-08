@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Callable
+from functools import total_ordering
 import random
 
 class State(Enum):
@@ -9,6 +10,11 @@ class State(Enum):
     UP = auto()
     FLYING_DOWN = auto()
     DOWN = auto()
+
+@dataclass
+class DropoutEvent:
+    name: str
+    state: State
 
 @dataclass(frozen=True)
 class DropoutParams:
@@ -26,7 +32,7 @@ class DropoutModel:
     params: DropoutParams
 
     # Model outputs
-    _sched: list[tuple[float, str, State]] # updates only
+    _sched: list[tuple[float, DropoutEvent]] # updates only
 
     # Model internals
     _state: State = State.FLYING_UP
@@ -39,10 +45,10 @@ class DropoutModel:
         self.params = params
         self._sim_time = init_time
         self._time_state_enter = init_time
-        self._sched = [(self._sim_time, self.name, self._state)]
+        self._sched = [(self._sim_time, DropoutEvent(name=self.name, state=self._state))]
 
     def change_state(self, new_state):
-        self._sched.append((self._sim_time, self.name, new_state))
+        self._sched.append((self._sim_time, DropoutEvent(name=self.name, state=new_state)))
 
         self._state = new_state
         self._time_state_enter = self._sim_time
@@ -141,8 +147,6 @@ class MultipleDroneSim:
         result = []
         for m in self.sims:
             result.extend(m.get())
-
-        result.sort()
         return result
 
 #######################
@@ -150,7 +154,6 @@ class MultipleDroneSim:
 #######################
 
 def main():
-    from pprint import pprint
     params = DropoutParams(
                     failure_probability = 0.001,
                     replacement_distribution_sampler = lambda : 100*random.random()+50,
@@ -167,6 +170,7 @@ def main():
             )
 
     sims.stepuntil(2000)
+    from pprint import pprint
     pprint(sims.get())
 
 if __name__ == "__main__":

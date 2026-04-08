@@ -1,3 +1,5 @@
+from dataclasses import dataclass, asdict
+from functools import total_ordering
 import os
 import sys
 import argparse
@@ -10,10 +12,11 @@ import math
 import re
 import errno
 import random
+from datetime import datetime
 from pprint import pprint
 
 from mesh_design_lib import data_rate_given_dist_comm
-from drop_model import DropoutParams, MultipleDroneSim
+from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim
 
 sys.path.append('meshnet-lab/')
 import software as mn_software
@@ -84,6 +87,32 @@ graph_json_path = os.path.join(output_root, "graph.json")
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
 
+# Simulation schedule types
+@dataclass
+class IperfEvent:
+    client_name: str
+    server_name: str
+    bitrate: str # 4M or 3K for example
+    udp: bool
+    duration: int
+
+SchedEventType = DropoutEvent | IperfEvent
+
+@total_ordering
+@dataclass
+class SchedEntry:
+    time: float
+    event: SchedEventType
+
+    def __le__(self, other):
+        return self.time <= other.time
+
+@dataclass
+class Sim:
+    start_timestamp: datetime
+    sched: list[SchedEntry]
+
+# subprocess handling
 def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
     """
     Terminate multiple subprocess.
@@ -206,7 +235,7 @@ def run_iperf3_server(server_name: str, client_name: str):
 def run_iperf3_client(server_name: str,
                       client_name: str,
                       out_dir: str, 
-                      duration: float = 5, 
+                      duration: int = 5, 
                       udp: bool = False, 
                       bitrate: str = ''):
     """
@@ -251,7 +280,7 @@ def run_iperf3_client(server_name: str,
 def run_iperf3_connection(server_name: str, 
                           client_name: str,
                           out_dir: str, 
-                          duration: float = 5, 
+                          duration: int = 5, 
                           udp: bool = False, 
                           bitrate: str = ''):
     """
@@ -426,7 +455,7 @@ def set_node_up(node_name: str):
     rmap = get_remote_mapping([Remote()]) # for running locally
     mn_software._start_protocol("batman-adv", rmap, [node_name])
 
-def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams):
+def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams) -> list[SchedEntry]:
     """
     nodes: list of node names
     t_start_step: linear step size for offsetting drones by different start time [s]
@@ -443,10 +472,18 @@ def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, p
             )
 
     sims.stepuntil(t_sim_end)
-    return sims.get()
+    events = []
+    for t, event in sims.get():
+        e = SchedEntry(
+                time=t,
+                event=event)
+        events.append(e)
+    return events
 
-def run_sim_sched():
-    pass
+def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
+    t_start = datetime.now()
+    # perform sim while duration not expired
+    return Sim(t_start, sched)
 
 def main():
     parser = argparse.ArgumentParser()
