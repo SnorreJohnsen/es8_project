@@ -4,3 +4,6 @@ __pycache__/
 **/__pycache__/
 pcaps/
 .venv/
+
+# Ignore plot folder PNGs
+pcap_time_diff_stats/*.png
