@@ -1,3 +1,5 @@
+from dataclasses import dataclass, asdict
+from functools import total_ordering
 import os
 import sys
 import argparse
@@ -9,9 +11,12 @@ import shutil
 import math
 import re
 import errno
+import random
+from datetime import datetime
 from pprint import pprint
 
 from mesh_design_lib import data_rate_given_dist_comm
+from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim
 
 sys.path.append('meshnet-lab/')
 import software as mn_software
@@ -77,10 +82,37 @@ output_root = "emulation_output"
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
 node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
+graph_json_path = os.path.join(output_root, "graph.json")
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
 
+# Simulation schedule types
+@dataclass
+class IperfEvent:
+    client_name: str
+    server_name: str
+    bitrate: str # 4M or 3K for example
+    udp: bool
+    duration: int
+
+SchedEventType = DropoutEvent | IperfEvent
+
+@total_ordering
+@dataclass
+class SchedEntry:
+    time: float
+    event: SchedEventType
+
+    def __le__(self, other):
+        return self.time <= other.time
+
+@dataclass
+class Sim:
+    start_timestamp: datetime
+    sched: list[SchedEntry]
+
+# subprocess handling
 def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
     """
     Terminate multiple subprocess.
@@ -203,7 +235,7 @@ def run_iperf3_server(server_name: str, client_name: str):
 def run_iperf3_client(server_name: str,
                       client_name: str,
                       out_dir: str, 
-                      duration: float = 5, 
+                      duration: int = 5, 
                       udp: bool = False, 
                       bitrate: str = ''):
     """
@@ -248,7 +280,7 @@ def run_iperf3_client(server_name: str,
 def run_iperf3_connection(server_name: str, 
                           client_name: str,
                           out_dir: str, 
-                          duration: float = 5, 
+                          duration: int = 5, 
                           udp: bool = False, 
                           bitrate: str = ''):
     """
@@ -346,7 +378,8 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
         link = {
             "source": dev["id"],
             "target": closest_drone["id"],
-            "bandwidth_mbit": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
+            "phyrate_mbps": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
+            "loss_percent": 10,
         }
 
         graph["links"].append(link)
@@ -363,7 +396,7 @@ def batctl_set_neigh_throughputs(graph: dict):
     for link in graph["links"]:
         source = link["source"]
         target = link["target"]
-        bw = float(link["bandwidth_mbit"])
+        bw = float(link["phyrate_mbps"])
 
         # get source and target MAC address
         bat_mac_cmd = "ip -o -brief link show uplink | awk '{print $3}'"
@@ -404,6 +437,54 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
     with open(node_addrs_json_path, "w") as f:
         json.dump(addrs_json, f)
 
+def set_node_down(node_name: str):
+    """
+    stop batman-adv protocol to simulate node leaving mesh network
+    
+    assumes namespace for node is already created
+    """
+    rmap = get_remote_mapping([Remote()]) # for running locally
+    mn_software._stop_protocol("batman-adv", rmap, [node_name])
+
+def set_node_up(node_name: str):
+    """
+    start batman-adv protocol to simulate node entering mesh network
+    
+    assumes namespace for node is already created
+    """
+    rmap = get_remote_mapping([Remote()]) # for running locally
+    mn_software._start_protocol("batman-adv", rmap, [node_name])
+
+def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams) -> list[SchedEntry]:
+    """
+    nodes: list of node names
+    t_start_step: linear step size for offsetting drones by different start time [s]
+    t_sim_end: end time for simulation [s]
+    params: dropout model parameters
+
+    returns: list[tuple[float, str, State]]
+    dropout update schedule entries for nodes with [time, drone name, new state]
+    """
+    sims = MultipleDroneSim(
+            names = nodes,
+            t_start_step = t_start_step,
+            params = params, 
+            )
+
+    sims.stepuntil(t_sim_end)
+    events = []
+    for t, event in sims.get():
+        e = SchedEntry(
+                time=t,
+                event=event)
+        events.append(e)
+    return events
+
+def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
+    t_start = datetime.now()
+    # perform sim while duration not expired
+    return Sim(t_start, sched)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("graph", help="Graph of the full network mesh (json)")
@@ -442,9 +523,11 @@ def main():
                    (12000.0, 5000.0, 1500.0), 
                    (25000.0, 9000.0, 3000.0)]
     place_test_adapters(graph, adapter_pos)
+    with open(graph_json_path, "w") as f:
+        json.dump(graph, f)
 
     # Create network name spaces with links from json graph
-    link_command = "tc qdisc add dev {ifname} root netem rate {bandwidth_mbit}mbit"
+    link_command = "./emulation_scripts/tc.sh '{action}' '{ifname}' '{loss_percent}' '{phyrate_mbps}'"
     mn_network.apply(graph, link_command=link_command)
 
     # Init batman-adv on all nodes and adapters
@@ -452,6 +535,21 @@ def main():
     all_ids = rmap.keys()
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
     adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
+
+    # set Dropout model parameters and generate schedule
+    dropout_params = DropoutParams(
+                    failure_probability = 0.001,
+                    replacement_distribution_sampler = lambda : 100*random.random()+50,
+                    time_step = 10,
+                    fly_up_time = 30,
+                    fly_down_time = 30,
+                    desired_fly_time = 900,
+                    recharging_time = 700,
+            )
+    gen_dropout_sched(nodes=drone_ids,
+                      t_start_step=50,
+                      t_sim_end=1000,
+                      params=dropout_params)
 
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
@@ -487,8 +585,8 @@ def main():
         start_tcpdump(id, "uplink", pcap_dir)
 
     time.sleep(2)  # allow to launch tcpdumps
-
-    # start iperf3 test
+    
+    input("Press Enter to perform iperf3 streams")
     run_iperf3_connection(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False, bitrate="2M")
     run_iperf3_connection(server_name="d0", client_name="d2", out_dir=iperf3_dir, duration=6, udp=True, bitrate="2M")
     run_iperf3_connection(server_name="d0", client_name="d3", out_dir=iperf3_dir, duration=7, udp=False, bitrate="3M")
@@ -497,6 +595,11 @@ def main():
     run_iperf3_connection(server_name="d1", client_name="d2", out_dir=iperf3_dir, duration=10, udp=True, bitrate="4M")
     run_iperf3_connection(server_name="d1", client_name="d3", out_dir=iperf3_dir, duration=11, udp=False, bitrate="5M")
     run_iperf3_connection(server_name="d1", client_name="d4", out_dir=iperf3_dir, duration=12, udp=True, bitrate="5M")
+
+    input("Press Enter to bring node down")
+    set_node_down("n0")
+    input("Press Enter to bring node up")
+    set_node_up("n0")
 
 
     input("Press Enter to end emulation")
