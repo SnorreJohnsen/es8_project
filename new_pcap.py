@@ -77,29 +77,37 @@ def creation_of_edges(*,
 
                 parts = line.strip().split()
                 # Frame_NR SRC DST TYPE
-                if len(parts) != 5:
-                    continue
 
-                src = clean(parts[1])
-                dst = clean(parts[2])
-                type = clean(parts[3])
-                protocol = clean(parts[4])
+                src = clean(parts[3])
+                dst = clean(parts[4])
+                type = clean(parts[5])
+                protocol = clean(parts[6])
 
                 protocols = [p.strip() for p in protocol.split(",")]
                 srcs = [s.strip() for s in src.split(",")]
                 dsts = [d.strip() for d in dst.split(",")]
                 types = [t.strip() for t in type.split(",")]
 
-                for s, d,t,p in zip(srcs, dsts,types,protocols):
+                for n, (s, d,t,p) in enumerate(zip(srcs, dsts,types,protocols * len(srcs))):
                     if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
                         continue
-                    # Possible filter for batman still not to know if arp or what it is
-                    # if p.split(":")[2] == 'batadv' and p.split(":")[-1] == 'data':
-                    if p.split(":")[2] == 'batadv':
+                    
+                    # Only make the batadv packet, not the tcp
+                    if 'batadv' in p and 'tcp' in p and n == 0:
                         if G.has_edge(s, d):
                             G[s][d]["weight"] += 1
                         else:
                             G.add_edge(s, d, type=t, weight=1)
+
+                        break
+
+                    # Possible filter for batman still not to know if arp or what it is
+                    # if p.split(":")[2] == 'batadv' and p.split(":")[-1] == 'data':
+                    # if p.split(":")[2] == 'batadv' and p+1.split(":")[-1] == 'tcp':
+                    #     if G.has_edge(s, d):
+                    #         G[s][d]["weight"] += 1
+                    #     else:
+                    #         G.add_edge(s, d, type=t, weight=1)
     return G
 
 def creation_of_pyvis(G,
