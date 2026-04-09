@@ -17,8 +17,8 @@ def shannon(metadata: dict,
             data_rate_Mbps: float,
             bandwidth_Mhz: float = 4,
             noise_figure_db: float = 6,
-            snr_eff: float = 0.14,
-            eta: float = 0.79,
+            snr_eff: float = 0.14296437445439275,
+            eta: float = 0.7886195927676991,
             wireless_prefix: str ="") -> float:
     """
     default values:
@@ -100,18 +100,52 @@ lookup_table_halow_module_MM8108 = {
     }
 }
 
+# for (GI=0.8 mu s) (OFDM (prior 11ax))
+lookup_table_wifi7_eht_GI0_8_OFDM = {
+    20: {  # EHT20 MHz
+        0: {"data_rate": 6.5, "receive_sensitivity": -92, "transmit_power": 22},
+        1: {"data_rate": 13, "receive_sensitivity": -90, "transmit_power": 22},
+        2: {"data_rate": 19.5, "receive_sensitivity": -88, "transmit_power": 21},
+        3: {"data_rate": 26, "receive_sensitivity": -84, "transmit_power": 21},
+        4: {"data_rate": 39, "receive_sensitivity": -81, "transmit_power": 20},
+        5: {"data_rate": 52, "receive_sensitivity": -78, "transmit_power": 20},
+        6: {"data_rate": 58.5, "receive_sensitivity": -76, "transmit_power": 19},
+        7: {"data_rate": 65, "receive_sensitivity": -74, "transmit_power": 18},
+        8: {"data_rate": 78, "receive_sensitivity": -71, "transmit_power": 18},
+    }}
+
+# for (GI=3.2 mu s) (OFDM & OFDMA (starting with 11ax))
+lookup_table_wifi7_eht_GI3_2_OFDMA = {
+    20: {  # EHT20 MHz
+        0: {"data_rate": 7.3, "receive_sensitivity": -92, "transmit_power": 22},
+        1: {"data_rate": 14.6, "receive_sensitivity": -90, "transmit_power": 22},
+        2: {"data_rate": 21.9, "receive_sensitivity": -88, "transmit_power": 21},
+        3: {"data_rate": 29.3, "receive_sensitivity": -84, "transmit_power": 21},
+        4: {"data_rate": 43.9, "receive_sensitivity": -81, "transmit_power": 20},
+        5: {"data_rate": 58.5, "receive_sensitivity": -78, "transmit_power": 20},
+        6: {"data_rate": 65.8, "receive_sensitivity": -76, "transmit_power": 19},
+        7: {"data_rate": 73.1, "receive_sensitivity": -74, "transmit_power": 18},
+        8: {"data_rate": 87.8, "receive_sensitivity": -71, "transmit_power": 18},
+        9: {"data_rate": 97.5, "receive_sensitivity": -68, "transmit_power": 17},
+        10: {"data_rate": 109.7, "receive_sensitivity": -65, "transmit_power": 17},
+        11: {"data_rate": 121.9, "receive_sensitivity": -62, "transmit_power": 17},
+        12: {"data_rate": 131.6, "receive_sensitivity": -59, "transmit_power": 16},
+        13: {"data_rate": 146.3, "receive_sensitivity": -57, "transmit_power": 16},
+    }}
+
 def get_halow_module_MM8108_params(*,
                                    metadata: dict,
                                    wireless_prefix: str ="",
                                    desired_bandwidth_Mhz,
-                                   desired_rate_Mbps):
+                                   desired_rate_Mbps,
+                                   lookup_table):
     # Find closest available bandwidth
-    available_bandwidth = np.array(list(lookup_table_halow_module_MM8108.keys()))
+    available_bandwidth = np.array(list(lookup_table.keys()))
     bandwidth_index = np.argmin(np.abs(available_bandwidth - desired_bandwidth_Mhz))
     closest_bandwidth = int(available_bandwidth[bandwidth_index])
 
     # Get all MCS schemes for that bandwidth
-    schemes = lookup_table_halow_module_MM8108[closest_bandwidth].values()
+    schemes = lookup_table[closest_bandwidth].values()
 
     # Find the sorted_scheme with data_rate closest to desired_rate_Mbps
     sorted_schemes = sorted(schemes, key=lambda s: abs(s['data_rate'] - desired_rate_Mbps))
@@ -205,15 +239,16 @@ def data_rate_given_dist_comm(distance_m: float,
                               bandwidth_Mhz: float = 8,
                               transmit_power_dbm: float = 22,
                               margin_loss_db: float = 3,
-                              eta: float = 0.79,
-                              snr_eff: float = 0.14
+                              eta: float = 0.7886195927676991,
+                              snr_eff: float = 0.14296437445439275,
+                              freq_Mhz : float = 868
                               ):
     required_sens= sensivity_given_range_fspl(distance_m=distance_m,
                                transmit_power_dbm=transmit_power_dbm,
                                transmit_gain_dbi= 0,
                                received_gain_dbi= 0,
                                margin_loss_db=margin_loss_db,
-                               freq_Mhz=868)
+                               freq_Mhz=freq_Mhz)
 
     data_rate_Mbps = shannon_inverse_bitrate(received_power_dbm=required_sens,
                             bandwidth_Mhz=bandwidth_Mhz,
