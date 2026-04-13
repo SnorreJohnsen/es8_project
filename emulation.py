@@ -16,7 +16,7 @@ from datetime import datetime
 from pprint import pprint
 
 from mesh_design_lib import data_rate_given_dist_comm
-from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim
+from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
 
 sys.path.append('meshnet-lab/')
 import software as mn_software
@@ -78,11 +78,12 @@ tcpdump_procs = []
 iperf3_servers = []
 
 # Directory paths for outputs
-output_root = "emulation_output"
+output_root = "/home/aau/meshsim/output/emulation"
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
 node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
 graph_json_path = os.path.join(output_root, "graph.json")
+sim_sched_json_path = os.path.join(output_root, "sim_sched.json")
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
@@ -109,7 +110,7 @@ class SchedEntry:
 
 @dataclass
 class Sim:
-    start_timestamp: datetime
+    start_timestamp: float
     sched: list[SchedEntry]
 
 # subprocess handling
@@ -454,6 +455,7 @@ def set_node_up(node_name: str):
     """
     rmap = get_remote_mapping([Remote()]) # for running locally
     mn_software._start_protocol("batman-adv", rmap, [node_name])
+    # TODO make links, apply netem rules, and set throughput overrides
 
 def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams) -> list[SchedEntry]:
     """
@@ -480,10 +482,78 @@ def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, p
         events.append(e)
     return events
 
+def stub_iperf_sched():
+    # sched: list[tuple[float, IperfEvent]] = []
+    events: list[SchedEntry] = []
+
+    sim_times = [0.0, 10.0, 20.0, 30.0, 32.0, 34.0, 35.0, 40.0]
+    iperf_events = [IperfEvent(client_name="d0", server_name="d1", bitrate="4M", udp=False, duration=5),
+                    IperfEvent(client_name="d1", server_name="d2", bitrate="2M", udp=False, duration=6),
+                    IperfEvent(client_name="d2", server_name="d3", bitrate="2M", udp=False, duration=7),
+                    IperfEvent(client_name="d3", server_name="d4", bitrate="3M", udp=False, duration=8),
+                    IperfEvent(client_name="d4", server_name="d5", bitrate="3M", udp=False, duration=9),
+                    IperfEvent(client_name="d5", server_name="d0", bitrate="1M", udp=False, duration=5),
+                    IperfEvent(client_name="d0", server_name="d1", bitrate="1M", udp=False, duration=6),
+                    IperfEvent(client_name="d1", server_name="d2", bitrate="4M", udp=False, duration=7),
+                    ]
+
+    for sim_time, event in zip(sim_times, iperf_events):
+        e = SchedEntry(
+                time=sim_time,
+                event=event)
+        events.append(e)
+
+    return events
+
+def do_event(e: SchedEventType):
+    print(f"Event {e} run at {datetime.now()}")
+    if isinstance(e, IperfEvent):
+        run_iperf3_connection(
+                server_name=e.server_name,
+                client_name=e.client_name,
+                out_dir=iperf3_dir,
+                duration=e.duration,
+                udp=e.udp,
+                bitrate=e.bitrate,
+                )
+    elif isinstance(e, DropoutEvent):
+        if e.state != State.UP:
+            set_node_down(e.name)
+        else:
+            set_node_up(e.name)
+    else:
+        raise ValueError("Invalid event type: " + type(e))
+
 def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
     t_start = datetime.now()
     # perform sim while duration not expired
-    return Sim(t_start, sched)
+    sched_sorted = sorted(sched)
+    print(sched_sorted) # FIXME remove
+
+    done = False
+    i = 0
+    while not done:
+        t_current = datetime.now()
+        t_elapsed = (t_current - t_start).total_seconds()
+
+        # if there are more events
+        if i < len(sched_sorted):
+            e = sched_sorted[i]
+            if t_elapsed >= e.time:
+                # handle event
+                do_event(e.event)
+                i += 1
+            elif e.time-t_elapsed > 2:
+                # sleep till next event
+                time.sleep(e.time-t_elapsed-1)
+
+        # Stop if simulation duration is reached
+        if t_elapsed > duration:
+            done = True
+
+
+
+    return Sim(t_start.timestamp(), sched_sorted)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -546,10 +616,13 @@ def main():
                     desired_fly_time = 900,
                     recharging_time = 700,
             )
-    gen_dropout_sched(nodes=drone_ids,
+    dropout_sched = gen_dropout_sched(nodes=drone_ids,
                       t_start_step=50,
                       t_sim_end=1000,
                       params=dropout_params)
+
+    iperf_sched = stub_iperf_sched()
+    sched_combined = dropout_sched + iperf_sched
 
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
@@ -586,23 +659,12 @@ def main():
 
     time.sleep(2)  # allow to launch tcpdumps
     
-    input("Press Enter to perform iperf3 streams")
-    run_iperf3_connection(server_name="d0", client_name="d1", out_dir=iperf3_dir, duration=5, udp=False, bitrate="2M")
-    run_iperf3_connection(server_name="d0", client_name="d2", out_dir=iperf3_dir, duration=6, udp=True, bitrate="2M")
-    run_iperf3_connection(server_name="d0", client_name="d3", out_dir=iperf3_dir, duration=7, udp=False, bitrate="3M")
-    run_iperf3_connection(server_name="d0", client_name="d4", out_dir=iperf3_dir, duration=8, udp=True, bitrate="3M")
-    run_iperf3_connection(server_name="d1", client_name="d0", out_dir=iperf3_dir, duration=9, udp=False, bitrate="4M")
-    run_iperf3_connection(server_name="d1", client_name="d2", out_dir=iperf3_dir, duration=10, udp=True, bitrate="4M")
-    run_iperf3_connection(server_name="d1", client_name="d3", out_dir=iperf3_dir, duration=11, udp=False, bitrate="5M")
-    run_iperf3_connection(server_name="d1", client_name="d4", out_dir=iperf3_dir, duration=12, udp=True, bitrate="5M")
-
-    input("Press Enter to bring node down")
-    set_node_down("n0")
-    input("Press Enter to bring node up")
-    set_node_up("n0")
+    sched = run_sim_sched(sched=sched_combined, duration=100)
+    with open(sim_sched_json_path, "w") as f:
+        json.dump(asdict(sched), f)
 
 
-    input("Press Enter to end emulation")
+    #input("Press Enter to end emulation")
 
     stop_all_iperf3_servers()
     stop_all_tcpdump()

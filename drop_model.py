@@ -4,7 +4,7 @@ from typing import Callable
 from functools import total_ordering
 import random
 
-class State(Enum):
+class State(str, Enum):
     RECHARGING = auto()
     FLYING_UP = auto()
     UP = auto()
