@@ -14,6 +14,7 @@ import errno
 import random
 from datetime import datetime
 from pprint import pprint
+from copy import copy
 
 from mesh_design_lib import data_rate_given_dist_comm
 from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
@@ -97,7 +98,7 @@ class IperfEvent:
     udp: bool
     duration: int
 
-SchedEventType = DropoutEvent | IperfEvent
+SchedEventType = DropoutEvent | IperfEvent # cooked that this is called *Type and the others aren't. maybe none of them are called that...
 
 @total_ordering
 @dataclass
@@ -111,7 +112,8 @@ class SchedEntry:
 @dataclass
 class Sim:
     start_timestamp: float
-    sched: list[SchedEntry]
+    sched_plan: list[SchedEntry]
+    sched_real: list[SchedEntry]
 
 # subprocess handling
 def sigint_all(procs: list[subprocess.Popen], timeout: float = 5.0) -> None:
@@ -528,7 +530,8 @@ def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
     t_start = datetime.now()
     # perform sim while duration not expired
     sched_sorted = sorted(sched)
-    print(sched_sorted) # FIXME remove
+
+    sched_real: list[SchedEntry] = []
 
     done = False
     i = 0
@@ -542,6 +545,9 @@ def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
             if t_elapsed >= e.time:
                 # handle event
                 do_event(e.event)
+                e_cp = copy(e)
+                e_cp.time = t_elapsed
+                sched_real.append(e_cp)
                 i += 1
             elif e.time-t_elapsed > 2:
                 # sleep till next event
@@ -553,7 +559,7 @@ def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
 
 
 
-    return Sim(t_start.timestamp(), sched_sorted)
+    return Sim(t_start.timestamp(), sched_sorted, sched_real)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -659,9 +665,9 @@ def main():
 
     time.sleep(2)  # allow to launch tcpdumps
     
-    sched = run_sim_sched(sched=sched_combined, duration=100)
+    sim = run_sim_sched(sched=sched_combined, duration=100)
     with open(sim_sched_json_path, "w") as f:
-        json.dump(asdict(sched), f)
+        json.dump(asdict(sim), f)
 
 
     #input("Press Enter to end emulation")
