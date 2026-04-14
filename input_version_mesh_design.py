@@ -4,6 +4,7 @@ from matplotlib.patches import Rectangle
 import matplotlib.colors as mcolors
 import math
 import os
+from pathlib import Path
 import random
 import pandas as pd
 from tqdm import tqdm
@@ -1662,6 +1663,7 @@ def graph_range_phyrate(metadata: dict,
 
 def process_drone_mesh(*,
                        grid_prefix: str,
+                       dir_origin: str,
                        wireless_prefix: str = "",
                        dist_comm: float,
                        dim: tuple[float, float],
@@ -1728,9 +1730,7 @@ def process_drone_mesh(*,
     #     `-- json/     -> JSON network files for partial meshes
     #                     (after drone removal)
 
-    # Directory Root
-    #dir_origin = f"/home/aau/meshsim/output/{grid_prefix}_mesh_design"
-    dir_origin = f"./{grid_prefix}_mesh_design_out"
+    # Directory Root (dir_origin) used for jsons and plots
     dir_origin_full_json = os.path.join(dir_origin, "full/json/")
     dir_origin_partial_json = os.path.join(dir_origin, "partial/json/")
 
@@ -1944,13 +1944,13 @@ def process_drone_mesh(*,
         json.dump(metadata, f)
 
 def inputs_define(*,
-        test_grid_meta_prefix,
-        wireless_prefix: str = '',
-        lookup_table,
-        lookup_table_name,
-        metadata,
-        freq_Mhz,
-        enable_graph_plots: bool = True):
+                  dir_origin: str,
+                  wireless_prefix: str = '',
+                  lookup_table,
+                  lookup_table_name,
+                  metadata,
+                  freq_Mhz,
+                  enable_graph_plots: bool = True):
     
     """
     Docstring for inputs_define:
@@ -1988,7 +1988,7 @@ def inputs_define(*,
 
     graph_sensitivity_phyrate(
         metadata=metadata,
-        file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+        file_folder_path=f"{dir_origin}/graph",
         filename=f"sensivity_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
         desired_bandwidth_Mhz=desired_bandwidth_Mhz,
         lookup_table=lookup_table,
@@ -1998,7 +1998,7 @@ def inputs_define(*,
 
     graph_range_phyrate(
         metadata=metadata,
-        file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+        file_folder_path=f"{dir_origin}/graph",
         filename=f"range_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
         desired_bandwidth_Mhz=desired_bandwidth_Mhz,
         lookup_table=lookup_table,
@@ -2074,7 +2074,7 @@ def inputs_define(*,
     return dist_comm,use_lookup_table
 
 def argument_define(*,
-                    test_grid_meta_prefix: str,
+                    dir_origin: str,
                     wireless_prefix: str = '',
                     lookup_table: dict,
                     lookup_table_name: str,
@@ -2117,7 +2117,7 @@ def argument_define(*,
 
     graph_sensitivity_phyrate(
     metadata=metadata,
-    file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+    file_folder_path=f"{dir_origin}/graph",
     filename=f"sensivity_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
     desired_bandwidth_Mhz=desired_bandwidth_Mhz,
     lookup_table=lookup_table,
@@ -2127,7 +2127,7 @@ def argument_define(*,
 
     graph_range_phyrate(
         metadata=metadata,
-        file_folder_path=f"./{test_grid_meta_prefix}_mesh_design_out/graph",
+        file_folder_path=f"{dir_origin}/graph",
         filename=f"range_vs_phyrate_bandwidth{desired_bandwidth_Mhz}_MHz_{lookup_table_name}",
         desired_bandwidth_Mhz=desired_bandwidth_Mhz,
         lookup_table=lookup_table,
@@ -2255,6 +2255,11 @@ def main():
     test_grid_meta_prefix = "Square"
     test_grid_func = drone_sq_grid
 
+    # Directory Root
+    base_dir = "/home/aau/meshsim/output"
+    dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
+    #dir_origin = f"./{test_grid_meta_prefix}_mesh_design_out"
+
     ###############################################################################
     ###############################################################################
 
@@ -2294,8 +2299,12 @@ def main():
                 test_grid_func = drone_triangle_grid
                 break
             else:
-                print(f"Warning: NOT A GRID TYPE : {grid}")
+                print(f"Warning: NOT A GRID TYPE: {grid}")
                 print()
+            
+            # Directory Root
+            dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
+            #dir_origin = f"./{test_grid_meta_prefix}_mesh_design_out"
 
         while True:
             print("Choose WiFi scheme:")
@@ -2307,7 +2316,7 @@ def main():
             if wifi_module in (1,2):
                 break
             else: 
-                print(f"Warning: NOT A AVAILABLE WIFI MODULE : {wifi_module}")
+                print(f"Warning: NOT AN AVAILABLE WIFI MODULE: {wifi_module}")
                 print()
 
         while True:
@@ -2321,27 +2330,27 @@ def main():
             if debug_int in (1,2):
                 break
             else:
-                print(f"WARNING: NEED TO SET DEBUG PLOT OFF (1) OR ON (2: NOT {debug_int}")
+                print(f"WARNING: NEED TO SET DEBUG PLOT OFF (1) OR ON (2): NOT {debug_int}")
                 print()
 
         if wifi_module == 1:
-            dist_comm,use_lookup_table = inputs_define(test_grid_meta_prefix = test_grid_meta_prefix,
-                        wireless_prefix=wireless_prefix,
-                        lookup_table=lookup_table_wifi7_eht_GI0_8_OFDM,
-                        lookup_table_name = "WIFI_7_GI0_8_OFDM",
-                        metadata=metadata,
-                        freq_Mhz = 6000,
-                        enable_graph_plots=Enable_debug_plots)
+            dist_comm,use_lookup_table = inputs_define(dir_origin=dir_origin,
+                                                       wireless_prefix=wireless_prefix,
+                                                       lookup_table=lookup_table_wifi7_eht_GI0_8_OFDM,
+                                                       lookup_table_name = "WIFI_7_GI0_8_OFDM",
+                                                       metadata=metadata,
+                                                       freq_Mhz = 6000,
+                                                       enable_graph_plots=Enable_debug_plots)
 
 
         elif wifi_module == 2:
-            dist_comm,use_lookup_table = inputs_define(test_grid_meta_prefix = test_grid_meta_prefix,
-                        wireless_prefix=wireless_prefix,
-                        lookup_table=lookup_table_halow_module_MM8108,
-                        lookup_table_name = "WIFI_HALOW_MM8108",
-                        metadata=metadata,
-                        freq_Mhz = 868,
-                        enable_graph_plots=Enable_debug_plots)
+            dist_comm,use_lookup_table = inputs_define(dir_origin=dir_origin,
+                                                       wireless_prefix=wireless_prefix,
+                                                       lookup_table=lookup_table_halow_module_MM8108,
+                                                       lookup_table_name = "WIFI_HALOW_MM8108",
+                                                       metadata=metadata,
+                                                       freq_Mhz = 868,
+                                                       enable_graph_plots=Enable_debug_plots)
 
     else:
         grid = args.grid.strip().lower() if args.grid else None
@@ -2387,30 +2396,36 @@ def main():
             print()
             exit()
 
+        # Directory Root
+        dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
+        #dir_origin = f"./{test_grid_meta_prefix}_mesh_design_out"
+
         if wifi_module == "halow":
             freq_Mhz = 868
-            dist_comm,use_lookup_table = argument_define(test_grid_meta_prefix=test_grid_meta_prefix,
-                                                        wireless_prefix='',
-                                                        lookup_table=lookup_table_halow_module_MM8108,
-                                                        lookup_table_name="WIFI_HALOW_MM8108",
-                                                        desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                                                        data_rate_Mbps= data_rate_Mbps,
-                                                        freq_Mhz=freq_Mhz,
-                                                        enable_graph_plots=Enable_debug_plots,
-                                                        link_budget_model=link_budget_model,
-                                                        transmit_power_dbm=transmit_power_dbm)
+            dist_comm,use_lookup_table = argument_define(dir_origin=dir_origin,
+                                                         wireless_prefix='',
+                                                         lookup_table=lookup_table_halow_module_MM8108,
+                                                         lookup_table_name="WIFI_HALOW_MM8108",
+                                                         desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                                                         data_rate_Mbps= data_rate_Mbps,
+                                                         freq_Mhz=freq_Mhz,
+                                                         enable_graph_plots=Enable_debug_plots,
+                                                         link_budget_model=link_budget_model,
+                                                         transmit_power_dbm=transmit_power_dbm)
+            
         elif wifi_module == "7":
             freq_Mhz = 6000
-            dist_comm,use_lookup_table = argument_define(test_grid_meta_prefix=test_grid_meta_prefix,
-                                                        wireless_prefix='',
-                                                        lookup_table=lookup_table_wifi7_eht_GI0_8_OFDM,
-                                                        lookup_table_name="WIFI_7_GI0_8_OFDM",
-                                                        desired_bandwidth_Mhz=desired_bandwidth_Mhz,
-                                                        data_rate_Mbps= data_rate_Mbps,
-                                                        freq_Mhz=freq_Mhz,
-                                                        enable_graph_plots=Enable_debug_plots,
-                                                        link_budget_model=link_budget_model,
-                                                        transmit_power_dbm=transmit_power_dbm)
+            dist_comm,use_lookup_table = argument_define(dir_origin=dir_origin,
+                                                         wireless_prefix='',
+                                                         lookup_table=lookup_table_wifi7_eht_GI0_8_OFDM,
+                                                         lookup_table_name="WIFI_7_GI0_8_OFDM",
+                                                         desired_bandwidth_Mhz=desired_bandwidth_Mhz,
+                                                         data_rate_Mbps= data_rate_Mbps,
+                                                         freq_Mhz=freq_Mhz,
+                                                         enable_graph_plots=Enable_debug_plots,
+                                                         link_budget_model=link_budget_model,
+                                                         transmit_power_dbm=transmit_power_dbm)
+            
         else:
             print(f"Warning: NOT AN AVAILABLE WIFI MODULE: {wifi_module}")
             exit()
@@ -2428,6 +2443,7 @@ def main():
 
     # Process a drone mesh to give metadata and plots
     process_drone_mesh(grid_prefix=test_grid_meta_prefix,
+                       dir_origin=dir_origin,
                        wireless_prefix=wireless_prefix,
                        dist_comm=dist_comm,
                        dim=test_dim,
