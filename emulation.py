@@ -409,26 +409,26 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
 
     graph["nodes"].extend(devs)
 
+def battp_set_link_throughput(n1: str, n2: str, tp: float):
+    tid = get_thread_id()
+    remote = None
+
+    # get n1 and n2 MAC address
+    bat_mac_cmd = "ip -o -brief link show uplink | awk '{print $3}'"
+    n1_mac = exec(tid, remote, f'ip netns exec "ns-{n1}" {bat_mac_cmd}', get_output=True)[0].strip() # [0] to only get stdout
+    n2_mac = exec(tid, remote, f'ip netns exec "ns-{n2}" {bat_mac_cmd}', get_output=True)[0].strip()
+
+    # set throughput limit in both directions (*10 is to go from unit Mbit to 100kbit)
+    exec(tid, remote, f'ip netns exec "ns-{n1}" battpctl set bat0 uplink {n2_mac} {int(tp*10)}')
+    exec(tid, remote, f'ip netns exec "ns-{n2}" battpctl set bat0 uplink {n1_mac} {int(tp*10)}')
+
 def batctl_set_neigh_throughputs(graph: dict):
     """
     set throughput limit in both direction to a neighbour node.
     """
-    tid = get_thread_id()
-    remote = None
 
     for link in graph["links"]:
-        source = link["source"]
-        target = link["target"]
-        bw = float(link["phyrate_mbps"])
-
-        # get source and target MAC address
-        bat_mac_cmd = "ip -o -brief link show uplink | awk '{print $3}'"
-        source_mac = exec(tid, remote, f'ip netns exec "ns-{source}" {bat_mac_cmd}', get_output=True)[0].strip() # [0] to only get stdout
-        target_mac = exec(tid, remote, f'ip netns exec "ns-{target}" {bat_mac_cmd}', get_output=True)[0].strip()
-
-        # set throughput limit in both directions (*10 is to go from unit Mbit to 100kbit)
-        exec(tid, remote, f'ip netns exec "ns-{source}" battpctl set bat0 uplink {target_mac} {int(bw*10)}')
-        exec(tid, remote, f'ip netns exec "ns-{target}" battpctl set bat0 uplink {source_mac} {int(bw*10)}')
+        battp_set_link_throughput(n1=link["source"], n2=link["target"], tp=float(link["phyrate_mbps"]))
 
 def get_node_addrs(node_id: str, cmd: str):
     tid = get_thread_id()
@@ -469,7 +469,7 @@ def set_node_down(node_name: str):
     rmap = get_remote_mapping([Remote()]) # for running locally
     mn_software._stop_protocol("batman-adv", rmap, [node_name])
 
-def set_node_up(node_name: str):
+def set_node_up(node_name: str, graph: dict):
     """
     start batman-adv protocol to simulate node entering mesh network
     
@@ -477,7 +477,11 @@ def set_node_up(node_name: str):
     """
     rmap = get_remote_mapping([Remote()]) # for running locally
     mn_software._start_protocol("batman-adv", rmap, [node_name])
-    # TODO make links, apply netem rules, and set throughput overrides
+
+    filt = lambda link: link["source"] == node_name or link["target"] == node_name
+    links = filter(filt, graph["links"])
+    for link in links:
+        battp_set_link_throughput(link["source"], link["target"], float(link["phyrate_mbps"]))
 
 def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams) -> list[SchedEntry]:
     """
@@ -527,7 +531,7 @@ def stub_iperf_sched():
 
     return events
 
-def do_event(e: SchedEventType):
+def do_event(e: SchedEventType, graph: dict):
     print(f"Event {e} run at {datetime.now()}")
     if isinstance(e, IperfEvent):
         run_iperf3_connection(
@@ -542,11 +546,11 @@ def do_event(e: SchedEventType):
         if e.state != State.UP:
             set_node_down(e.name)
         else:
-            set_node_up(e.name)
+            set_node_up(e.name, graph)
     else:
         raise ValueError("Invalid event type: " + type(e))
 
-def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
+def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
     t_start = datetime.now()
     t_end = t_start + timedelta(seconds=duration)
 
@@ -577,7 +581,7 @@ def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
             e = sched_sorted[i]
             if t_elapsed >= e.time:
                 # handle event
-                do_event(e.event)
+                do_event(e.event, graph)
                 e_cp = copy(e)
                 e_cp.time = t_elapsed
                 sched_real.append(e_cp)
@@ -696,7 +700,7 @@ def main():
 
     time.sleep(2)  # allow to launch tcpdumps
     
-    sim = run_sim_sched(sched=sched_combined, duration=1000)
+    sim = run_sim_sched(graph=graph, sched=sched_combined, duration=100)
     with open(sim_sched_json_path, "w") as f:
         json.dump(asdict(sim), f)
 
