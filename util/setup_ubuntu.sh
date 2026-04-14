@@ -13,7 +13,7 @@ sudo apt update
 sudo apt install -y \
 	build-essential pkg-config libnl-3-dev libnl-genl-3-dev \
 	python3 python3-venv \
-	batctl iperf3
+	batctl iperf3 tshark
 
 echo "[*] Creating venv"
 python3 -m venv .venv
