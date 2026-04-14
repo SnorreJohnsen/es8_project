@@ -62,6 +62,26 @@ def batadv_patch_loaded() -> bool:
     if len(matches) > 0:
         batadv_patched_regex = br"^\[.*\] batman_adv: B\.A\.T\.M\.A\.N\. advanced \d{4}\.\d patched \(compatibility version \d+\) loaded$"
         patched = bool(re.fullmatch(batadv_patched_regex, matches[-1]))
+
+    # if batman patched not in dmesg check in modinfo
+    if not patched:
+        try:
+            result = subprocess.run(
+                ["modinfo", "-F", "description", "batman_adv"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=True
+            )
+
+            description = result.stdout.strip()
+
+            if "B.A.T.M.A.N. advanced patched" in description:
+                patched = True
+
+        except subprocess.CalledProcessError:
+            patched = False
+
     if not patched:
         print("ERROR: batman_adv is not patched version")
         return False
