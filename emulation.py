@@ -12,10 +12,9 @@ import math
 import re
 import errno
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from pprint import pprint
 from copy import copy
-from tqdm import tqdm
 
 from mesh_design_lib import data_rate_given_dist_comm
 from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
@@ -549,6 +548,18 @@ def do_event(e: SchedEventType):
 
 def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
     t_start = datetime.now()
+    t_end = t_start + timedelta(seconds=duration)
+
+    print(f"""
+    {'='*50}
+    {'SIMULATION'.center(50)}
+    {'='*50}
+    Start time : {t_start}
+    End time   : {t_end}
+    Duration   : {duration:.1f} s
+    {'='*50}
+    """)
+
     # perform sim while duration not expired
     sched_sorted = sorted(sched)
 
@@ -557,39 +568,27 @@ def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
     done = False
     i = 0
 
-    tqdm_update_perc = 0 # start tqdm at 0%
-    tqdm.write("")
-    with tqdm(total=duration, desc="Simulation progress") as pbar:
+    while not done:
+        t_current = datetime.now()
+        t_elapsed = (t_current - t_start).total_seconds()
 
-        while not done:
-            t_current = datetime.now()
-            t_elapsed = (t_current - t_start).total_seconds()
+        # if there are more events
+        if i < len(sched_sorted):
+            e = sched_sorted[i]
+            if t_elapsed >= e.time:
+                # handle event
+                do_event(e.event)
+                e_cp = copy(e)
+                e_cp.time = t_elapsed
+                sched_real.append(e_cp)
+                i += 1
+            elif e.time-t_elapsed > 2:
+                # sleep till next event
+                time.sleep(e.time-t_elapsed-1)
 
-            # if there are more events
-            if i < len(sched_sorted):
-                e = sched_sorted[i]
-                if t_elapsed >= e.time:
-                    # handle event
-                    do_event(e.event)
-                    e_cp = copy(e)
-                    e_cp.time = t_elapsed
-                    sched_real.append(e_cp)
-                    i += 1
-                elif e.time-t_elapsed > 2:
-                    # sleep till next event
-                    time.sleep(e.time-t_elapsed-1)
-
-            # update progressbar 
-            tqdm_progress_perc = int((t_elapsed/duration) * 100)
-            if tqdm_progress_perc >= tqdm_update_perc and tqdm_progress_perc >= 2:
-                tqdm.write("")
-                pbar.n = min(t_elapsed, duration)
-                pbar.refresh()
-                tqdm_update_perc += 2
-
-            # Stop if simulation duration is reached
-            if t_elapsed > duration:
-                done = True
+        # Stop if simulation duration is reached
+        if t_elapsed > duration:
+            done = True
 
     return Sim(t_start.timestamp(), sched_sorted, sched_real)
 
