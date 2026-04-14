@@ -15,6 +15,7 @@ import random
 from datetime import datetime
 from pprint import pprint
 from copy import copy
+from tqdm import tqdm
 
 from mesh_design_lib import data_rate_given_dist_comm
 from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
@@ -535,29 +536,40 @@ def run_sim_sched(sched: list[SchedEntry], duration: float) -> Sim:
 
     done = False
     i = 0
-    while not done:
-        t_current = datetime.now()
-        t_elapsed = (t_current - t_start).total_seconds()
 
-        # if there are more events
-        if i < len(sched_sorted):
-            e = sched_sorted[i]
-            if t_elapsed >= e.time:
-                # handle event
-                do_event(e.event)
-                e_cp = copy(e)
-                e_cp.time = t_elapsed
-                sched_real.append(e_cp)
-                i += 1
-            elif e.time-t_elapsed > 2:
-                # sleep till next event
-                time.sleep(e.time-t_elapsed-1)
+    tqdm_update_perc = 0 # start tqdm at 0%
+    tqdm.write("")
+    with tqdm(total=duration, desc="Simulation progress") as pbar:
 
-        # Stop if simulation duration is reached
-        if t_elapsed > duration:
-            done = True
+        while not done:
+            t_current = datetime.now()
+            t_elapsed = (t_current - t_start).total_seconds()
 
+            # if there are more events
+            if i < len(sched_sorted):
+                e = sched_sorted[i]
+                if t_elapsed >= e.time:
+                    # handle event
+                    do_event(e.event)
+                    e_cp = copy(e)
+                    e_cp.time = t_elapsed
+                    sched_real.append(e_cp)
+                    i += 1
+                elif e.time-t_elapsed > 2:
+                    # sleep till next event
+                    time.sleep(e.time-t_elapsed-1)
 
+            # update progressbar 
+            tqdm_progress_perc = int((t_elapsed/duration) * 100)
+            if tqdm_progress_perc >= tqdm_update_perc and tqdm_progress_perc >= 2:
+                tqdm.write("")
+                pbar.n = min(t_elapsed, duration)
+                pbar.refresh()
+                tqdm_update_perc += 2
+
+            # Stop if simulation duration is reached
+            if t_elapsed > duration:
+                done = True
 
     return Sim(t_start.timestamp(), sched_sorted, sched_real)
 
@@ -665,7 +677,7 @@ def main():
 
     time.sleep(2)  # allow to launch tcpdumps
     
-    sim = run_sim_sched(sched=sched_combined, duration=100)
+    sim = run_sim_sched(sched=sched_combined, duration=1000)
     with open(sim_sched_json_path, "w") as f:
         json.dump(asdict(sim), f)
 
