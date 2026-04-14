@@ -598,7 +598,9 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("graph", help="Graph of the full network mesh (json)")
+    parser.add_argument('graph', help='Graph of the full network mesh (json)')
+    parser.add_argument('-s', '--sim-sched', required=False, help='Simulation schedule (json)')
+    parser.add_argument('-d', '--duration', default=100, help='Duration for simulation [s]')
     parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', help='Set verbosity.')
     args = parser.parse_args()
 
@@ -652,24 +654,36 @@ def main():
         start_tcpdump(id, "uplink", pcap_dir)
     time.sleep(0.5)  # allow to launch tcpdumps
     
+    # Load or generate schedule
+    if args.sim_sched:
+        print(f"Loading simulation schedule from file {args.sim_sched}")
+        # Load schedule
+        try:
+            with open(args.sim_sched, "r") as f:
+                sim_dict = json.load(f)
+            sim_obj = Sim(**sim_dict)
+            sched = sim_obj.sched_plan
+        except:
+            raise ValueError(f"Invalid sim schedule file {args.sim_sched}")
+    else:
+        print("Generating simulation schedule")
+        # set Dropout model parameters and generate schedule
+        dropout_params = DropoutParams(
+                        failure_probability = 0.001,
+                        replacement_distribution_sampler = lambda : 100*random.random()+50,
+                        time_step = 10,
+                        fly_up_time = 30,
+                        fly_down_time = 30,
+                        desired_fly_time = 900,
+                        recharging_time = 700,
+                )
+        dropout_sched = gen_dropout_sched(nodes=drone_ids,
+                          t_start_step=50,
+                          t_sim_end=1000,
+                          params=dropout_params)
 
-    # set Dropout model parameters and generate schedule
-    dropout_params = DropoutParams(
-                    failure_probability = 0.001,
-                    replacement_distribution_sampler = lambda : 100*random.random()+50,
-                    time_step = 10,
-                    fly_up_time = 30,
-                    fly_down_time = 30,
-                    desired_fly_time = 900,
-                    recharging_time = 700,
-            )
-    dropout_sched = gen_dropout_sched(nodes=drone_ids,
-                      t_start_step=50,
-                      t_sim_end=1000,
-                      params=dropout_params)
-
-    iperf_sched = stub_iperf_sched()
-    sched_combined = dropout_sched + iperf_sched
+        iperf_sched = stub_iperf_sched()
+        sched = dropout_sched + iperf_sched
 
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
@@ -692,7 +706,7 @@ def main():
 
     if verbosity != "quiet":
         print("Wait for batman-adv to be ready")
-    time.sleep(30) # wait for batman to be ready
+    time.sleep(10) # wait for batman to be ready
 
     # Apply throughput override
     batctl_set_neigh_throughputs(graph)
@@ -700,7 +714,7 @@ def main():
         print("Wait for throughput override")
     time.sleep(10) # wait for moving average in throughput override
 
-    sim = run_sim_sched(graph=graph, sched=sched_combined, duration=100)
+    sim = run_sim_sched(graph=graph, sched=sched, duration=args.duration)
     with open(sim_sched_json_path, "w") as f:
         json.dump(asdict(sim), f)
 
