@@ -647,6 +647,12 @@ def main():
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
     adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
 
+    # Start tcpdump for each node
+    for id in all_ids:
+        start_tcpdump(id, "uplink", pcap_dir)
+    time.sleep(0.5)  # allow to launch tcpdumps
+    
+
     # set Dropout model parameters and generate schedule
     dropout_params = DropoutParams(
                     failure_probability = 0.001,
@@ -677,12 +683,16 @@ def main():
         device_ids.append(device_id)
         create_device(device_id, adapter_id)
 
+    # Add devices and start tcpdump
+    for device_id in device_ids:
+        start_tcpdump(device_id, "veth0", pcap_dir)
+
     # Make json files for IP addrs and MAC addrs overview
     get_all_addrs(graph, device_ids)
 
     if verbosity != "quiet":
         print("Wait for batman-adv to be ready")
-    time.sleep(30) # wait for batman to be ready (30s)
+    time.sleep(30) # wait for batman to be ready
 
     # Apply throughput override
     batctl_set_neigh_throughputs(graph)
@@ -690,16 +700,6 @@ def main():
         print("Wait for throughput override")
     time.sleep(10) # wait for moving average in throughput override
 
-    # Add devices and start tcpdump
-    for device_id in device_ids:
-        start_tcpdump(device_id, "veth0", pcap_dir)
-
-    # Start tcpdump for each node
-    for id in all_ids:
-        start_tcpdump(id, "uplink", pcap_dir)
-
-    time.sleep(2)  # allow to launch tcpdumps
-    
     sim = run_sim_sched(graph=graph, sched=sched_combined, duration=100)
     with open(sim_sched_json_path, "w") as f:
         json.dump(asdict(sim), f)
