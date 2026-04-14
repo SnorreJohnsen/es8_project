@@ -1819,8 +1819,10 @@ def process_drone_mesh(*,
             # Metaprefix for file names
             prefix_dropout_real_perc = metadata[f"{grid_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
 
+            num_nodes_dropout = len(node_list_dropout)
+
             # Make single network of each dropout rate
-            make_json_network(file_name=f"{grid_prefix}_network_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz.json",
+            make_json_network(file_name=f"{grid_prefix}_network_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_{num_nodes_dropout}_nodes.json",
                               file_folder_path=dir_origin_partial_json,
                               nodes=node_list_dropout,
                               links=link_list_dropout)
@@ -1887,9 +1889,10 @@ def process_drone_mesh(*,
 
         # Add number drones used in full mesh to metadata
         metadata[f"{grid_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
+        num_nodes = len(node_list_all)
 
         # Make the json network from list of nodes
-        make_json_network(file_name=f"{grid_prefix}_network_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz.json",
+        make_json_network(file_name=f"{grid_prefix}_network_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_{num_nodes}_nodes.json",
                           file_folder_path=dir_origin_full_json,
                           nodes=node_list_all,
                           links=link_list_all)
@@ -2256,7 +2259,8 @@ def main():
     test_grid_func = drone_sq_grid
 
     # Directory Root
-    base_dir = "/home/aau/meshsim/output"
+    base_dir = "C:/UNI/8.Semester/Project"
+    #base_dir = "/home/aau/meshsim/output"
     dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
     #dir_origin = f"./{test_grid_meta_prefix}_mesh_design_out"
 
