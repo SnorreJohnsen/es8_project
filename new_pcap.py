@@ -17,8 +17,6 @@ Example: of how to create txt file with nessacary measures and order:
 -e batadv.ogm2.orig > edges_d0_d4.txt
 '''
 
-
-
 @dataclass
 class Node:
     id: str
@@ -37,7 +35,6 @@ adapter.append(a1)
 adapter.append(a2)
 adapter.append(a3)
 adapter.append(a4)
-
 
 def find_mac_path(obj, target_mac, path=""):
     if isinstance(obj, dict):
@@ -68,6 +65,18 @@ def natural_key(text):
         int(chunk) if chunk.isdigit() else chunk.lower()
         for chunk in re.split(r'(\d+)', text)
     ]
+
+def extract_uplink_macs(reference_data):
+    uplink_macs = []
+
+    for data in reference_data.values():
+        mac_dict = data.get('mac', {})
+
+        for iface, mac in mac_dict.items():
+            if 'uplink' in iface:
+                uplink_macs.append(mac)
+
+    return uplink_macs
 
 def creation_of_edges_OGM2(*,
                       G,
@@ -172,7 +181,6 @@ def edge_with_type_exists(G, src, dst, order):
     
     return None
 
-
 def creation_of_edges_TCP(*,
                       G,
                       file: str,
@@ -187,7 +195,7 @@ def creation_of_edges_TCP(*,
                     break
 
                 parts = line.strip().split()
-                # Frame_NR SRC DST TYPE
+                # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST TYPE PROTOCOLS BATMAN_TYPE BATMAN_ORIG
 
                 src = clean(parts[3])
                 dst = clean(parts[4])
@@ -226,27 +234,39 @@ def creation_of_pyvis(G,
                       json_nodes: str,
                       output_file="packet_graph.html"):
     # Create PyVis network
-    net = Network(height="800px", width="100%", directed=True, bgcolor="#222222", font_color="white")
+    net = Network(height="800px", width="100%", directed=True, bgcolor="grey", font_color="black")
 
     # Optional: better physics (important for mesh graphs)
     net.barnes_hut()
 
+    # Load layout data (graph.json)
     with open(json_nodes,"r") as f:
         node_link_data = json.load(f)
     nodes_pos_data = node_link_data.get("nodes", [])
-    pos_lookup = {n["id"]: n for n in nodes_pos_data}
-    adapter_pos_lookup = {a.id: a for a in adapter}
-    # Add nodes + edges
-    nodes = []
-    for node in G.nodes():
+    #adapter_pos_lookup = {a.id: a for a in adapter} # adapter nodes are in pos_lookup
+    pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
+    #graph_nodes = set(G.nodes())                        # includes MAC address for nodes and adapters with links
+    nodes = []     # Add nodes + edges
+
+    # 1. Add nodes that exist in G (only include nodes and adapters that have links)
+    nodes_adapters_macs = extract_uplink_macs(reference_data=reference_data)  # ALL MAC addresses
+    print()
+    print(f'{nodes_adapters_macs=}')
+    print()
+    print(f'{G.nodes()=}')
+    print()
+    for node in nodes_adapters_macs:
+
         node_info = find_mac_path(reference_data, node)
 
+        # node_info = /n4/mac/uplink@if15  (example)
         if node_info:
             parts = node_info.split("/")
             node_id = parts[1]
             addr_type = parts[2]
             addr_type_type = parts[3]
             # expected adapter and node ids in the json lookup
+
             if node_id in pos_lookup and "uplink" in addr_type_type:
                 x = pos_lookup[node_id]["x"]
                 y = pos_lookup[node_id]["y"]
@@ -263,8 +283,16 @@ def creation_of_pyvis(G,
             addr_type_type = "unknown"
             x = 30000
             y = 15000
-        net.add_node(node, label=f"MAC: {node} \n NODE: {node_id} \n ADDR TYPE {addr_type} {addr_type_type}",x=x,y=y,physics=False)
-        nodes.append((node_id, node, addr_type, addr_type_type))
+        
+        # for nodes that contains links
+        if node in G.nodes():
+            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id} \n ADDR TYPE: {addr_type} {addr_type_type}", size=100, color='blue',x=x,y=y,physics=False)
+            nodes.append((node_id, node, addr_type, addr_type_type))
+        
+        # for nodes that dont contain links
+        else:
+            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id} \n ADDR TYPE: {addr_type} {addr_type_type} \n NO TRAFFIC DATA", size=100, color='red',x=x,y=y,physics=False)
+            nodes.append((node_id, node, addr_type, addr_type_type))
 
     # natural sort here
     nodes.sort(key=lambda x: natural_key(x[0]))
@@ -272,10 +300,14 @@ def creation_of_pyvis(G,
     for node_id, mac, addr_type, addr_type_type in nodes:
         net.add_node(
             mac,
-            label=f"MAC: {mac}\nNODE: {node_id}\nADDR TYPE {addr_type} {addr_type_type}"
+            label=f"MAC: {mac}\nNODE: {node_id}\nADDR TYPE: {addr_type} {addr_type_type}"
         )
-        print(f"{node_id} -> {mac}")
+        if mac in G.nodes():
+            print(f"{node_id} -> {mac}")
+        else:
+            print(f'{node_id} -> {mac} - This node/adapter do not contain any links')
 
+    # Add edges with styling
     weights = [data.get("weight", 1) for _, _, data in G.edges(data=True)]
     min_w = min(weights)
     max_w = max(weights)
@@ -289,7 +321,7 @@ def creation_of_pyvis(G,
         dst,
         title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
         color= color,               # controls thickness
-        width=1 + np.log1p(weight)  # optional smoother scaling
+        width=2 + 3 * np.log1p(weight)  # optional smoother scaling
     )
 
     # Save and open
@@ -319,12 +351,11 @@ def heatmap_color(norm):
     else:
         return f"rgb(255,{int(255 * (1 - (norm - 0.75)*4))},0)"  # yellow → red
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="What Parameters mean")
     parser.add_argument("-in","--input", type=str ,help ="Input file location | NEEDS TO BE TXT")
-    parser.add_argument("-addr","--addresses",type=str, help ="Json file including all associated adresses for the Nodes,Adapters,Devices")
-    parser.add_argument("-j","--json",type=str, help ="Json file Including pos of nodes")
+    parser.add_argument("-addr","--addresses",type=str, help ="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
+    parser.add_argument("-j","--json",type=str, help ="Json file Including pos of nodes (graph.json)")
     args = parser.parse_args()
 
     analysis_file = args.input
@@ -341,14 +372,14 @@ if __name__ == "__main__":
 
     # checking order of OGM2 messages being transmitted throughout the network
     # Build graph
-    G = nx.MultiDiGraph()
-    Mac_a4= mac_node("a4",reference_data=addr_data)
-    creation_of_edges_OGM2(G=G,file=analysis_file,start_time=20,OGM2_orig_mac=Mac_a4,time_interval=1)
+    #G = nx.MultiDiGraph()
+    #Mac_a4= mac_node("a4",reference_data=addr_data)
+    #G = creation_of_edges_OGM2(G=G,file=analysis_file,start_time=20,OGM2_orig_mac=Mac_a4,time_interval=1)
 
     # TPC stream seing how it goes through the netwrok of iperf tcp stream
     # Build graph
-    #G = nx.DiGraph()
-    # G = creation_of_edges_TCP(G=G,file=analysis_file,start_packet=start,stop_packet=end)
-    
+    G = nx.DiGraph()
+    G = creation_of_edges_TCP(G=G,file=analysis_file,start_packet=start,stop_packet=end)
+
     creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
 
