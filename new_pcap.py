@@ -14,7 +14,7 @@ adapter = []
 Example: of how to create txt file with nessacary measures and order:
 & tshark -r pcap_file
 -T fields -e frame.number -e frame.time_epoch -e frame.time_relative -e eth.src -e eth.dst -e eth.type -e frame.protocols -e batadv.batman.packet_type
--e batadv.ogm2.orig > edges_d0_d4.txt
+-e batadv.ogm2.orig -e batadv.ogm2.throughput > edges_d0_d4.txt
 '''
 
 @dataclass
@@ -171,6 +171,75 @@ def creation_of_edges_OGM2(*,
 
     return G
 
+
+def tracking_of_OGM2_at_source(*,
+                      file: str,
+                      start_time: int = 0,
+                      OGM2_orig_mac: str,
+                      time_interval: float = 1,
+                      eth_src: str = None,
+                      node_id: str):
+    
+    '''
+    docstring:
+    G: networksx with need to be nx.MultiDiGraph()
+    file: network stream with format of:
+    frame_number | time | relative time | eth.src | eth.dst | eth.type | frame.protocols | bat_packet_type | bat_ogm2.orig
+    OGM2_orig_mac: Need to uplink from reference data of the desired node
+    time_interval: How long interval to track over, OGM2 interval is 1 sec and therefore default
+    '''
+    
+    with open(file, "r", encoding="utf-16", errors="ignore") as f:
+            stop_time = start_time + time_interval
+            throughput = None
+            print(f"The Node id: {node_id} with Mac Adress {eth_src} | OGM Original Address to be found: {OGM2_orig_mac}")
+            print("------------------------------------------------------------------------------------------------------------")
+            for i, line in enumerate(f):
+
+                # get the relative time
+                parts = line.strip().split()
+                time = float(clean(parts[2]))
+
+                # ensure above desired start time
+                if time < start_time:
+                    continue
+                # find first OGM of Orig send from the ORIG addr
+                elif time > start_time and time < stop_time:
+                    src = clean(parts[3])
+                    dst = clean(parts[4])
+                    protocol = clean(parts[6])
+
+                    # may need to split at, for bat_type and OGM2_orig_addr as may entail more then one
+                    if len(parts) == 10:
+                        bat_type = clean(parts[7])
+                        bat_types = [b.strip() for b in bat_type.split(",")]
+                        OGM2_orig_addr = clean(parts[8])
+                        OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
+                        OGM2_tp = clean(parts[9])
+                        OGM2_tps = [
+                                        TP.strip()[:-1] + "." + TP.strip()[-1]
+                                        if len(TP.strip()) > 1 else TP.strip()
+                                        for TP in OGM2_tp.split(",")
+                                    ]
+                        #print(f"{src=},{OGM2_orig_addrs=}")
+                        #print(f"{eth_src=},{OGM2_orig_mac=}")
+                        # if find orig OGM2 message at the orig we start timer 
+                        if src == eth_src and OGM2_orig_mac in OGM2_orig_addrs and 'batadv' in protocol and '4' in bat_types:
+                            index = OGM2_orig_addrs.index(OGM2_orig_mac)
+                            # only print when throughput changes
+                            if throughput != OGM2_tps[index]:
+                                throughput = OGM2_tps[index]
+                                print(f"Time is {time} | Throughput: {OGM2_tps[index]} mbit/s ")
+                        else:
+                            continue
+                    else:   
+                        continue
+                else:
+                    continue
+    print("__________________________________________________________________________________________")
+    return 
+
+
 def edge_with_type_exists(G, src, dst, order):
     if not G.has_edge(src, dst):
         return None
@@ -197,6 +266,7 @@ def creation_of_edges_TCP(*,
                 parts = line.strip().split()
                 # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST TYPE PROTOCOLS BATMAN_TYPE BATMAN_ORIG
 
+                time = float(clean(parts[2]))
                 src = clean(parts[3])
                 dst = clean(parts[4])
                 type = clean(parts[5])
@@ -215,9 +285,9 @@ def creation_of_edges_TCP(*,
                     if 'batadv' in p and 'tcp' in p and n == 0:
                         if G.has_edge(s, d):
                             G[s][d]["weight"] += 1
+                            G[s][d]["last_time"] = time
                         else:
-                            G.add_edge(s, d, type=t, weight=1)
-
+                            G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
                         break
 
                     # Possible filter for batman still not to know if arp or what it is
@@ -243,18 +313,11 @@ def creation_of_pyvis(G,
     with open(json_nodes,"r") as f:
         node_link_data = json.load(f)
     nodes_pos_data = node_link_data.get("nodes", [])
-    #adapter_pos_lookup = {a.id: a for a in adapter} # adapter nodes are in pos_lookup
     pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
-    #graph_nodes = set(G.nodes())                        # includes MAC address for nodes and adapters with links
     nodes = []     # Add nodes + edges
 
     # 1. Add nodes that exist in G (only include nodes and adapters that have links)
     nodes_adapters_macs = extract_uplink_macs(reference_data=reference_data)  # ALL MAC addresses
-    print()
-    print(f'{nodes_adapters_macs=}')
-    print()
-    print(f'{G.nodes()=}')
-    print()
     for node in nodes_adapters_macs:
 
         node_info = find_mac_path(reference_data, node)
@@ -285,13 +348,13 @@ def creation_of_pyvis(G,
             y = 15000
         
         # for nodes that contains links
-        if node in G.nodes():
-            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id} \n ADDR TYPE: {addr_type} {addr_type_type}", size=100, color='blue',x=x,y=y,physics=False)
+        if "a" in node_id:
+            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id}", size=10, color='red',x=x/10,y=y/10,physics=False, font={'size': 300, 'bold': True})
             nodes.append((node_id, node, addr_type, addr_type_type))
         
         # for nodes that dont contain links
-        else:
-            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id} \n ADDR TYPE: {addr_type} {addr_type_type} \n NO TRAFFIC DATA", size=100, color='red',x=x,y=y,physics=False)
+        elif "n" in node_id:
+            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id}", size=10, color='blue',x=x/10,y=y/10,physics=False, font={'size': 300, 'bold': True})
             nodes.append((node_id, node, addr_type, addr_type_type))
 
     # natural sort here
@@ -316,12 +379,29 @@ def creation_of_pyvis(G,
         weight = data.get('weight',1)
         norm = normalize(w=weight,min_w=min_w,max_w=max_w)
         color = heatmap_color(norm=norm)
+
+        
+        # 👇 check if reverse edge exists
+        has_reverse = G.has_edge(dst, src)
+
+        if has_reverse and src != dst:
+            smooth = {
+                'enabled': True,
+                'type': 'curvedCW',
+                'roundness': 0.1
+            }
+        else:
+            smooth = False
+
+
         net.add_edge(
         src,
         dst,
-        title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
-        color= color,               # controls thickness
-        width=2 + 3 * np.log1p(weight)  # optional smoother scaling
+        smooth=smooth,
+        title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {weight}",        
+        # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
+        color= color,               
+        width=1 + np.log1p(weight)  # optional smoother scaling
     )
 
     # Save and open
@@ -379,6 +459,16 @@ if __name__ == "__main__":
     # TPC stream seing how it goes through the netwrok of iperf tcp stream
     # Build graph
     G = nx.DiGraph()
+    Mac_a0= mac_node("a0",reference_data=addr_data)
+    Mac_n8= mac_node("n8",reference_data=addr_data)
+    Mac_n6= mac_node("n6",reference_data=addr_data)
+    Mac_n5= mac_node("n5",reference_data=addr_data)
+    Mac_a4= mac_node("a4",reference_data=addr_data)
+    # For debug of why we take a shortcut looking at throughput from OGM2
+    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n6,node_id="n6")
+    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
+    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n6,node_id="n6")
+    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n8,node_id="n8")
     G = creation_of_edges_TCP(G=G,file=analysis_file,start_packet=start,stop_packet=end)
 
     creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
