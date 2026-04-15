@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import matplotlib.colors as mcolors
 import math
+import sys
 import os
 from pathlib import Path
 import random
@@ -2194,6 +2195,17 @@ def argument_define(*,
     return dist_comm,use_lookup_table      
 
 def main():
+
+    # Set grid type to process
+    test_grid_meta_prefix = "Square"
+    test_grid_func = drone_sq_grid
+
+    # Directory Root
+    #default_dir = "C:/UNI/8.Semester/Project"
+    default_dir = "/home/aau/meshsim/output"
+    base_dir = default_dir
+    dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
+
     parser = argparse.ArgumentParser(
         description="Example CLI",
         formatter_class=argparse.RawTextHelpFormatter  # <- preserves newlines
@@ -2228,6 +2240,8 @@ def main():
                         help = "Set dropout rates: Single value like 10 or comma-separated like 10,20,30. Default = 0.05, 0.1, 0.15, 0.2")
     parser.add_argument("-iter","--iterations", type = int,
                         help = "Set amount of times each Dropout is ran. Default = 100 ")
+    parser.add_argument("-p","--root_path", type = str,
+                        help = f"Set custom root path. Default = {default_dir}")
 
     args = parser.parse_args()
 
@@ -2251,18 +2265,6 @@ def main():
     # wireless communication parameters for MM8108-MF15457 lookup table
     wireless_prefix = ""
     margin_loss_db = 3 # safety variable for "other" losses
-
-    # Set grid type to process
-    # if hexagonal grid is chosen bool variable extra_edge_drones
-    # has to be set in function process_drone_mesh
-    test_grid_meta_prefix = "Square"
-    test_grid_func = drone_sq_grid
-
-    # Directory Root
-    base_dir = "C:/UNI/8.Semester/Project"
-    #base_dir = "/home/aau/meshsim/output"
-    dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
-    #dir_origin = f"./{test_grid_meta_prefix}_mesh_design_out"
 
     ###############################################################################
     ###############################################################################
@@ -2367,11 +2369,13 @@ def main():
         tol = args.tolerances
         dropout_iter = args.iterations
         drop_rates = args.dropout_rates
+        root_path = args.root_path
+
         if tol is not None:
             default_tolerances = np.array([float(x) for x in tol.split(",")])
         if dropout_iter is not None:
             default_drop_iter = dropout_iter
-        if  drop_rates is not None:
+        if drop_rates is not None:
             default_dropout_rates = np.array([float(x) for x in drop_rates.split(",")])
             for i in range(len(default_dropout_rates)):
                 rate = default_dropout_rates[i]
@@ -2384,6 +2388,22 @@ def main():
                     print()
                     print(f"WARNING: THE RATES ARE SUPPORTED FOR 0.0 to 1.0, {rate} IS NOT WITHIN RANGE")
                     exit()
+        if root_path is not None:
+            root_path = os.path.expanduser(root_path)
+            valid = True
+            if not os.path.isabs(root_path):
+                print(f'[ERROR] Path must be absolute: {root_path}')
+                valid = False
+            if not os.path.isdir(root_path):
+                print(f'[ERROR] Directory does not exist: {root_path}')
+                valid = False
+            if valid:
+                base_dir = root_path
+                print(f'[INFO] Saving in custom path: {base_dir}')
+            else:
+                print(f"[INFO] Saving in default path: {default_dir}")
+        else:
+            print(f'[INFO] Saving in default path: {default_dir}')
 
         metadata["TOLERANCES"] = str(default_tolerances)
         metadata["DROPOUT_RATES"] = str(default_dropout_rates)
