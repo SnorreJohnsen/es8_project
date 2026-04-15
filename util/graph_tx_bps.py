@@ -4,6 +4,8 @@ from collections import defaultdict
 from pathlib import Path
 import subprocess
 import sys
+import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 
@@ -98,6 +100,14 @@ def main() -> None:
         help="Optional output image path for accumulated bits plot",
     )
     args = ap.parse_args()
+
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    if args.csv:
+        Path(args.csv).parent.mkdir(parents=True, exist_ok=True)
+    if args.accum_csv:
+        Path(args.accum_csv).parent.mkdir(parents=True, exist_ok=True)
+    if args.accum_plot:
+        Path(args.accum_plot).parent.mkdir(parents=True, exist_ok=True)
 
     if args.bucket <= 0:
         raise ValueError("--bucket must be > 0")
