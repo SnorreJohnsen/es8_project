@@ -7,6 +7,7 @@ import pyshark
 from tqdm import tqdm
 import numpy as np
 from dataclasses import dataclass
+import webbrowser, os
 
 adapter = []
 
@@ -17,24 +18,6 @@ Example: of how to create txt file with nessacary measures and order:
 -e batadv.ogm2.orig -e batadv.ogm2.throughput > edges_d0_d4.txt
 '''
 
-@dataclass
-class Node:
-    id: str
-    x: int
-    y: int
-    z: int
-
-a0 = Node(id="a0", x=0,y=0,z=0)
-a1 = Node(id="a1", x=3000,y=3000,z=3000)
-a2 = Node(id="a2", x=1000,y=10000,z=10000)
-a3 = Node(id="a3", x=12000,y=5000,z=1500)
-a4 = Node(id="a4", x=25000,y=9000,z=3000)
-
-adapter.append(a0)
-adapter.append(a1)
-adapter.append(a2)
-adapter.append(a3)
-adapter.append(a4)
 
 def find_mac_path(obj, target_mac, path=""):
     if isinstance(obj, dict):
@@ -171,7 +154,6 @@ def creation_of_edges_OGM2(*,
 
     return G
 
-
 def tracking_of_OGM2_at_source(*,
                       file: str,
                       start_time: int = 0,
@@ -239,7 +221,6 @@ def tracking_of_OGM2_at_source(*,
     print("__________________________________________________________________________________________")
     return 
 
-
 def edge_with_type_exists(G, src, dst, order):
     if not G.has_edge(src, dst):
         return None
@@ -253,20 +234,22 @@ def edge_with_type_exists(G, src, dst, order):
 def creation_of_edges_TCP(*,
                       G,
                       file: str,
-                      start_packet: int = 0,
-                      stop_packet: int):
+                      start_time: int = 0,
+                      time_interval: int,
+                      stepsize_anime: float = 1):
     
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
+            stop_time = start_time + time_interval
+            anime_time = 0
             for i, line in enumerate(f):
-                if i < start_packet:
+                parts = line.strip().split()
+                time = float(clean(parts[2]))
+                if time < start_time:
                     continue
-                if i >= stop_packet:
+                elif time > stop_time:
                     break
 
-                parts = line.strip().split()
                 # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST TYPE PROTOCOLS BATMAN_TYPE BATMAN_ORIG
-
-                time = float(clean(parts[2]))
                 src = clean(parts[3])
                 dst = clean(parts[4])
                 type = clean(parts[5])
@@ -289,7 +272,12 @@ def creation_of_edges_TCP(*,
                         else:
                             G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
                         break
-
+                if time > start_time + anime_time + 1:
+                    anime_time += stepsize_anime
+                    if len(G.edges) > 0:
+                        print(f"Animation Number: {anime_time} | Time is {time}")
+                        creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes,index=time)
+                        print("_______________________________________________________________________________")
                     # Possible filter for batman still not to know if arp or what it is
                     # if p.split(":")[2] == 'batadv' and p.split(":")[-1] == 'data':
                     # if p.split(":")[2] == 'batadv' and p+1.split(":")[-1] == 'tcp':
@@ -300,12 +288,13 @@ def creation_of_edges_TCP(*,
     return G
 
 def creation_of_pyvis(G,
+                      index: str,
                       reference_data: str,
                       json_nodes: str,
-                      output_file="packet_graph.html"):
+                      output_file="packet_graph.html",
+                      ):
     # Create PyVis network
     net = Network(height="800px", width="100%", directed=True, bgcolor="grey", font_color="black")
-
     # Optional: better physics (important for mesh graphs)
     net.barnes_hut()
 
@@ -381,7 +370,7 @@ def creation_of_pyvis(G,
         color = heatmap_color(norm=norm)
 
         
-        # 👇 check if reverse edge exists
+        #  check if reverse edge exists
         has_reverse = G.has_edge(dst, src)
 
         if has_reverse and src != dst:
@@ -405,7 +394,45 @@ def creation_of_pyvis(G,
     )
 
     # Save and open
-    net.write_html(output_file, open_browser=True, notebook=False)
+    # Save HTML (DO NOT use show)
+    name_graph = f"{output_file}_time_{index}.html"
+    net.write_html(name_graph)
+
+    # Inject auto-fit script
+    with open(name_graph, "r+", encoding="utf-8") as f:
+        html = f.read()
+
+        injection = """
+        <script type="text/javascript">
+        window.addEventListener("load", function () {
+            if (typeof network !== "undefined") {
+
+                // FORCE stabilization immediately
+                network.stabilize(1000);
+
+                // After stabilization → fit and lock view
+                setTimeout(function () {
+                    network.fit({
+                        animation: {
+                            duration: 0
+                        }
+                    });
+
+                    // Optional: disable physics so it doesn't move again
+                    network.setOptions({ physics: false });
+
+                }, 100);
+            }
+        });
+        </script>
+        """
+
+        html = html.replace("</body>", injection + "\n</body>")
+
+        f.seek(0)
+        f.write(html)
+        f.truncate()
+    webbrowser.open("file://" + os.path.abspath(name_graph))
 
 def normalize(w,min_w,max_w):
     if max_w == min_w:
@@ -463,13 +490,23 @@ if __name__ == "__main__":
     Mac_n8= mac_node("n8",reference_data=addr_data)
     Mac_n6= mac_node("n6",reference_data=addr_data)
     Mac_n5= mac_node("n5",reference_data=addr_data)
+    Mac_n4= mac_node("n4",reference_data=addr_data)   
     Mac_a4= mac_node("a4",reference_data=addr_data)
+    
     # For debug of why we take a shortcut looking at throughput from OGM2
-    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n6,node_id="n6")
-    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
-    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n6,node_id="n6")
-    tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n8,node_id="n8")
-    G = creation_of_edges_TCP(G=G,file=analysis_file,start_packet=start,stop_packet=end)
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n6,node_id="n6")
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
 
-    creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n4,node_id="n4")
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n5,node_id="n5")
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n8,node_id="n8")
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n6,node_id="n6")
+
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n4,node_id="n4")
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
+    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n8,node_id="n8")
+    
+    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=2)
+
+    # creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
 
