@@ -56,7 +56,7 @@ if __name__ == "__main__":
     ap.add_argument("outdir", help="Output directory for simulation schedules")
     ap.add_argument("--down-time", default=0, help="When to bring node down")
     ap.add_argument("--up-time", default=10, help="When to bring node up")
-    ap.add_argument("--duration", default=30, help="Simulation duration")
+    ap.add_argument("--duration", default=60, help="Simulation duration")
     args = ap.parse_args()
 
     # Load mesh json
