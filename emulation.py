@@ -15,11 +15,16 @@ import random
 from datetime import datetime, timedelta
 from pprint import pprint
 from copy import copy
+from pydantic import BaseModel
+from pydantic_core import from_json, to_json
 
 from mesh_design_lib import data_rate_given_dist_comm
 from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
 
-sys.path.append('meshnet-lab/')
+sim_root = "/home/aau/meshsim/"
+repo_root = os.path.join(sim_root, "repo")
+
+sys.path.append(os.path.join(repo_root, 'meshnet-lab/'))
 import software as mn_software
 import network as mn_network
 from network import mtu
@@ -99,7 +104,7 @@ tcpdump_procs = []
 iperf3_servers = []
 
 # Directory paths for outputs
-output_root = "/home/aau/meshsim/output/emulation"
+output_root = os.path.join(sim_root, "output", "emulation")
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
 node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
@@ -110,8 +115,7 @@ sim_sched_json_path = os.path.join(output_root, "sim_sched.json")
 IPERF3_REF_PORT = 60000 # start port for iperf3
 
 # Simulation schedule types
-@dataclass
-class IperfEvent:
+class IperfEvent(BaseModel):
     client_name: str
     server_name: str
     bitrate: str # 4M or 3K for example
@@ -121,17 +125,16 @@ class IperfEvent:
 SchedEventType = DropoutEvent | IperfEvent # cooked that this is called *Type and the others aren't. maybe none of them are called that...
 
 @total_ordering
-@dataclass
-class SchedEntry:
+class SchedEntry(BaseModel):
     time: float
     event: SchedEventType
 
     def __le__(self, other):
         return self.time <= other.time
 
-@dataclass
-class Sim:
+class Sim(BaseModel):
     start_timestamp: float
+    duration: float
     sched_plan: list[SchedEntry]
     sched_real: list[SchedEntry]
 
@@ -532,7 +535,8 @@ def stub_iperf_sched():
     return events
 
 def do_event(e: SchedEventType, graph: dict):
-    print(f"Event {e} run at {datetime.now()}")
+    if verbosity != "quiet":
+        print(f"Event {e} run at {datetime.now()}")
     if isinstance(e, IperfEvent):
         run_iperf3_connection(
                 server_name=e.server_name,
@@ -554,15 +558,16 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
     t_start = datetime.now()
     t_end = t_start + timedelta(seconds=duration)
 
-    print(f"""
-    {'='*50}
-    {'SIMULATION'.center(50)}
-    {'='*50}
-    Start time : {t_start}
-    End time   : {t_end}
-    Duration   : {duration:.1f} s
-    {'='*50}
-    """)
+    if verbosity != "quiet":
+        print(f"""
+        {'='*50}
+        {'SIMULATION'.center(50)}
+        {'='*50}
+        Start time : {t_start}
+        End time   : {t_end}
+        Duration   : {duration:.1f} s
+        {'='*50}
+        """)
 
     # perform sim while duration not expired
     sched_sorted = sorted(sched)
@@ -594,13 +599,13 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
         if t_elapsed > duration:
             done = True
 
-    return Sim(t_start.timestamp(), sched_sorted, sched_real)
+    return Sim(start_timestamp=t_start.timestamp(), duration=duration, sched_plan=sched_sorted, sched_real=sched_real)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('graph', help='Graph of the full network mesh (json)')
     parser.add_argument('-s', '--sim-sched', required=False, help='Simulation schedule (json)')
-    parser.add_argument('-d', '--duration', default=100, help='Duration for simulation [s]')
+    parser.add_argument('-d', '--duration', required=False, help='Duration for simulation [s]')
     parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', help='Set verbosity.')
     args = parser.parse_args()
 
@@ -640,7 +645,8 @@ def main():
         json.dump(graph, f)
 
     # Create network name spaces with links from json graph
-    link_command = "./emulation_scripts/tc.sh '{action}' '{ifname}' '{loss_percent}' '{phyrate_mbps}'"
+    tc_script = os.path.join(repo_root, "emulation_scripts", "tc.sh")
+    link_command = tc_script + " '{action}' '{ifname}' '{loss_percent}' '{phyrate_mbps}'"
     mn_network.apply(graph, link_command=link_command)
 
     # Init batman-adv on all nodes and adapters
@@ -656,17 +662,22 @@ def main():
     
     # Load or generate schedule
     if args.sim_sched:
-        print(f"Loading simulation schedule from file {args.sim_sched}")
+        if verbosity != "quiet":
+            print(f"Loading simulation schedule from file {args.sim_sched}")
         # Load schedule
         try:
             with open(args.sim_sched, "r") as f:
-                sim_dict = json.load(f)
-            sim_obj = Sim(**sim_dict)
+                sim_obj = Sim.model_validate(from_json(f.read()))
             sched = sim_obj.sched_plan
+            duration = sim_obj.duration
         except:
             raise ValueError(f"Invalid sim schedule file {args.sim_sched}")
     else:
-        print("Generating simulation schedule")
+        if not args.duration:
+            raise ValueError("Cannot generate schedule without arg --duration")
+        duration = args.duration
+        if verbosity != "quiet":
+            print("Generating simulation schedule")
         # set Dropout model parameters and generate schedule
         dropout_params = DropoutParams(
                         failure_probability = 0.001,
@@ -714,9 +725,9 @@ def main():
         print("Wait for throughput override")
     time.sleep(10) # wait for moving average in throughput override
 
-    sim = run_sim_sched(graph=graph, sched=sched, duration=args.duration)
-    with open(sim_sched_json_path, "w") as f:
-        json.dump(asdict(sim), f)
+    sim = run_sim_sched(graph=graph, sched=sched, duration=duration)
+    with open(sim_sched_json_path, "wb") as f:
+        f.write(to_json(sim))
 
 
     #input("Press Enter to end emulation")

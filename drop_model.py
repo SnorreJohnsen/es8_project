@@ -3,21 +3,20 @@ from enum import Enum, auto
 from typing import Callable
 from functools import total_ordering
 import random
+from pydantic import BaseModel
 
 class State(str, Enum):
-    RECHARGING = auto()
-    FLYING_UP = auto()
-    UP = auto()
-    FLYING_DOWN = auto()
-    DOWN = auto()
+    RECHARGING = "RECHARGING"
+    FLYING_UP = "FLYING_UP"
+    UP = "UP"
+    FLYING_DOWN = "FLYING_DOWN"
+    DOWN = "DOWN"
 
-@dataclass
-class DropoutEvent:
+class DropoutEvent(BaseModel):
     name: str
     state: State
 
-@dataclass(frozen=True)
-class DropoutParams:
+class DropoutParams(BaseModel):
     failure_probability: float
     replacement_distribution_sampler: Callable[[], float]
     time_step: float
