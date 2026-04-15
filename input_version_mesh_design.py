@@ -1298,7 +1298,11 @@ def link_matrix(links: list,
     all_bw = [float(link.phyrate_mbps) for link in links]
     if not all_bw:
         all_bw = [0]
-    norm = mcolors.Normalize(vmin=min(all_bw), vmax=max(all_bw))
+
+    vmin = min(all_bw)
+    vmax = max(all_bw)
+
+    norm = mcolors.Normalize(vmin=vmin - 0.3 * (vmax - vmin), vmax=vmax)
     cmap = plt.cm.viridis
 
     # Build data
@@ -1316,7 +1320,7 @@ def link_matrix(links: list,
         row = []
         for tgt_id in node_ids:
             if src_id == tgt_id:
-                row.append(np.nan)  # diagonal
+                row.append('DIAG')  # diagonal
             else:
                 bw = link_lookup.get((src_id, tgt_id), np.nan)
                 if bw == 0.0:
@@ -1328,8 +1332,12 @@ def link_matrix(links: list,
 
     # Create LaTeX strings 
     def latex_cell(val):
+        if val == 'DIAG':
+            return r"\cellcolor[RGB]{0,0,0}"  # diagonal
+
         if pd.isna(val):
-            return r"\cellcolor[RGB]{200,200,200}"  # diagonal or missing
+            return r"\cellcolor[RGB]{200,200,200}"  # missing
+            
         color = cmap(norm(val))
         r, g, b = int(color[0]*255), int(color[1]*255), int(color[2]*255)
         return rf"\cellcolor[RGB]{{{r},{g},{b}}} {val:.1f}"
