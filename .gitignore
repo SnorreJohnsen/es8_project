@@ -1,5 +1,5 @@
 # Ignore all mesh output folders
-*_mesh_design_out/
+*_mesh_design/
 __pycache__/
 **/__pycache__/
 pcaps/
