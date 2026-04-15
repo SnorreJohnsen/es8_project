@@ -7,3 +7,8 @@ pcaps/
 
 # Ignore plot folder PNGs
 pcap_time_diff_stats/*.png
+graphs/*
+frames/*
+*edges*.txt
+*.gif
+*.mp4
