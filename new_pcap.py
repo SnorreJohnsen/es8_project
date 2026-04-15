@@ -8,6 +8,14 @@ from tqdm import tqdm
 import numpy as np
 from dataclasses import dataclass
 import webbrowser, os
+import matplotlib.pyplot as plt
+import imageio.v2 as imageio
+import glob
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+import time
+from PIL import Image
 
 adapter = []
 
@@ -236,7 +244,9 @@ def creation_of_edges_TCP(*,
                       file: str,
                       start_time: int = 0,
                       time_interval: int,
-                      stepsize_anime: float = 1):
+                      stepsize_anime: float = 1,
+                      gif: bool = False,
+                      browser_html: bool = False):
     
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             stop_time = start_time + time_interval
@@ -276,22 +286,53 @@ def creation_of_edges_TCP(*,
                     anime_time += stepsize_anime
                     if len(G.edges) > 0:
                         print(f"Animation Number: {anime_time} | Time is {time}")
-                        creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes,index=time)
+                        os.makedirs("frames", exist_ok=True)
+                        os.makedirs("graphs", exist_ok=True)
+                        html_file = f"graphs/graph_{int(time)}.html"
+                        png_file = f"frames/frame_{int(time):04d}.png"
+                        creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes,index=time,output_file=html_file, browser_html = browser_html)
                         print("_______________________________________________________________________________")
-                    # Possible filter for batman still not to know if arp or what it is
-                    # if p.split(":")[2] == 'batadv' and p.split(":")[-1] == 'data':
-                    # if p.split(":")[2] == 'batadv' and p+1.split(":")[-1] == 'tcp':
-                    #     if G.has_edge(s, d):
-                    #         G[s][d]["weight"] += 1
-                    #     else:
-                    #         G.add_edge(s, d, type=t, weight=1)
+                        # only use this conversion not often slower then a snail
+                        if gif is True:
+                            html_to_png(html_file, png_file)
     return G
+
+def html_to_png(html_file, output_png):
+    assert os.path.exists(html_file), html_file
+
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--window-size=1200,800")
+
+    driver = webdriver.Chrome(options=options)
+
+    try:
+        # load page
+        driver.get("file://" + os.path.abspath(html_file))
+
+        # wait for page to fully load
+        WebDriverWait(driver, 10).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+
+        # extra wait for PyVis JS rendering
+        time.sleep(2)
+
+        # enforce size (important for consistent PNGs)
+        driver.set_window_size(1200, 800)
+
+        # screenshot
+        driver.save_screenshot(output_png)
+
+    finally:
+        driver.quit()
 
 def creation_of_pyvis(G,
                       index: str,
                       reference_data: str,
                       json_nodes: str,
                       output_file="packet_graph.html",
+                      browser_html: bool = False
                       ):
     # Create PyVis network
     net = Network(height="800px", width="100%", directed=True, bgcolor="grey", font_color="black")
@@ -395,11 +436,10 @@ def creation_of_pyvis(G,
 
     # Save and open
     # Save HTML (DO NOT use show)
-    name_graph = f"{output_file}_time_{index}.html"
-    net.write_html(name_graph)
+    net.write_html(output_file)
 
     # Inject auto-fit script
-    with open(name_graph, "r+", encoding="utf-8") as f:
+    with open(output_file, "r+", encoding="utf-8") as f:
         html = f.read()
 
         injection = """
@@ -432,7 +472,8 @@ def creation_of_pyvis(G,
         f.seek(0)
         f.write(html)
         f.truncate()
-    webbrowser.open("file://" + os.path.abspath(name_graph))
+    if browser_html is True:
+        webbrowser.open("file://" + os.path.abspath(output_file))
 
 def normalize(w,min_w,max_w):
     if max_w == min_w:
@@ -457,6 +498,22 @@ def heatmap_color(norm):
         return f"rgb({int(255 * (norm - 0.5)*4)},255,0)"   # green → yellow
     else:
         return f"rgb(255,{int(255 * (1 - (norm - 0.75)*4))},0)"  # yellow → red
+
+def draw_graph(G, path):
+    plt.figure(figsize=(6, 6))
+
+    pos = nx.spring_layout(G, seed=42)
+
+    nx.draw(
+        G,
+        pos,
+        with_labels=True,
+        node_size=500,
+        font_size=10
+    )
+
+    plt.savefig(path)
+    plt.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="What Parameters mean")
@@ -506,7 +563,27 @@ if __name__ == "__main__":
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n8,node_id="n8")
     
-    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=2)
+    gif = True
+    gif_already = False
+
+    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=5,gif=gif,browser_html = False)
+    if gif is True or gif_already is True:
+
+        frame_files = sorted(glob.glob("frames/frame_*.png"))
+
+        # sanity check (IMPORTANT)
+        sizes = [Image.open(f).size for f in frame_files]
+        print("frame sizes:", set(sizes))
+
+        images = [imageio.imread(f) for f in frame_files]
+
+        # REPEAT FRAMES FOR SLOWER MOTION
+        imageio.mimsave(
+            "network.gif",
+            images,
+            duration=0.01,   # now this is smoother (not too fast)
+            loop=0
+        )
 
     # creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
 
