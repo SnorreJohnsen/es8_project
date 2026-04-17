@@ -313,8 +313,11 @@ def creation_of_edges_TCP(*,
                                 "src_node": src_node,
                                 "dst_node": dst_node,
                                 "src_mac_type": src_mac_type, 
-                                "dst_mac_type": dst_mac_type,                               
+                                "dst_mac_type": dst_mac_type, 
+                                "count": 1                              
                             }
+                        else:
+                            tcp_streams[stream]["count"] += 1
                 if time > start_time + anime_time or time == tot_time:
                     anime_prev = anime_time
                     anime_time += stepsize_anime
@@ -329,7 +332,7 @@ def creation_of_edges_TCP(*,
                         png_file = f"frames/frame_{int(time):04d}.png"
                         print(f"TCP streams existing is:")
                         for (s, d), info in tcp_streams.items():
-                            print(f"Node: Src {info['src_node']} -> Dst {info['dst_node']} ||||",
+                            print(f"Node: Src {info['src_node']} -> Dst {info['dst_node']} | Link Use Count: {info['count']}|||",
                                     f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
                         creation_of_pyvis(G=G,
                                           reference_data=addr_data,
