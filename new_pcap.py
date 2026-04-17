@@ -16,6 +16,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 import time
 from PIL import Image
+from collections import deque
+
 
 adapter = []
 
@@ -23,8 +25,9 @@ adapter = []
 Example: of how to create txt file with nessacary measures and order:
 & tshark -r pcap_file
 -T fields -e frame.number -e frame.time_epoch -e frame.time_relative -e eth.src -e eth.dst -e eth.type -e frame.protocols -e batadv.batman.packet_type
--e batadv.ogm2.orig -e batadv.ogm2.throughput > edges_d0_d4.txt
+-e batadv.ogm2.orig -e batadv.ogm2.throughput  > edges_d0_d4.txt
 '''
+# maybe add this when need to track unicast -e batadv.unicast.dst -e batadv.unicast.ttl
 
 
 def find_mac_path(obj, target_mac, path=""):
@@ -249,9 +252,17 @@ def creation_of_edges_TCP(*,
                       browser_html: bool = False):
     
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
+            lines = f.readlines()
+            last_line = lines[-1]
+            last_parts = last_line.strip().split()
+            tot_pkts = clean(last_parts[0])
+            tot_time = float(clean(last_parts[2]))
+            print(tot_pkts,tot_time)
+            
             stop_time = start_time + time_interval
             anime_time = 0
-            for i, line in enumerate(f):
+
+            for i, line in enumerate(lines):
                 parts = line.strip().split()
                 time = float(clean(parts[2]))
                 if time < start_time:
@@ -260,6 +271,7 @@ def creation_of_edges_TCP(*,
                     break
 
                 # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST TYPE PROTOCOLS BATMAN_TYPE BATMAN_ORIG
+                pkt_num = clean(parts[0])
                 src = clean(parts[3])
                 dst = clean(parts[4])
                 type = clean(parts[5])
@@ -282,7 +294,7 @@ def creation_of_edges_TCP(*,
                         else:
                             G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
                         break
-                if time > start_time + anime_time + 1:
+                if time > start_time + anime_time + 1 or time == tot_time:
                     anime_time += stepsize_anime
                     if len(G.edges) > 0:
                         print(f"Animation Number: {anime_time} | Time is {time}")
@@ -290,7 +302,15 @@ def creation_of_edges_TCP(*,
                         os.makedirs("graphs", exist_ok=True)
                         html_file = f"graphs/graph_{int(time)}.html"
                         png_file = f"frames/frame_{int(time):04d}.png"
-                        creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes,index=time,output_file=html_file, browser_html = browser_html)
+                        creation_of_pyvis(G=G,
+                                          reference_data=addr_data,
+                                          json_nodes=json_link_nodes,
+                                          index=time,output_file=html_file,
+                                          browser_html = browser_html,
+                                          current_pkt = pkt_num,
+                                          total_pkts = tot_pkts,
+                                          time = time,
+                                          total_time = tot_time)
                         print("_______________________________________________________________________________")
                         # only use this conversion not often slower then a snail
                         if gif is True:
@@ -331,9 +351,14 @@ def creation_of_pyvis(G,
                       index: str,
                       reference_data: str,
                       json_nodes: str,
+                      current_pkt: str,
+                      total_pkts: str,
+                      time: float,
+                      total_time: float,
                       output_file="packet_graph.html",
                       browser_html: bool = False
                       ):
+    print(f"Creating Pyvis HTML at time: {time}")
     # Create PyVis network
     net = Network(height="800px", width="100%", directed=True, bgcolor="grey", font_color="black")
     # Optional: better physics (important for mesh graphs)
@@ -404,6 +429,9 @@ def creation_of_pyvis(G,
     weights = [data.get("weight", 1) for _, _, data in G.edges(data=True)]
     min_w = min(weights)
     max_w = max(weights)
+    q1 = int(min_w + 0.25 * (max_w - min_w))
+    mid = int(min_w + 0.5 * (max_w - min_w))
+    q3 = int(min_w + 0.75 * (max_w - min_w))
 
     for src, dst, data in G.edges(data=True):
         weight = data.get('weight',1)
@@ -441,7 +469,7 @@ def creation_of_pyvis(G,
     # Inject auto-fit script
     with open(output_file, "r+", encoding="utf-8") as f:
         html = f.read()
-
+       
         injection = """
         <script type="text/javascript">
         window.addEventListener("load", function () {
@@ -465,6 +493,77 @@ def creation_of_pyvis(G,
             }
         });
         </script>
+
+        <style>
+        #heatmap-legend {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;  /* maybe reduce from 1540 */
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            font-family: Arial;
+            font-size: 14px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            z-index: 9999;
+        }
+
+        #heatmap-bar {
+            height: 20px;
+            width: 100%;
+            border-radius: 5px;
+            background: linear-gradient(
+                to right,
+                rgb(0,0,255),     /* blue */
+                rgb(0,255,255),   /* cyan */
+                rgb(0,255,0),     /* green */
+                rgb(255,255,0),   /* yellow */
+                rgb(255,0,0)      /* red */
+            );
+        }
+
+        #heatmap-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 12px;
+        }
+        </style>
+
+        <div id="heatmap-legend">
+            <b>TCP packets transmitted on link</b>
+            <div id="heatmap-bar"></div>
+            <div id="heatmap-labels">
+                <span>""" + f"{min_w}" + """</span>
+                <span>""" + f"{q1}" + """</span>
+                <span>""" + f"{mid}" + """</span>
+                <span>""" + f"{q3}" + """</span>
+                <span>""" + f"{max_w}" + """</span>
+
+            </div>
+        </div>
+
+        <style>
+        #packet-info {
+            position: fixed;
+            top: 30px;
+            left: 30px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: Arial;
+            font-size: 13px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            z-index: 9999;
+        }
+        </style>
+
+        <div id="packet-info">
+            <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
+            <div>Time of instance <b>""" + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+        </div>
         """
 
         html = html.replace("</body>", injection + "\n</body>")
@@ -563,10 +662,10 @@ if __name__ == "__main__":
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n8,node_id="n8")
     
-    gif = True
+    gif = False
     gif_already = False
 
-    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=5,gif=gif,browser_html = False)
+    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=5,gif=gif,browser_html = True)
     if gif is True or gif_already is True:
 
         frame_files = sorted(glob.glob("frames/frame_*.png"))
