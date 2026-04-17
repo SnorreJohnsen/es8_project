@@ -331,9 +331,12 @@ def creation_of_edges_TCP(*,
                         html_file = f"graphs/graph_{int(time)}.html"
                         png_file = f"frames/frame_{int(time):04d}.png"
                         print(f"TCP streams existing is:")
-                        for (s, d), info in tcp_streams.items():
+                        # sort after count amount
+                        for (s, d), info in sorted(tcp_streams.items(),
+                           key=lambda item: item[1]['count'],
+                           reverse=True):
                             print(f"Node: Src {info['src_node']} -> Dst {info['dst_node']} | Link Use Count: {info['count']}|||",
-                                    f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
+                                f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
                         creation_of_pyvis(G=G,
                                           reference_data=addr_data,
                                           json_nodes=json_link_nodes,
