@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 import glob
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 import time
@@ -359,7 +361,11 @@ def html_to_png(html_file, output_png):
     options.add_argument("--headless=new")
     options.add_argument("--window-size=1200,800")
 
-    driver = webdriver.Chrome(options=options)
+    # Insert this for thias to work
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+
+    #driver = webdriver.Chrome(options=options)
 
     try:
         # load page
