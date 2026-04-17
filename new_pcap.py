@@ -250,7 +250,7 @@ def creation_of_edges_TCP(*,
                       stepsize_anime: float = 1,
                       gif: bool = False,
                       browser_html: bool = False):
-    
+    tcp_streams = {}
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
@@ -260,7 +260,7 @@ def creation_of_edges_TCP(*,
             print(tot_pkts,tot_time)
             
             stop_time = start_time + time_interval
-            anime_time = 0
+            anime_time = start_time
 
             for i, line in enumerate(lines):
                 parts = line.strip().split()
@@ -293,15 +293,44 @@ def creation_of_edges_TCP(*,
                             G[s][d]["last_time"] = time
                         else:
                             G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
-                        break
-                if time > start_time + anime_time + 1 or time == tot_time:
+                    if 'batadv' in p and 'tcp' in p and n == 1:
+                        stream = (s, d)
+
+                        if stream not in tcp_streams:
+                            src_mac_info = find_mac_path(addr_data, s)
+                            dst_mac_info = find_mac_path(addr_data, d)
+
+                            # find "n0" id and type "veth:.."
+                            src_parts = src_mac_info.split("/")
+                            src_node = src_parts[1]
+                            src_mac_type = src_parts[3]
+
+                            dst_parts = dst_mac_info.split("/")
+                            dst_node = dst_parts[1]
+                            dst_mac_type = dst_parts[3]
+
+                            tcp_streams[stream] = {
+                                "src_node": src_node,
+                                "dst_node": dst_node,
+                                "src_mac_type": src_mac_type, 
+                                "dst_mac_type": dst_mac_type,                               
+                            }
+                if time > start_time + anime_time or time == tot_time:
+                    anime_prev = anime_time
                     anime_time += stepsize_anime
                     if len(G.edges) > 0:
-                        print(f"Animation Number: {anime_time} | Time is {time}")
+                        if time == tot_time:
+                            print(f"Animation Fully captured | Time is {time}")
+                        else:
+                            print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs("frames", exist_ok=True)
                         os.makedirs("graphs", exist_ok=True)
                         html_file = f"graphs/graph_{int(time)}.html"
                         png_file = f"frames/frame_{int(time):04d}.png"
+                        print(f"TCP streams existing is:")
+                        for (s, d), info in tcp_streams.items():
+                            print(f"Node: Src {info['src_node']} -> Dst {info['dst_node']} ||||",
+                                    f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
                         creation_of_pyvis(G=G,
                                           reference_data=addr_data,
                                           json_nodes=json_link_nodes,
@@ -619,12 +648,17 @@ if __name__ == "__main__":
     parser.add_argument("-in","--input", type=str ,help ="Input file location | NEEDS TO BE TXT")
     parser.add_argument("-addr","--addresses",type=str, help ="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
     parser.add_argument("-j","--json",type=str, help ="Json file Including pos of nodes (graph.json)")
+    parser.add_argument("-gif","--gif_enabled",action="store_true", help ="enable creation of gif from png's, (png's are not created if gif is disabled)")
+    parser.add_argument("-e","--existing_png_for_gif",action="store_true", help ="Don't recreate png, for gif instead use already existing pngs created previously")
+    parser.add_argument("-b","--browser",action="store_true", help ="If to enable that the HTML plots are opened in the browser")
     args = parser.parse_args()
 
     analysis_file = args.input
     addr_file = args.addresses
     json_link_nodes = args.json
-
+    enable_gif = args.gif_enabled
+    exist_gif = args.existing_png_for_gif
+    enable_browser = args.browser
     capture = pyshark.FileCapture(analysis_file)
 
     start = 0
@@ -661,12 +695,9 @@ if __name__ == "__main__":
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n4,node_id="n4")
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n8,node_id="n8")
-    
-    gif = False
-    gif_already = False
 
-    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=5,gif=gif,browser_html = True)
-    if gif is True or gif_already is True:
+    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=5,gif=enable_gif,browser_html = enable_browser)
+    if enable_gif is True or exist_gif is True:
 
         frame_files = sorted(glob.glob("frames/frame_*.png"))
 
