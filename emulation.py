@@ -46,6 +46,9 @@ if os.geteuid() != 0:
 
 # check if batman_adv patched version is loaded
 def batadv_patch_loaded() -> bool:
+    """
+    checks if the correct batman patched module is loaded before procceding as this is required for correct simulation
+    """
     # Check if batman_adv loaded
     loaded = False
     result = subprocess.run("lsmod", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -413,6 +416,9 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
     graph["nodes"].extend(devs)
 
 def battp_set_link_throughput(n1: str, n2: str, tp: float):
+    """
+    use battpctl to set link throughput in both directions between two nodes.
+    """
     tid = get_thread_id()
     remote = None
 
@@ -427,13 +433,16 @@ def battp_set_link_throughput(n1: str, n2: str, tp: float):
 
 def batctl_set_neigh_throughputs(graph: dict):
     """
-    set throughput limit in both direction to a neighbour node.
+    set throughput limit in both direction to all neighbour nodes in a graph.
     """
 
     for link in graph["links"]:
         battp_set_link_throughput(n1=link["source"], n2=link["target"], tp=float(link["phyrate_mbps"]))
 
 def get_node_addrs(node_id: str, cmd: str):
+    """
+    get node addresses from command.
+    """
     tid = get_thread_id()
     remote = None
 
@@ -512,6 +521,9 @@ def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, p
     return events
 
 def stub_iperf_sched():
+    """
+    create manual iperf schedule entries at specific time
+    """
     # sched: list[tuple[float, IperfEvent]] = []
     events: list[SchedEntry] = []
 
@@ -535,6 +547,9 @@ def stub_iperf_sched():
     return events
 
 def do_event(e: SchedEventType, graph: dict):
+    """
+    performs either iperf or dropout event from given graph and schedule event type
+    """
     if verbosity != "quiet":
         print(f"Event {e} run at {datetime.now()}")
     if isinstance(e, IperfEvent):
@@ -555,6 +570,9 @@ def do_event(e: SchedEventType, graph: dict):
         raise ValueError("Invalid event type: " + type(e))
 
 def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
+    """
+    runs simulation schedule from given graph of nodes and schedule list in a set duration.
+    """
     t_start = datetime.now()
     t_end = t_start + timedelta(seconds=duration)
 
