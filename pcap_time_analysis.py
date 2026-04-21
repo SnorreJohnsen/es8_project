@@ -3,10 +3,9 @@ from tqdm import tqdm
 import hashlib
 import subprocess
 import numpy as np
-import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
-import itertools
+import argparse
 
 def describe(data, f=None):
     data = np.array(data)
@@ -118,10 +117,14 @@ def max_diff_same_frame(pcap_file,
     return diffs_actual
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i","--input", type=str, help ="Input .pcap file location")
+    args = parser.parse_args()
 
+    pcap_file = args.input
     # Replace with your PCAP path
     #pcap_file = r"C:\UNI\8.Semester\Project\emulation_output\pcaps\merged_cleaned_10u.pcap" 
-    pcap_file = r"C:\UNI\8.Semester\Project\emulation_output_no_netem\pcaps\merged_cleaned_no_netem_10u.pcap" 
+    #pcap_file = r"C:\UNI\8.Semester\Project\emulation_output_no_netem\pcaps\merged_cleaned_no_netem_10u.pcap" 
     #pcap_file = r"C:\UNI\8.Semester\Project\pcap_test_files\merged_smus_test.pcap"
     pcap_name = Path(pcap_file).stem # keep for file name
 
