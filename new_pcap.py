@@ -267,7 +267,7 @@ def creation_of_edges_TCP(*,
                       gif: bool = False,
                       browser_html: bool = False,
                       flag_interval: bool = False):
-    
+
     tcp_streams = {}
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             lines = f.readlines()
@@ -275,16 +275,27 @@ def creation_of_edges_TCP(*,
             last_parts = last_line.strip().split()
             tot_pkts = clean(last_parts[0])
             tot_time = float(clean(last_parts[2]))
-            
+            # Sanity check for stop time
+            if stop_time < start_time:
+                print('WARNING!! stop time is lower than start time')
+                return
+            if stop_time > tot_time:
+                print('WARNING!! stop time is higher than total capture time')
+                print(f'Setting stop time equal to total time: {tot_time}')
+                stop_time = tot_time
+
             anime_time = stepsize_anime
             first_time_tcp_packet = None
+            first_before_stop = True
 
             for i, line in enumerate(lines):
                 parts = line.strip().split()
                 time = float(clean(parts[2]))
                 if time < start_time:
                     continue
-                elif time > stop_time:
+                elif time > stop_time and first_before_stop == True:
+                    first_before_stop = False
+                elif time > stop_time and first_before_stop == False:
                     break
 
                 # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST TYPE PROTOCOLS BATMAN_TYPE BATMAN_ORIG
@@ -339,21 +350,21 @@ def creation_of_edges_TCP(*,
                             }
                         else:
                             tcp_streams[stream]["count"] += 1
-                if time > start_time + anime_time or time == tot_time:
+                if time > start_time + anime_time or time == tot_time or time >= stop_time:
                     anime_prev = start_time + anime_time
                     anime_time += stepsize_anime
                     if len(G.edges) > 0:
-                        if time == tot_time:
-                            print(f"Animation Fully captured | Time is {time}")
+                        if time == tot_time or time >= stop_time:
+                            print(f"Animation captured Up to Time: {time}")
                             if flag_interval is True:
                                 time_last_anime = anime_prev-stepsize_anime
-                                print(f"Shows Only {tot_time-time_last_anime:.2f} secs | Being the remaining TCP packet of interval: {time_last_anime} sec - {tot_time} sec ")
+                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining TCP packet of interval: {time_last_anime} sec - {time} sec ")
                         else:
                             print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs("frames", exist_ok=True)
                         os.makedirs("graphs", exist_ok=True)
-                        html_file = f"graphs/graph_{int(time)}.html"
-                        png_file = f"frames/frame_{int(time):04d}.png"
+                        html_file = f"graphs/graph_{float(time):.2f}.html"
+                        png_file = f"frames/frame_{float(time):.2f}.png"
                         print(f"TCP streams existing is:")
 
                         # sort after count amount
@@ -848,9 +859,9 @@ if __name__ == "__main__":
     parser.add_argument("-e","--existing_png_for_gif",action="store_true", help ="Don't recreate png, for gif instead use already existing pngs created previously")
     parser.add_argument("-b","--browser",action="store_true", help ="If to enable that the HTML plots are opened in the browser")
     parser.add_argument("-f","--flag_interval",action="store_true", help ="Set to enable HTML for intervals")
-    parser.add_argument("-sta","--start_time", type=int, help ="Choose start time for analysis. Default = 0 sec")
-    parser.add_argument("-sto","--stop_time", type=int, help ="Choose stop time for analysis. Default = 30 sec")
-    parser.add_argument("-i","--interval", type=int, help ="Choose interval size of windows. Default = 5 sec")
+    parser.add_argument("-sta","--start_time", type=float, help ="Choose start time for analysis. Default = 0 sec")
+    parser.add_argument("-sto","--stop_time", type=float, help ="Choose stop time for analysis. Default = 30 sec")
+    parser.add_argument("-i","--interval", type=float, help ="Choose interval size of windows. Default = 5 sec")
     args = parser.parse_args()
 
     analysis_file = args.input
