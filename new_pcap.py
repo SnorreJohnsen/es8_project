@@ -27,10 +27,9 @@ adapter = []
 Example: of how to create txt file with nessacary measures and order:
 & tshark -r pcap_file
 -T fields -e frame.number -e frame.time_epoch -e frame.time_relative -e eth.src -e eth.dst -e eth.type -e frame.protocols -e batadv.batman.packet_type
--e batadv.ogm2.orig -e batadv.ogm2.throughput  > edges_d0_d4.txt
+-e batadv.ogm2.orig -e batadv.ogm2.throughput -e batadv.ogm2.ttl > edges_d0_d4.txt
 '''
 # maybe add this when need to track unicast -e batadv.unicast.dst -e batadv.unicast.ttl
-
 
 def find_mac_path(obj, target_mac, path=""):
     if isinstance(obj, dict):
@@ -168,12 +167,12 @@ def creation_of_edges_OGM2(*,
     return G
 
 def tracking_of_OGM2_at_source(*,
-                      file: str,
-                      start_time: int = 0,
-                      OGM2_orig_mac: str,
-                      time_interval: float = 1,
-                      eth_src: str = None,
-                      node_id: str):
+                               addr_data: str,
+                               file: str,
+                               start_time: int = 0,
+                               OGM2_orig_mac: str,
+                               time_interval: float = 1,
+                               eth_src: str = None):
     
     '''
     docstring:
@@ -183,11 +182,22 @@ def tracking_of_OGM2_at_source(*,
     OGM2_orig_mac: Need to uplink from reference data of the desired node
     time_interval: How long interval to track over, OGM2 interval is 1 sec and therefore default
     '''
-    
+
+    src_mac_info = find_mac_path(addr_data, eth_src)
+    OGM2_mac_info = find_mac_path(addr_data, OGM2_orig_mac)
+
+    # find "n0" id and type "veth:.."
+    src_parts = src_mac_info.split("/")
+    src_node = src_parts[1]
+
+    # find "n0" id and type "veth:.."
+    OGM2_parts = OGM2_mac_info.split("/")
+    OGM2_node = OGM2_parts[1]
+
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             stop_time = start_time + time_interval
             throughput = None
-            print(f"The Node id: {node_id} with Mac Adress {eth_src} | OGM Original Address to be found: {OGM2_orig_mac}")
+            print(f"OGM Original Address at node id: {OGM2_node} with MAC address: {OGM2_orig_mac} | Broadcasted at node id: {src_node} with MAC Adress {eth_src}")
             print("------------------------------------------------------------------------------------------------------------")
             for i, line in enumerate(f):
 
@@ -205,7 +215,8 @@ def tracking_of_OGM2_at_source(*,
                     protocol = clean(parts[6])
 
                     # may need to split at, for bat_type and OGM2_orig_addr as may entail more then one
-                    if len(parts) == 10:
+                    if len(parts) == 11:
+
                         bat_type = clean(parts[7])
                         bat_types = [b.strip() for b in bat_type.split(",")]
                         OGM2_orig_addr = clean(parts[8])
@@ -216,6 +227,8 @@ def tracking_of_OGM2_at_source(*,
                                         if len(TP.strip()) > 1 else TP.strip()
                                         for TP in OGM2_tp.split(",")
                                     ]
+                        OGM2_ttl = clean(parts[10])
+                        OGM2_ttls = [O.strip() for O in OGM2_ttl.split(",")]
                         #print(f"{src=},{OGM2_orig_addrs=}")
                         #print(f"{eth_src=},{OGM2_orig_mac=}")
                         # if find orig OGM2 message at the orig we start timer 
@@ -224,14 +237,15 @@ def tracking_of_OGM2_at_source(*,
                             # only print when throughput changes
                             if throughput != OGM2_tps[index]:
                                 throughput = OGM2_tps[index]
-                                print(f"Time is {time} | Throughput: {OGM2_tps[index]} mbit/s ")
+                                ttl = int(OGM2_ttls[index])
+                                print(f"Time is {time:6.2f} | Throughput: {float(OGM2_tps[index]):6.2f} mbit/s | TTL: {ttl} -> Hops: {50 - ttl}")
                         else:
                             continue
                     else:   
                         continue
                 else:
                     continue
-    print("__________________________________________________________________________________________")
+    print("_______________________________________________________________________________")
     return 
 
 def edge_with_type_exists(G, src, dst, order):
@@ -248,10 +262,12 @@ def creation_of_edges_TCP(*,
                       G,
                       file: str,
                       start_time: int = 0,
-                      time_interval: int,
+                      stop_time: int,
                       stepsize_anime: float = 1,
                       gif: bool = False,
-                      browser_html: bool = False):
+                      browser_html: bool = False,
+                      flag_interval: bool = False):
+    
     tcp_streams = {}
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             lines = f.readlines()
@@ -259,10 +275,9 @@ def creation_of_edges_TCP(*,
             last_parts = last_line.strip().split()
             tot_pkts = clean(last_parts[0])
             tot_time = float(clean(last_parts[2]))
-            print(tot_pkts,tot_time)
             
-            stop_time = start_time + time_interval
-            anime_time = start_time
+            anime_time = stepsize_anime
+            first_time_tcp_packet = None
 
             for i, line in enumerate(lines):
                 parts = line.strip().split()
@@ -295,6 +310,10 @@ def creation_of_edges_TCP(*,
                             G[s][d]["last_time"] = time
                         else:
                             G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
+                            if first_time_tcp_packet == None:
+                                first_time_tcp_packet = time
+                                time_prev = first_time_tcp_packet
+                                packet_prev = int(pkt_num)
                     if 'batadv' in p and 'tcp' in p and n == 1:
                         stream = (s, d)
 
@@ -321,11 +340,14 @@ def creation_of_edges_TCP(*,
                         else:
                             tcp_streams[stream]["count"] += 1
                 if time > start_time + anime_time or time == tot_time:
-                    anime_prev = anime_time
+                    anime_prev = start_time + anime_time
                     anime_time += stepsize_anime
                     if len(G.edges) > 0:
                         if time == tot_time:
                             print(f"Animation Fully captured | Time is {time}")
+                            if flag_interval is True:
+                                time_last_anime = anime_prev-stepsize_anime
+                                print(f"Shows Only {tot_time-time_last_anime:.2f} secs | Being the remaining TCP packet of interval: {time_last_anime} sec - {tot_time} sec ")
                         else:
                             print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs("frames", exist_ok=True)
@@ -333,6 +355,7 @@ def creation_of_edges_TCP(*,
                         html_file = f"graphs/graph_{int(time)}.html"
                         png_file = f"frames/frame_{int(time):04d}.png"
                         print(f"TCP streams existing is:")
+
                         # sort after count amount
                         for (s, d), info in sorted(tcp_streams.items(),
                            key=lambda item: item[1]['count'],
@@ -347,11 +370,22 @@ def creation_of_edges_TCP(*,
                                           current_pkt = pkt_num,
                                           total_pkts = tot_pkts,
                                           time = time,
-                                          total_time = tot_time)
+                                          total_time = tot_time,
+                                          flag_interval=flag_interval,
+                                          time_prev = time_prev,
+                                          packet_prev=packet_prev)
                         print("_______________________________________________________________________________")
+                        first_time_tcp_packet = None
+
+                        if flag_interval is True:
+                            G = nx.DiGraph()
+
                         # only use this conversion not often slower then a snail
                         if gif is True:
                             html_to_png(html_file, png_file)
+                    else:
+                        print(f"At time: {time} No TCP Packet's found, Will go to next Time Step")
+                        print("_______________________________________________________________________________")
     return G
 
 def html_to_png(html_file, output_png):
@@ -388,6 +422,220 @@ def html_to_png(html_file, output_png):
     finally:
         driver.quit()
 
+def accumulative_injection(min_w: int,
+                           max_w: int,
+                           q1: int,
+                           q3: int,
+                           mid: int,
+                           current_pkt,
+                           total_pkts,
+                           time,
+                           total_time):
+    injection = """
+        <script type="text/javascript">
+        window.addEventListener("load", function () {
+            if (typeof network !== "undefined") {
+
+                // FORCE stabilization immediately
+                network.stabilize(1000);
+
+                // After stabilization → fit and lock view
+                setTimeout(function () {
+                    network.fit({
+                        animation: {
+                            duration: 0
+                        }
+                    });
+
+                    // Optional: disable physics so it doesn't move again
+                    network.setOptions({ physics: false });
+
+                }, 100);
+            }
+        });
+        </script>
+
+        <style>
+        #heatmap-legend {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;  /* maybe reduce from 1540 */
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            font-family: Arial;
+            font-size: 14px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            z-index: 9999;
+        }
+
+        #heatmap-bar {
+            height: 20px;
+            width: 100%;
+            border-radius: 5px;
+            background: linear-gradient(
+                to right,
+                rgb(0,0,255),     /* blue */
+                rgb(0,255,255),   /* cyan */
+                rgb(0,255,0),     /* green */
+                rgb(255,255,0),   /* yellow */
+                rgb(255,0,0)      /* red */
+            );
+        }
+
+        #heatmap-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 12px;
+        }
+        </style>
+
+        <div id="heatmap-legend">
+            <b>TCP packets transmitted on link</b>
+            <div id="heatmap-bar"></div>
+            <div id="heatmap-labels">
+                <span>""" + f"{min_w}" + """</span>
+                <span>""" + f"{q1}" + """</span>
+                <span>""" + f"{mid}" + """</span>
+                <span>""" + f"{q3}" + """</span>
+                <span>""" + f"{max_w}" + """</span>
+
+            </div>
+        </div>
+
+        <style>
+        #packet-info {
+            position: fixed;
+            top: 30px;
+            left: 30px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: Arial;
+            font-size: 13px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            z-index: 9999;
+        }
+        </style>
+
+        <div id="packet-info">
+            <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
+            <div>Time of instance <b>""" + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+        </div>
+        """
+    return injection
+
+def window_injection(min_w: int,
+                           max_w: int,
+                           q1: int,
+                           q3: int,
+                           mid: int,
+                           current_pkt: int,
+                           total_pkts: int,
+                           time: float,
+                           total_time: float,
+                           time_prev: float,
+                           packet_prev: int):
+    injection = """
+        <script type="text/javascript">
+        window.addEventListener("load", function () {
+            if (typeof network !== "undefined") {
+
+                // FORCE stabilization immediately
+                network.stabilize(1000);
+
+                // After stabilization → fit and lock view
+                setTimeout(function () {
+                    network.fit({
+                        animation: {
+                            duration: 0
+                        }
+                    });
+
+                    // Optional: disable physics so it doesn't move again
+                    network.setOptions({ physics: false });
+
+                }, 100);
+            }
+        });
+        </script>
+
+        <style>
+        #heatmap-legend {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;  /* maybe reduce from 1540 */
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            font-family: Arial;
+            font-size: 14px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            z-index: 9999;
+        }
+
+        #heatmap-bar {
+            height: 20px;
+            width: 100%;
+            border-radius: 5px;
+            background: linear-gradient(
+                to right,
+                rgb(0,0,255),     /* blue */
+                rgb(0,255,255),   /* cyan */
+                rgb(0,255,0),     /* green */
+                rgb(255,255,0),   /* yellow */
+                rgb(255,0,0)      /* red */
+            );
+        }
+
+        #heatmap-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 12px;
+        }
+        </style>
+
+        <div id="heatmap-legend">
+            <b>TCP packets transmitted on link</b>
+            <div id="heatmap-bar"></div>
+            <div id="heatmap-labels">
+                <span>""" + f"{min_w}" + """</span>
+                <span>""" + f"{q1}" + """</span>
+                <span>""" + f"{mid}" + """</span>
+                <span>""" + f"{q3}" + """</span>
+                <span>""" + f"{max_w}" + """</span>
+
+            </div>
+        </div>
+
+        <style>
+        #packet-info {
+            position: fixed;
+            top: 30px;
+            left: 30px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: Arial;
+            font-size: 13px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            z-index: 9999;
+        }
+        </style>
+
+        <div id="packet-info">
+            <div>Packet interval <b>""" + f"{packet_prev}" + """ - """ + f'{current_pkt}' + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
+            <div>Time of interval <b>""" + f"{time_prev:.2f}" + """ - """ + f"{time:.2f}"  + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+        </div>
+        """
+    return injection
+
 def creation_of_pyvis(G,
                       index: str,
                       reference_data: str,
@@ -396,8 +644,11 @@ def creation_of_pyvis(G,
                       total_pkts: str,
                       time: float,
                       total_time: float,
+                      time_prev: float,
+                      packet_prev: int,
                       output_file="packet_graph.html",
-                      browser_html: bool = False
+                      browser_html: bool = False,
+                      flag_interval: bool = False
                       ):
     print(f"Creating Pyvis HTML at time: {time}")
     # Create PyVis network
@@ -511,101 +762,29 @@ def creation_of_pyvis(G,
     with open(output_file, "r+", encoding="utf-8") as f:
         html = f.read()
        
-        injection = """
-        <script type="text/javascript">
-        window.addEventListener("load", function () {
-            if (typeof network !== "undefined") {
-
-                // FORCE stabilization immediately
-                network.stabilize(1000);
-
-                // After stabilization → fit and lock view
-                setTimeout(function () {
-                    network.fit({
-                        animation: {
-                            duration: 0
-                        }
-                    });
-
-                    // Optional: disable physics so it doesn't move again
-                    network.setOptions({ physics: false });
-
-                }, 100);
-            }
-        });
-        </script>
-
-        <style>
-        #heatmap-legend {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 800px;  /* maybe reduce from 1540 */
-            padding: 12px;
-            background: white;
-            border-radius: 8px;
-            font-family: Arial;
-            font-size: 14px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            z-index: 9999;
-        }
-
-        #heatmap-bar {
-            height: 20px;
-            width: 100%;
-            border-radius: 5px;
-            background: linear-gradient(
-                to right,
-                rgb(0,0,255),     /* blue */
-                rgb(0,255,255),   /* cyan */
-                rgb(0,255,0),     /* green */
-                rgb(255,255,0),   /* yellow */
-                rgb(255,0,0)      /* red */
-            );
-        }
-
-        #heatmap-labels {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 5px;
-            font-size: 12px;
-        }
-        </style>
-
-        <div id="heatmap-legend">
-            <b>TCP packets transmitted on link</b>
-            <div id="heatmap-bar"></div>
-            <div id="heatmap-labels">
-                <span>""" + f"{min_w}" + """</span>
-                <span>""" + f"{q1}" + """</span>
-                <span>""" + f"{mid}" + """</span>
-                <span>""" + f"{q3}" + """</span>
-                <span>""" + f"{max_w}" + """</span>
-
-            </div>
-        </div>
-
-        <style>
-        #packet-info {
-            position: fixed;
-            top: 30px;
-            left: 30px;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-family: Arial;
-            font-size: 13px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-            z-index: 9999;
-        }
-        </style>
-
-        <div id="packet-info">
-            <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
-            <div>Time of instance <b>""" + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
-        </div>
-        """
+        # Inset injection
+        if flag_interval == True:
+            injection = window_injection(min_w=min_w,
+                                         max_w=max_w,
+                                         q1=q1,
+                                         q3=q3,
+                                         mid=mid,
+                                         current_pkt=current_pkt,
+                                         total_pkts=total_pkts,
+                                         time=time,
+                                         total_time=total_time,
+                                         time_prev = time_prev,
+                                         packet_prev=packet_prev)
+        else:
+            injection = accumulative_injection(min_w=min_w,
+                                         max_w=max_w,
+                                         q1=q1,
+                                         q3=q3,
+                                         mid=mid,
+                                         current_pkt=current_pkt,
+                                         total_pkts=total_pkts,
+                                         time=time,
+                                         total_time=total_time)
 
         html = html.replace("</body>", injection + "\n</body>")
 
@@ -656,6 +835,11 @@ def draw_graph(G, path):
     plt.close()
 
 if __name__ == "__main__":
+
+    default_start_time = 0
+    default_stop_time = 30
+    default_interval = 5
+
     parser = argparse.ArgumentParser(description="What Parameters mean")
     parser.add_argument("-in","--input", type=str ,help ="Input file location | NEEDS TO BE TXT")
     parser.add_argument("-addr","--addresses",type=str, help ="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
@@ -663,6 +847,10 @@ if __name__ == "__main__":
     parser.add_argument("-gif","--gif_enabled",action="store_true", help ="enable creation of gif from png's, (png's are not created if gif is disabled)")
     parser.add_argument("-e","--existing_png_for_gif",action="store_true", help ="Don't recreate png, for gif instead use already existing pngs created previously")
     parser.add_argument("-b","--browser",action="store_true", help ="If to enable that the HTML plots are opened in the browser")
+    parser.add_argument("-f","--flag_interval",action="store_true", help ="Set to enable HTML for intervals")
+    parser.add_argument("-sta","--start_time", type=int, help ="Choose start time for analysis. Default = 0 sec")
+    parser.add_argument("-sto","--stop_time", type=int, help ="Choose stop time for analysis. Default = 30 sec")
+    parser.add_argument("-i","--interval", type=int, help ="Choose interval size of windows. Default = 5 sec")
     args = parser.parse_args()
 
     analysis_file = args.input
@@ -671,8 +859,19 @@ if __name__ == "__main__":
     enable_gif = args.gif_enabled
     exist_gif = args.existing_png_for_gif
     enable_browser = args.browser
+    enable_interval_graph = args.flag_interval
+    start_time = args.start_time
+    stop_time = args.stop_time
+    interval_time = args.interval
     capture = pyshark.FileCapture(analysis_file)
 
+    if start_time is not None:
+        default_start_time = start_time
+    if stop_time is not None:
+        default_stop_time = stop_time
+    if interval_time is not None:
+        default_interval = interval_time
+    
     start = 0
     end = 10000000
 
@@ -690,13 +889,14 @@ if __name__ == "__main__":
     G = nx.DiGraph()
     Mac_a0= mac_node("a0",reference_data=addr_data)
     Mac_n8= mac_node("n8",reference_data=addr_data)
-    Mac_n6= mac_node("n6",reference_data=addr_data)
-    Mac_n5= mac_node("n5",reference_data=addr_data)
-    Mac_n4= mac_node("n4",reference_data=addr_data)   
-    Mac_a4= mac_node("a4",reference_data=addr_data)
+    #Mac_n6= mac_node("n6",reference_data=addr_data)
+    #Mac_n5= mac_node("n5",reference_data=addr_data)
+    #Mac_n4= mac_node("n4",reference_data=addr_data)
+    Mac_a4= mac_node("a4",reference_data=addr_data)       
+    Mac_n0= mac_node("n0",reference_data=addr_data)
     
     # For debug of why we take a shortcut looking at throughput from OGM2
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n6,node_id="n6")
+    tracking_of_OGM2_at_source(addr_data=addr_data, file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n0)
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
 
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n4,node_id="n4")
@@ -708,7 +908,14 @@ if __name__ == "__main__":
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
     # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n8,node_id="n8")
 
-    G = creation_of_edges_TCP(G=G,file=analysis_file,start_time=0, time_interval=30,stepsize_anime=5,gif=enable_gif,browser_html = enable_browser)
+    G = creation_of_edges_TCP(G=G,
+                              file=analysis_file,
+                              start_time=default_start_time,
+                              stop_time=default_stop_time,
+                              stepsize_anime=default_interval,
+                              gif=enable_gif,
+                              browser_html = enable_browser,
+                              flag_interval=enable_interval_graph)
     if enable_gif is True or exist_gif is True:
 
         frame_files = sorted(glob.glob("frames/frame_*.png"))
