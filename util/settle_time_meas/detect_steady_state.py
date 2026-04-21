@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import math
 from dataclasses import dataclass
@@ -52,7 +53,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Detect outage, recovery, and post-outage steady-state onset from a bucketed TX-bits CSV."
     )
-    parser.add_argument("bucket_csv", help="Path to bucket.csv")
+    parser.add_argument("bucket_csv", nargs="?", help="Path to bucket.csv")
+    parser.add_argument(
+        "--batch-root",
+        help="Walk a settle_time_meas root and analyze all matching bucket.csv files under <mesh-size>/plot/<node>/<bucket-size>_bucket/bucket.csv",
+    )
+    parser.add_argument(
+        "--bucket-size-filter",
+        type=float,
+        help="In batch mode, only include runs whose parsed bucket size matches this value",
+    )
     parser.add_argument("--time-column", help="Override inferred time column")
     parser.add_argument("--bits-column", help="Override inferred bits column")
     parser.add_argument("--window-s", type=float, default=3.0, help="Analysis window duration in seconds")
@@ -103,7 +113,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit only the core timestamps, detector outputs, and warnings",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.batch_root is None and args.bucket_csv is None:
+        parser.error("Provide either bucket_csv or --batch-root")
+    if args.batch_root is not None and args.bucket_csv is not None:
+        parser.error("Use either bucket_csv or --batch-root, not both")
+    return args
 
 
 def base_result(csv_path: str) -> dict[str, Any]:
@@ -143,6 +158,19 @@ def base_result(csv_path: str) -> dict[str, Any]:
     }
 
 
+def configured_parameters(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "window_s": args.window_s,
+        "step_s": args.step_s,
+        "min_suffix_s": args.min_suffix_s,
+        "mean_rel_tol": args.mean_rel_tol,
+        "std_rel_tol": args.std_rel_tol,
+        "trend_tol": args.trend_tol,
+        "zero_frac_tol": args.zero_frac_tol,
+        "match_fraction_threshold": args.match_fraction_threshold,
+    }
+
+
 def detector_result_template() -> dict[str, Any]:
     return {
         "steady_state_start_idx": None,
@@ -151,6 +179,39 @@ def detector_result_template() -> dict[str, Any]:
         "accepted_candidate_window_index": None,
         "selected_metrics": None,
         "candidate_evaluations": [],
+    }
+
+
+def percentile(values: list[float], q: float) -> float | None:
+    if not values:
+        return None
+    return float(np.percentile(np.array(values, dtype=float), q))
+
+
+def summarize_values(values: list[float]) -> dict[str, Any]:
+    if not values:
+        return {
+            "mean": None,
+            "median": None,
+            "std": None,
+            "min": None,
+            "max": None,
+            "p10": None,
+            "p25": None,
+            "p75": None,
+            "p90": None,
+        }
+    array = np.array(values, dtype=float)
+    return {
+        "mean": float(np.mean(array)),
+        "median": float(np.median(array)),
+        "std": float(np.std(array)),
+        "min": float(np.min(array)),
+        "max": float(np.max(array)),
+        "p10": percentile(values, 10),
+        "p25": percentile(values, 25),
+        "p75": percentile(values, 75),
+        "p90": percentile(values, 90),
     }
 
 
@@ -519,11 +580,12 @@ def evaluate_suffix_cohesion(
     return result
 
 
-def analyze(args: argparse.Namespace) -> dict[str, Any]:
-    result = base_result(args.bucket_csv)
+def analyze(args: argparse.Namespace, csv_path_override: str | None = None) -> dict[str, Any]:
+    csv_path_str = csv_path_override if csv_path_override is not None else args.bucket_csv
+    result = base_result(str(csv_path_str))
     warnings = result["warnings"]
 
-    csv_path = Path(args.bucket_csv)
+    csv_path = Path(str(csv_path_str))
     if not csv_path.is_file():
         warnings.append(f"CSV file not found: {csv_path}")
         return result
@@ -698,6 +760,169 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def parse_batch_path(batch_root: Path, csv_path: Path) -> dict[str, Any] | None:
+    try:
+        rel = csv_path.relative_to(batch_root)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) != 5:
+        return None
+    mesh_part, plot_part, node_name, bucket_dir, file_name = parts
+    if plot_part != "plot" or file_name != "bucket.csv" or not bucket_dir.endswith("_bucket"):
+        return None
+    bucket_text = bucket_dir[: -len("_bucket")]
+    try:
+        bucket_size_seconds = float(bucket_text)
+    except ValueError:
+        return None
+    mesh_size: int | str
+    try:
+        mesh_size = int(mesh_part)
+    except ValueError:
+        mesh_size = mesh_part
+    return {
+        "mesh_size": mesh_size,
+        "node_name": node_name,
+        "bucket_size_seconds": bucket_size_seconds,
+        "bucket_csv": str(csv_path),
+    }
+
+
+def detector_summary_from_result(result: dict[str, Any], detector_key: str) -> dict[str, Any]:
+    detector = result[detector_key]
+    return {
+        "steady_state_start_time": detector["steady_state_start_time"],
+        "settling_time_seconds": detector["settling_time_seconds"],
+    }
+
+
+def run_record_from_result(path_info: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "mesh_size": path_info["mesh_size"],
+        "node_name": path_info["node_name"],
+        "bucket_size_seconds": path_info["bucket_size_seconds"],
+        "bucket_csv": path_info["bucket_csv"],
+        "outage_start_time": result["outage"]["start_time"],
+        "outage_end_time": result["outage"]["end_time"],
+        "first_nonzero_after_outage_time": result["recovery"]["first_nonzero_after_outage_time"],
+        "prototype_matching": detector_summary_from_result(result, "prototype_matching"),
+        "suffix_cohesion": detector_summary_from_result(result, "suffix_cohesion"),
+        "warnings": list(result["warnings"]),
+    }
+
+
+def detector_group_summary(runs: list[dict[str, Any]], detector_key: str) -> dict[str, Any]:
+    values = [
+        float(run[detector_key]["settling_time_seconds"])
+        for run in runs
+        if run[detector_key]["settling_time_seconds"] is not None
+    ]
+    return {
+        "n": len(runs),
+        "success_n": len(values),
+        "failure_n": len(runs) - len(values),
+        "settling_time_seconds": summarize_values(values),
+    }
+
+
+def summarize_group(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "count": len(runs),
+        "prototype_matching": detector_group_summary(runs, "prototype_matching"),
+        "suffix_cohesion": detector_group_summary(runs, "suffix_cohesion"),
+    }
+
+
+def group_runs(runs: list[dict[str, Any]], key_fn: Any) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for run in runs:
+        key = str(key_fn(run))
+        grouped.setdefault(key, []).append(run)
+    return grouped
+
+
+def build_grouped_summaries(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    by_mesh_groups = group_runs(runs, lambda run: run["mesh_size"])
+    by_bucket_groups = group_runs(runs, lambda run: run["bucket_size_seconds"])
+
+    by_mesh_size = {
+        key: summarize_group(group_runs_list) for key, group_runs_list in sorted(by_mesh_groups.items())
+    }
+    by_bucket_size = {
+        key: summarize_group(group_runs_list) for key, group_runs_list in sorted(by_bucket_groups.items())
+    }
+
+    mesh_bucket_groups: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for run in runs:
+        mesh_key = str(run["mesh_size"])
+        bucket_key = str(run["bucket_size_seconds"])
+        mesh_bucket_groups.setdefault(mesh_key, {}).setdefault(bucket_key, []).append(run)
+
+    by_mesh_size_and_bucket_size: dict[str, Any] = {}
+    for mesh_key in sorted(mesh_bucket_groups):
+        by_mesh_size_and_bucket_size[mesh_key] = {
+            bucket_key: summarize_group(mesh_bucket_groups[mesh_key][bucket_key])
+            for bucket_key in sorted(mesh_bucket_groups[mesh_key])
+        }
+
+    return {
+        "by_mesh_size": by_mesh_size,
+        "by_bucket_size": by_bucket_size,
+        "by_mesh_size_and_bucket_size": by_mesh_size_and_bucket_size,
+    }
+
+
+def analyze_batch(args: argparse.Namespace) -> dict[str, Any]:
+    batch_root = Path(args.batch_root).expanduser().resolve()
+    meta_warnings: list[str] = []
+    runs: list[dict[str, Any]] = []
+    batch_paths = sorted(batch_root.glob("*/plot/*/*_bucket/bucket.csv"))
+
+    if not batch_root.is_dir():
+        meta_warnings.append(f"Batch root not found or not a directory: {batch_root}")
+    if not batch_paths:
+        meta_warnings.append(f"No bucket.csv files matched under batch root: {batch_root}")
+
+    for csv_path in batch_paths:
+        path_info = parse_batch_path(batch_root, csv_path)
+        if path_info is None:
+            meta_warnings.append(f"Skipped path with unexpected layout: {csv_path}")
+            continue
+        if (
+            args.bucket_size_filter is not None
+            and not math.isclose(
+                path_info["bucket_size_seconds"], args.bucket_size_filter, rel_tol=0.0, abs_tol=1e-9
+            )
+        ):
+            continue
+
+        try:
+            result = analyze(args, str(csv_path))
+        except Exception as exc:  # pragma: no cover - defensive batch path
+            result = base_result(str(csv_path))
+            result["warnings"].append(f"Unhandled analysis error: {exc}")
+        runs.append(run_record_from_result(path_info, result))
+
+    batch_result = {
+        "meta": {
+            "batch_root": str(batch_root),
+            "path_scheme": "<root>/<mesh-size>/plot/<node-name>/<bucket-size>_bucket/bucket.csv",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "detector_version": "mvp1",
+            "filters": {
+                "bucket_size_filter_seconds": args.bucket_size_filter,
+            },
+            "detector_parameters": configured_parameters(args),
+            "warnings": meta_warnings,
+            "run_count": len(runs),
+        },
+        "runs": runs,
+        "grouped": build_grouped_summaries(runs),
+    }
+    return batch_result
+
+
 def prune_result_for_output(result: dict[str, Any], debug: bool, quick: bool) -> dict[str, Any]:
     if debug:
         return result
@@ -759,13 +984,15 @@ def prune_result_for_output(result: dict[str, Any], debug: bool, quick: bool) ->
 
 def main() -> None:
     args = parse_args()
-    try:
-        result = analyze(args)
-    except Exception as exc:  # pragma: no cover - defensive JSON output path
-        result = base_result(args.bucket_csv)
-        result["warnings"].append(f"Unhandled analysis error: {exc}")
-
-    cleaned = to_builtin(prune_result_for_output(result, args.debug, args.quick))
+    if args.batch_root is not None:
+        cleaned = to_builtin(analyze_batch(args))
+    else:
+        try:
+            result = analyze(args)
+        except Exception as exc:  # pragma: no cover - defensive JSON output path
+            result = base_result(str(args.bucket_csv))
+            result["warnings"].append(f"Unhandled analysis error: {exc}")
+        cleaned = to_builtin(prune_result_for_output(result, args.debug, args.quick))
     print(json.dumps(cleaned, indent=2, sort_keys=True))
 
 
