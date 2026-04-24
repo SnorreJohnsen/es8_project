@@ -976,10 +976,25 @@ def plot_drone_positions(*,
     x_device_pos = device_positions[:,0]
     y_device_pos = device_positions[:,1]
     # only plot device if there is less than or equal to 300 devices
-    if len(x_device_pos) <= 300:
-        ax_drone_pos.plot(x_device_pos, y_device_pos, 'o', color = 'green', markersize=1)
+
     ax_drone_pos.plot(x_pos, y_pos, 'o', color = 'red', markersize=2)
     
+    # Insert node_id below nodes
+    if len(x_device_pos) <= 300:
+        ax_drone_pos.plot(x_device_pos, y_device_pos, 'o', color = 'green', markersize=1)
+    else:
+        for node in nodes:
+            y_offset = 0.05 * (ax_drone_pos.get_ylim()[1] - ax_drone_pos.get_ylim()[0])
+            ax_drone_pos.text(
+                node.x,
+                node.y - y_offset,
+                node.id,
+                ha='center',
+                va='top',
+                fontsize=8,
+                color='black'
+            )
+
     device_links_rate = []
     if not use_lookup_table:
         # dist_device_to_drone should already be squared distances
@@ -1247,11 +1262,25 @@ def plot_drone_links(*,
     # Draw nodes
     ax.scatter(x_pos, y_pos, color='red', s=20)
 
+    # Insert node_ids
+    for node in nodes:
+        y_offset = 0.05 * (ax.get_ylim()[1] - ax.get_ylim()[0])
+        ax.text(
+            node.x,
+            node.y - y_offset,
+            node.id,
+            ha='center',
+            va='top',
+            fontsize=8,
+            color='black',
+            fontweight='bold'
+        )
+
     # Optional colorbar
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = plt.colorbar(sm, ax=ax, shrink=0.5)
-    cbar.set_label("PHYrate (Mbps)")
+    cbar.set_label("PHYrate [Mbps]")
 
     title_text = (
     f"{title_name}\n"
@@ -1940,7 +1969,7 @@ def process_drone_mesh(*,
                                 file_folder_path=dir_origin_full_plots,
                                 use_lookup_table=link_budget_model)
             
-            plot_drone_links(title_name=f"{grid_prefix} Mesh | dropout = {prefix_dropout_real_perc*100:.2f}% tolerance = {tolerance} [m]",
+            plot_drone_links(title_name=f"{grid_prefix} Mesh | Tolerance = {tolerance} [m]",
                             file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
                             nodes=node_list_all,
                             links=link_list_all,

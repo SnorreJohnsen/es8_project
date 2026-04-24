@@ -470,8 +470,7 @@ def accumulative_injection(min_w: int,
         #heatmap-legend {
             position: fixed;
             top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
+            right: 30px;
             width: 800px;  /* maybe reduce from 1540 */
             padding: 12px;
             background: white;
@@ -578,8 +577,7 @@ def window_injection(min_w: int,
         #heatmap-legend {
             position: fixed;
             top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
+            right: 30px;
             width: 800px;  /* maybe reduce from 1540 */
             padding: 12px;
             background: white;
