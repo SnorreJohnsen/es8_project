@@ -25,7 +25,6 @@ sim_root = "/home/aau/meshsim/"
 repo_root = os.path.join(sim_root, "repo")
 
 sys.path.append(os.path.join(repo_root, 'meshnet-lab/'))
-import software as mn_software
 import network as mn_network
 from network import mtu
 from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals, get_thread_id, exec
@@ -194,7 +193,7 @@ def stop_all_tcpdump():
     sigint_all(tcpdump_procs)
 
 
-def start_tcpdump(node_name: str, ifname: str, out_dir: str):
+def start_tcpdump(node_name: str, ifname: str, ns_name: str, out_dir: str):
     """
     Starts a tcpdump on a node to capture traffic
 
@@ -207,11 +206,11 @@ def start_tcpdump(node_name: str, ifname: str, out_dir: str):
     """
 
     pcap_path = os.path.join(out_dir, f"{node_name}.pcap")
-    cmd = ["ip", "netns", "exec", f"ns-{node_name}",
+    cmd = ["ip", "netns", "exec", ns_name,
             "tcpdump", "-i", ifname, "-n", "-U", "-w", pcap_path]
 
     if verbosity == "verbose":
-        print(f"start_tcpdump({node_name=}, {out_dir=})")
+        print(f"start_tcpdump({node_name=}, {ifname=}, {ns_name=}, {out_dir=})")
         print(" ".join(cmd))
 
     proc = subprocess.Popen(cmd,
@@ -415,6 +414,16 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
 
     graph["nodes"].extend(devs)
 
+def start_batadv(node_name: str, version5: bool = True, tid = None):
+    if version5:
+        start_script = os.path.join(repo_root, "emulation_scripts", "start_batadv_v.sh")
+    else:
+        raise NotImplementedError("Only BATMAN_V implemented")
+    if not tid:
+        tid = get_thread_id()
+    remote = None
+    exec(tid, remote, f'ip netns exec "ns-{node_name}" "{start_script}" "ns-{node_name}"')
+
 def battp_set_link_throughput(n1: str, n2: str, tp: float):
     """
     use battpctl to set link throughput in both directions between two nodes.
@@ -474,21 +483,30 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
 
 def set_node_down(node_name: str):
     """
-    stop batman-adv protocol to simulate node leaving mesh network
+    move uplink to trash namespace and remove bat0 to simulate node down
     
     assumes namespace for node is already created
     """
-    rmap = get_remote_mapping([Remote()]) # for running locally
-    mn_software._stop_protocol("batman-adv", rmap, [node_name])
+    tid = get_thread_id()
+    remote = None
+
+    exec(tid, remote, f'ip netns exec "ns-{node_name}" batctl meshif bat0 interface destroy 2>/dev/null || true')
+    exec(tid, remote, f'ip netns add "trash-{node_name}" 2>/dev/null || true')
+    exec(tid, remote, f'ip netns exec "ns-{node_name}" ip link set uplink down')
+    exec(tid, remote, f'ip netns exec "ns-{node_name}" ip link set uplink nomaster')
+    exec(tid, remote, f'ip netns exec "ns-{node_name}" ip link set uplink netns "trash-{node_name}"')
 
 def set_node_up(node_name: str, graph: dict):
     """
-    start batman-adv protocol to simulate node entering mesh network
+    move uplink from trash to ns-node_name and add bat0 to simulate node up
     
-    assumes namespace for node is already created
+    assumes node was previously pulled down with `set_node_down()`
     """
-    rmap = get_remote_mapping([Remote()]) # for running locally
-    mn_software._start_protocol("batman-adv", rmap, [node_name])
+    tid = get_thread_id()
+    remote = None
+    exec(tid, remote, f'ip netns exec "trash-{node_name}" ip link set uplink netns "ns-{node_name}"')
+    start_batadv(node_name, version5=True, tid=tid)
+    exec(tid, remote, f'ip netns exec "ns-{node_name}" ip link set uplink up', get_output=True) # get_output=True -> syncronous guard
 
     filt = lambda link: link["source"] == node_name or link["target"] == node_name
     links = filter(filt, graph["links"])
@@ -675,7 +693,7 @@ def main():
 
     # Start tcpdump for each node
     for id in all_ids:
-        start_tcpdump(id, "uplink", pcap_dir)
+        start_tcpdump(id, f"br-{id}", "switch", pcap_dir)
     time.sleep(0.5)  # allow to launch tcpdumps
     
     # Load or generate schedule
@@ -717,8 +735,10 @@ def main():
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
 
-    mn_software._start_protocol("batman-adv", rmap, drone_ids)
-    mn_software._start_protocol("batman-adv", rmap, adapter_ids)
+    for nid in drone_ids:
+        start_batadv(nid, version5=True)
+    for nid in adapter_ids:
+        start_batadv(nid, version5=True)
 
     device_ids = []
     for adapter_id in adapter_ids:
@@ -728,7 +748,7 @@ def main():
 
     # Add devices and start tcpdump
     for device_id in device_ids:
-        start_tcpdump(device_id, "veth0", pcap_dir)
+        start_tcpdump(device_id, "veth0", f"ns-{device_id}", pcap_dir)
 
     # Make json files for IP addrs and MAC addrs overview
     get_all_addrs(graph, device_ids)
@@ -747,8 +767,7 @@ def main():
     with open(sim_sched_json_path, "wb") as f:
         f.write(to_json(sim))
 
-
-    #input("Press Enter to end emulation")
+    # input("Press Enter to end emulation")
 
     stop_all_iperf3_servers()
     stop_all_tcpdump()
