@@ -263,6 +263,7 @@ def run_iperf3_server(server_name: str, client_name: str):
 def run_iperf3_client(server_name: str,
                       client_name: str,
                       out_dir: str, 
+                      timestamp: float,
                       duration: int = 5, 
                       udp: bool = False, 
                       bitrate: str = ''):
@@ -281,7 +282,7 @@ def run_iperf3_client(server_name: str,
     server_num = int(server_name.strip("d"))
     server_ip = f"10.200.100.{server_num+10}"
 
-    iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}.json")
+    iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}_{timestamp:.1f}.json")
     iperf3_args = ["-c", server_ip, "-p", server_port, "-t", duration, "--json"]
     if udp:
         iperf3_args.append("-u")
@@ -308,6 +309,7 @@ def run_iperf3_client(server_name: str,
 def run_iperf3_connection(server_name: str, 
                           client_name: str,
                           out_dir: str, 
+                          timestamp: float,
                           duration: int = 5, 
                           udp: bool = False, 
                           bitrate: str = ''):
@@ -315,7 +317,7 @@ def run_iperf3_connection(server_name: str,
     run iperf3 connection from two device name spaces.
     """
     run_iperf3_server(server_name, client_name)
-    run_iperf3_client(server_name, client_name, out_dir, duration, udp, bitrate)
+    run_iperf3_client(server_name, client_name, out_dir, timestamp, duration, udp, bitrate)
 
 def find_closest_node(this: dict, others: list[dict]):
     """
@@ -564,7 +566,7 @@ def stub_iperf_sched():
 
     return events
 
-def do_event(e: SchedEventType, graph: dict):
+def do_event(e: SchedEventType, graph: dict, simtime: float):
     """
     performs either iperf or dropout event from given graph and schedule event type
     """
@@ -578,6 +580,7 @@ def do_event(e: SchedEventType, graph: dict):
                 duration=e.duration,
                 udp=e.udp,
                 bitrate=e.bitrate,
+                timestamp=simtime,
                 )
     elif isinstance(e, DropoutEvent):
         if e.state != State.UP:
@@ -622,7 +625,7 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
             e = sched_sorted[i]
             if t_elapsed >= e.time:
                 # handle event
-                do_event(e.event, graph)
+                do_event(e.event, graph, t_elapsed)
                 e_cp = copy(e)
                 e_cp.time = t_elapsed
                 sched_real.append(e_cp)
@@ -641,7 +644,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('graph', help='Graph of the full network mesh (json)')
     parser.add_argument('-s', '--sim-sched', required=False, help='Simulation schedule (json)')
-    parser.add_argument('-d', '--duration', required=False, help='Duration for simulation [s]')
+    parser.add_argument('-d', '--duration', type=int, required=False, help='Duration for simulation [s]')
     parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', help='Set verbosity.')
     args = parser.parse_args()
 
