@@ -9,7 +9,6 @@ import numpy as np
 from dataclasses import dataclass
 import webbrowser, os
 import matplotlib.pyplot as plt
-import imageio.v2 as imageio
 import glob
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -17,8 +16,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 import time
-from PIL import Image
 from collections import deque
+import subprocess
 
 
 adapter = []
@@ -27,7 +26,7 @@ adapter = []
 Example: of how to create txt file with nessacary measures and order:
 & tshark -r pcap_file
 -T fields -e frame.number -e frame.time_epoch -e frame.time_relative -e eth.src -e eth.dst -e eth.type -e frame.protocols -e batadv.batman.packet_type
--e batadv.ogm2.orig -e batadv.ogm2.throughput -e batadv.ogm2.ttl > edges_d0_d4.txt
+-e batadv.ogm2.orig -e batadv.ogm2.throughput -e batadv.ogm2.ttl -e frame.len > edges_d0_d4.txt
 '''
 # maybe add this when need to track unicast -e batadv.unicast.dst -e batadv.unicast.ttl
 
@@ -269,6 +268,7 @@ def creation_of_edges_TCP(*,
                       flag_interval: bool = False):
 
     tcp_streams = {}
+    frame_idx = 0
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
@@ -363,8 +363,9 @@ def creation_of_edges_TCP(*,
                             print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs("frames", exist_ok=True)
                         os.makedirs("graphs", exist_ok=True)
+                        frame_idx += 1
                         html_file = f"graphs/graph_{float(time):.2f}.html"
-                        png_file = f"frames/frame_{float(time):.2f}.png"
+                        png_file = f"frames/frame_{frame_idx:04d}.png"
                         print(f"TCP streams existing is:")
 
                         # sort after count amount
@@ -471,7 +472,7 @@ def accumulative_injection(min_w: int,
             position: fixed;
             top: 20px;
             right: 30px;
-            width: 800px;  /* maybe reduce from 1540 */
+            width: 500px;  /* maybe reduce from 1540 */
             padding: 12px;
             background: white;
             border-radius: 8px;
@@ -578,7 +579,7 @@ def window_injection(min_w: int,
             position: fixed;
             top: 20px;
             right: 30px;
-            width: 800px;  /* maybe reduce from 1540 */
+            width: 500px;  /* maybe reduce from 1540 */
             padding: 12px;
             background: white;
             border-radius: 8px;
@@ -929,19 +930,26 @@ if __name__ == "__main__":
 
         frame_files = sorted(glob.glob("frames/frame_*.png"))
 
-        # sanity check (IMPORTANT)
-        sizes = [Image.open(f).size for f in frame_files]
-        print("frame sizes:", set(sizes))
+        if not frame_files:
+            print("No frames found. Skipping video creation.")
+        else:
+            print(f"Creating video from {len(frame_files)} frames...")
 
-        images = [imageio.imread(f) for f in frame_files]
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-y",  # overwrite output
+                "-framerate", "0.5",
+                "-i", "frames/frame_%04d.png",
+                "-c:v", "libx264",
+                "-preset", "slow",
+                "-crf", "18",
+                "-pix_fmt", "yuv420p",
+                "network.gif"
+            ]
 
-        # REPEAT FRAMES FOR SLOWER MOTION
-        imageio.mimsave(
-            "network.gif",
-            images,
-            duration=0.01,   # now this is smoother (not too fast)
-            loop=0
-        )
+            subprocess.run(ffmpeg_cmd, check=True)
+
+            print("Video saved as network.mp4")
 
     # creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
 
