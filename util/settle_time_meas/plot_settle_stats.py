@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-DETECTOR_CHOICES = ("prototype_matching", "suffix_cohesion")
+DETECTOR_CHOICES = ("prototype_matching", "suffix_cohesion", "local_stability")
 PLOT_CHOICES = ("settle-vs-mesh", "dist-vs-mesh", "bucket-compare")
 
 
@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, help="Output image path, e.g. plot.png")
     parser.add_argument(
         "--detector",
-        default="suffix_cohesion",
+        default="local_stability",
         choices=DETECTOR_CHOICES,
         help="Detector to visualize",
     )
@@ -81,6 +81,8 @@ def filter_runs(
 
 
 def detector_settling(run: dict[str, Any], detector: str) -> float | None:
+    if detector not in run:
+        return None
     value = run[detector]["settling_time_seconds"]
     return None if value is None else float(value)
 
