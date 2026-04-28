@@ -32,6 +32,10 @@ BITS_COLUMN_CANDIDATES = (
     "txbits",
 )
 
+DEFAULT_DETECTORS = ("local_stability",)
+LEGACY_DETECTORS = ("prototype_matching", "suffix_cohesion")
+ALL_DETECTORS = (*LEGACY_DETECTORS, *DEFAULT_DETECTORS)
+
 
 @dataclass
 class WindowFeature:
@@ -104,6 +108,35 @@ def parse_args() -> argparse.Namespace:
         help="Required matching fraction for prototype detector and local-pass fractions for cohesion detector",
     )
     parser.add_argument(
+        "--cooldown-s",
+        type=float,
+        default=5.0,
+        help="Cooldown after first post-outage activity before local-stability candidates may be accepted",
+    )
+    parser.add_argument(
+        "--horizon-s",
+        type=float,
+        default=10.0,
+        help="Local-stability horizon duration in seconds",
+    )
+    parser.add_argument(
+        "--mean-change-tol",
+        type=float,
+        default=0.30,
+        help="Allowed relative first-half vs second-half mean change for local-stability windows",
+    )
+    parser.add_argument(
+        "--cv-tol",
+        type=float,
+        default=1.0,
+        help="Allowed coefficient of variation for local-stability windows",
+    )
+    parser.add_argument(
+        "--include-legacy-detectors",
+        action="store_true",
+        help="Also run the older prototype-matching and suffix-cohesion detectors",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Include full window features and candidate-evaluation diagnostics in the JSON output",
@@ -127,6 +160,7 @@ def base_result(csv_path: str) -> dict[str, Any]:
         "time_column": None,
         "bits_column": None,
         "bucket_size_seconds": None,
+        "detectors_run": [],
         "warnings": [],
         "parameters": {},
         "outage": {
@@ -153,9 +187,14 @@ def base_result(csv_path: str) -> dict[str, Any]:
             "num_windows": 0,
             "windows": [],
         },
-        "prototype_matching": detector_result_template(),
-        "suffix_cohesion": detector_result_template(),
+        "local_stability": detector_result_template(),
     }
+
+
+def selected_detectors(args: argparse.Namespace) -> tuple[str, ...]:
+    if args.include_legacy_detectors:
+        return ALL_DETECTORS
+    return DEFAULT_DETECTORS
 
 
 def configured_parameters(args: argparse.Namespace) -> dict[str, Any]:
@@ -168,6 +207,11 @@ def configured_parameters(args: argparse.Namespace) -> dict[str, Any]:
         "trend_tol": args.trend_tol,
         "zero_frac_tol": args.zero_frac_tol,
         "match_fraction_threshold": args.match_fraction_threshold,
+        "cooldown_s": args.cooldown_s,
+        "horizon_s": args.horizon_s,
+        "mean_change_tol": args.mean_change_tol,
+        "cv_tol": args.cv_tol,
+        "include_legacy_detectors": args.include_legacy_detectors,
     }
 
 
@@ -580,9 +624,96 @@ def evaluate_suffix_cohesion(
     return result
 
 
+def evaluate_local_stability(
+    times: np.ndarray,
+    bits: np.ndarray,
+    recovery_start_time: float,
+    recovery_start_idx: int,
+    bucket_size_seconds: float,
+    step_n: int,
+    horizon_n: int,
+    cooldown_s: float,
+    zero_frac_tol: float,
+    mean_change_tol: float,
+    cv_tol: float,
+) -> dict[str, Any]:
+    result = detector_result_template()
+
+    first_candidate_time = recovery_start_time + max(0.0, cooldown_s)
+    first_candidate_idx = recovery_start_idx
+    while first_candidate_idx < len(times) and times[first_candidate_idx] < first_candidate_time:
+        first_candidate_idx += 1
+
+    for candidate_idx in range(first_candidate_idx, len(bits) - horizon_n + 1, step_n):
+        end_idx = candidate_idx + horizon_n - 1
+        segment = bits[candidate_idx : end_idx + 1]
+        mean = float(np.mean(segment))
+        std = float(np.std(segment))
+        zero_fraction = float(np.mean(segment == 0))
+        cv = std / max(abs(mean), 1.0)
+
+        half_n = len(segment) // 2
+        first_half_mean = float(np.mean(segment[:half_n])) if half_n else mean
+        second_half_mean = float(np.mean(segment[-half_n:])) if half_n else mean
+        mean_change_rel = abs(second_half_mean - first_half_mean) / max(abs(mean), 1.0)
+
+        mean_ok = mean > 0
+        zero_ok = zero_fraction <= zero_frac_tol
+        cv_ok = cv <= cv_tol
+        mean_change_ok = mean_change_rel <= mean_change_tol
+        accepted = mean_ok and zero_ok and cv_ok and mean_change_ok
+
+        evaluation = {
+            "candidate_start_idx": candidate_idx,
+            "candidate_end_idx": end_idx,
+            "candidate_start_time": float(times[candidate_idx]),
+            "candidate_end_time": float(times[end_idx]),
+            "horizon_buckets": horizon_n,
+            "horizon_seconds_actual": horizon_n * bucket_size_seconds,
+            "mean": mean,
+            "std": std,
+            "cv": cv,
+            "zero_fraction": zero_fraction,
+            "first_half_mean": first_half_mean,
+            "second_half_mean": second_half_mean,
+            "mean_change_rel": mean_change_rel,
+            "mean_ok": mean_ok,
+            "zero_ok": zero_ok,
+            "cv_ok": cv_ok,
+            "mean_change_ok": mean_change_ok,
+            "accepted": accepted,
+        }
+        result["candidate_evaluations"].append(evaluation)
+
+        if accepted:
+            result["steady_state_start_idx"] = candidate_idx
+            result["steady_state_start_time"] = float(times[candidate_idx])
+            result["settling_time_seconds"] = float(times[candidate_idx]) - recovery_start_time
+            result["accepted_candidate_window_index"] = None
+            result["selected_metrics"] = {
+                "candidate_end_idx": end_idx,
+                "candidate_end_time": float(times[end_idx]),
+                "horizon_buckets": horizon_n,
+                "horizon_seconds_actual": horizon_n * bucket_size_seconds,
+                "cooldown_s": cooldown_s,
+                "mean": mean,
+                "std": std,
+                "cv": cv,
+                "zero_fraction": zero_fraction,
+                "first_half_mean": first_half_mean,
+                "second_half_mean": second_half_mean,
+                "mean_change_rel": mean_change_rel,
+            }
+            break
+
+    return result
+
+
 def analyze(args: argparse.Namespace, csv_path_override: str | None = None) -> dict[str, Any]:
     csv_path_str = csv_path_override if csv_path_override is not None else args.bucket_csv
     result = base_result(str(csv_path_str))
+    detectors_run = selected_detectors(args)
+    result["detectors_run"] = list(detectors_run)
     warnings = result["warnings"]
 
     csv_path = Path(str(csv_path_str))
@@ -669,6 +800,7 @@ def analyze(args: argparse.Namespace, csv_path_override: str | None = None) -> d
 
     window_n = ceil_to_buckets(args.window_s, bucket_size_seconds, minimum=2)
     step_n = ceil_to_buckets(args.step_s, bucket_size_seconds, minimum=1)
+    horizon_n = ceil_to_buckets(args.horizon_s, bucket_size_seconds, minimum=2)
     subblock_s = min(1.0, args.window_s / 3.0)
     subblock_n = ceil_to_buckets(subblock_s, bucket_size_seconds, minimum=1)
     window_duration_seconds_actual = window_n * bucket_size_seconds
@@ -684,10 +816,12 @@ def analyze(args: argparse.Namespace, csv_path_override: str | None = None) -> d
         "analysis_points": len(bits) - recovery_start_idx,
         "window_n": window_n,
         "step_n": step_n,
+        "horizon_n": horizon_n,
         "subblock_n": subblock_n,
         "subblock_duration_seconds_actual": subblock_n * bucket_size_seconds,
         "window_duration_seconds_actual": window_duration_seconds_actual,
         "step_duration_seconds_actual": step_duration_seconds_actual,
+        "horizon_duration_seconds_actual": horizon_n * bucket_size_seconds,
         "min_suffix_windows": min_suffix_windows,
         "num_windows": len(windows),
         "windows": serialize_windows(windows),
@@ -715,6 +849,10 @@ def analyze(args: argparse.Namespace, csv_path_override: str | None = None) -> d
         "zero_frac_tol": args.zero_frac_tol,
         "zero_frac_tol_used": zero_frac_tol_used,
         "match_fraction_threshold": args.match_fraction_threshold,
+        "cooldown_s": args.cooldown_s,
+        "horizon_s": args.horizon_s,
+        "mean_change_tol": args.mean_change_tol,
+        "cv_tol": args.cv_tol,
     }
 
     post_recovery_duration = (len(bits) - recovery_start_idx) * bucket_size_seconds
@@ -730,32 +868,50 @@ def analyze(args: argparse.Namespace, csv_path_override: str | None = None) -> d
             "Post-recovery capture duration is short relative to the configured window/minimum suffix durations"
         )
 
-    result["prototype_matching"] = evaluate_prototype_matching(
-        windows=windows,
-        min_suffix_windows=min_suffix_windows,
-        mean_rel_tol=args.mean_rel_tol,
-        std_rel_tol=args.std_rel_tol,
-        trend_tol=trend_tol_used,
-        zero_frac_tol=zero_frac_tol_used,
-        match_fraction_threshold=args.match_fraction_threshold,
+    if "prototype_matching" in detectors_run:
+        result["prototype_matching"] = evaluate_prototype_matching(
+            windows=windows,
+            min_suffix_windows=min_suffix_windows,
+            mean_rel_tol=args.mean_rel_tol,
+            std_rel_tol=args.std_rel_tol,
+            trend_tol=trend_tol_used,
+            zero_frac_tol=zero_frac_tol_used,
+            match_fraction_threshold=args.match_fraction_threshold,
+            recovery_start_time=recovery_start_time,
+        )
+
+    if "suffix_cohesion" in detectors_run:
+        result["suffix_cohesion"] = evaluate_suffix_cohesion(
+            windows=windows,
+            min_suffix_windows=min_suffix_windows,
+            mean_rel_tol=args.mean_rel_tol,
+            std_rel_tol=args.std_rel_tol,
+            trend_tol=trend_tol_used,
+            zero_frac_tol=zero_frac_tol_used,
+            match_fraction_threshold=args.match_fraction_threshold,
+            recovery_start_time=recovery_start_time,
+        )
+
+    result["local_stability"] = evaluate_local_stability(
+        times=times,
+        bits=bits,
         recovery_start_time=recovery_start_time,
+        recovery_start_idx=recovery_start_idx,
+        bucket_size_seconds=bucket_size_seconds,
+        step_n=step_n,
+        horizon_n=horizon_n,
+        cooldown_s=args.cooldown_s,
+        zero_frac_tol=zero_frac_tol_used,
+        mean_change_tol=args.mean_change_tol,
+        cv_tol=args.cv_tol,
     )
 
-    result["suffix_cohesion"] = evaluate_suffix_cohesion(
-        windows=windows,
-        min_suffix_windows=min_suffix_windows,
-        mean_rel_tol=args.mean_rel_tol,
-        std_rel_tol=args.std_rel_tol,
-        trend_tol=trend_tol_used,
-        zero_frac_tol=zero_frac_tol_used,
-        match_fraction_threshold=args.match_fraction_threshold,
-        recovery_start_time=recovery_start_time,
-    )
-
-    if result["prototype_matching"]["steady_state_start_time"] is None:
+    if "prototype_matching" in detectors_run and result["prototype_matching"]["steady_state_start_time"] is None:
         warnings.append("Prototype-matching detector did not find a steady-state onset")
-    if result["suffix_cohesion"]["steady_state_start_time"] is None:
+    if "suffix_cohesion" in detectors_run and result["suffix_cohesion"]["steady_state_start_time"] is None:
         warnings.append("Suffix-cohesion detector did not find a steady-state onset")
+    if "local_stability" in detectors_run and result["local_stability"]["steady_state_start_time"] is None:
+        warnings.append("Local-stability detector did not find a steady-state onset")
 
     return result
 
@@ -790,7 +946,7 @@ def parse_batch_path(batch_root: Path, csv_path: Path) -> dict[str, Any] | None:
 
 
 def detector_summary_from_result(result: dict[str, Any], detector_key: str) -> dict[str, Any]:
-    detector = result[detector_key]
+    detector = result.get(detector_key, detector_result_template())
     return {
         "steady_state_start_time": detector["steady_state_start_time"],
         "settling_time_seconds": detector["settling_time_seconds"],
@@ -798,7 +954,7 @@ def detector_summary_from_result(result: dict[str, Any], detector_key: str) -> d
 
 
 def run_record_from_result(path_info: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    record = {
         "mesh_size": path_info["mesh_size"],
         "node_name": path_info["node_name"],
         "bucket_size_seconds": path_info["bucket_size_seconds"],
@@ -806,32 +962,38 @@ def run_record_from_result(path_info: dict[str, Any], result: dict[str, Any]) ->
         "outage_start_time": result["outage"]["start_time"],
         "outage_end_time": result["outage"]["end_time"],
         "first_nonzero_after_outage_time": result["recovery"]["first_nonzero_after_outage_time"],
-        "prototype_matching": detector_summary_from_result(result, "prototype_matching"),
-        "suffix_cohesion": detector_summary_from_result(result, "suffix_cohesion"),
+        "detectors_run": list(result.get("detectors_run", DEFAULT_DETECTORS)),
         "warnings": list(result["warnings"]),
     }
+    for detector_key in result.get("detectors_run", DEFAULT_DETECTORS):
+        record[detector_key] = detector_summary_from_result(result, detector_key)
+    return record
 
 
 def detector_group_summary(runs: list[dict[str, Any]], detector_key: str) -> dict[str, Any]:
     values = [
         float(run[detector_key]["settling_time_seconds"])
         for run in runs
+        if detector_key in run
         if run[detector_key]["settling_time_seconds"] is not None
     ]
+    detector_runs = [run for run in runs if detector_key in run]
     return {
-        "n": len(runs),
+        "n": len(detector_runs),
         "success_n": len(values),
-        "failure_n": len(runs) - len(values),
+        "failure_n": len(detector_runs) - len(values),
         "settling_time_seconds": summarize_values(values),
     }
 
 
 def summarize_group(runs: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
+    summary = {
         "count": len(runs),
-        "prototype_matching": detector_group_summary(runs, "prototype_matching"),
-        "suffix_cohesion": detector_group_summary(runs, "suffix_cohesion"),
     }
+    detector_keys = sorted({detector for run in runs for detector in run.get("detectors_run", [])})
+    for detector_key in detector_keys:
+        summary[detector_key] = detector_group_summary(runs, detector_key)
+    return summary
 
 
 def group_runs(runs: list[dict[str, Any]], key_fn: Any) -> dict[str, list[dict[str, Any]]]:
@@ -901,6 +1063,7 @@ def analyze_batch(args: argparse.Namespace) -> dict[str, Any]:
             result = analyze(args, str(csv_path))
         except Exception as exc:  # pragma: no cover - defensive batch path
             result = base_result(str(csv_path))
+            result["detectors_run"] = list(selected_detectors(args))
             result["warnings"].append(f"Unhandled analysis error: {exc}")
         runs.append(run_record_from_result(path_info, result))
 
@@ -914,6 +1077,7 @@ def analyze_batch(args: argparse.Namespace) -> dict[str, Any]:
                 "bucket_size_filter_seconds": args.bucket_size_filter,
             },
             "detector_parameters": configured_parameters(args),
+            "detectors_run": list(selected_detectors(args)),
             "warnings": meta_warnings,
             "run_count": len(runs),
         },
@@ -924,31 +1088,29 @@ def analyze_batch(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def prune_result_for_output(result: dict[str, Any], debug: bool, quick: bool) -> dict[str, Any]:
+    detectors_run = result.get("detectors_run", DEFAULT_DETECTORS)
     if debug:
         return result
     if quick:
-        return {
+        pruned = {
             "bucket_csv": result["bucket_csv"],
             "bucket_size_seconds": result["bucket_size_seconds"],
+            "detectors_run": detectors_run,
             "outage_start_time": result["outage"]["start_time"],
             "outage_end_time": result["outage"]["end_time"],
             "first_nonzero_after_outage_time": result["recovery"]["first_nonzero_after_outage_time"],
-            "prototype_matching": {
-                "steady_state_start_time": result["prototype_matching"]["steady_state_start_time"],
-                "settling_time_seconds": result["prototype_matching"]["settling_time_seconds"],
-            },
-            "suffix_cohesion": {
-                "steady_state_start_time": result["suffix_cohesion"]["steady_state_start_time"],
-                "settling_time_seconds": result["suffix_cohesion"]["settling_time_seconds"],
-            },
             "warnings": result["warnings"],
         }
+        for detector_key in detectors_run:
+            pruned[detector_key] = detector_summary_from_result(result, detector_key)
+        return pruned
 
     pruned = {
         "bucket_csv": result["bucket_csv"],
         "time_column": result["time_column"],
         "bits_column": result["bits_column"],
         "bucket_size_seconds": result["bucket_size_seconds"],
+        "detectors_run": detectors_run,
         "warnings": result["warnings"],
         "parameters": result["parameters"],
         "outage": result["outage"],
@@ -959,26 +1121,23 @@ def prune_result_for_output(result: dict[str, Any], debug: bool, quick: bool) ->
             "analysis_points": result["windowing"]["analysis_points"],
             "window_n": result["windowing"]["window_n"],
             "step_n": result["windowing"]["step_n"],
+            "horizon_n": result["windowing"]["horizon_n"],
             "window_duration_seconds_actual": result["windowing"]["window_duration_seconds_actual"],
             "step_duration_seconds_actual": result["windowing"]["step_duration_seconds_actual"],
+            "horizon_duration_seconds_actual": result["windowing"]["horizon_duration_seconds_actual"],
             "min_suffix_windows": result["windowing"]["min_suffix_windows"],
             "num_windows": result["windowing"]["num_windows"],
         },
-        "prototype_matching": {
-            "steady_state_start_idx": result["prototype_matching"]["steady_state_start_idx"],
-            "steady_state_start_time": result["prototype_matching"]["steady_state_start_time"],
-            "settling_time_seconds": result["prototype_matching"]["settling_time_seconds"],
-            "accepted_candidate_window_index": result["prototype_matching"]["accepted_candidate_window_index"],
-            "selected_metrics": result["prototype_matching"]["selected_metrics"],
-        },
-        "suffix_cohesion": {
-            "steady_state_start_idx": result["suffix_cohesion"]["steady_state_start_idx"],
-            "steady_state_start_time": result["suffix_cohesion"]["steady_state_start_time"],
-            "settling_time_seconds": result["suffix_cohesion"]["settling_time_seconds"],
-            "accepted_candidate_window_index": result["suffix_cohesion"]["accepted_candidate_window_index"],
-            "selected_metrics": result["suffix_cohesion"]["selected_metrics"],
-        },
     }
+    for detector_key in detectors_run:
+        detector = result.get(detector_key, detector_result_template())
+        pruned[detector_key] = {
+            "steady_state_start_idx": detector["steady_state_start_idx"],
+            "steady_state_start_time": detector["steady_state_start_time"],
+            "settling_time_seconds": detector["settling_time_seconds"],
+            "accepted_candidate_window_index": detector["accepted_candidate_window_index"],
+            "selected_metrics": detector["selected_metrics"],
+        }
     return pruned
 
 
@@ -991,6 +1150,7 @@ def main() -> None:
             result = analyze(args)
         except Exception as exc:  # pragma: no cover - defensive JSON output path
             result = base_result(str(args.bucket_csv))
+            result["detectors_run"] = list(selected_detectors(args))
             result["warnings"].append(f"Unhandled analysis error: {exc}")
         cleaned = to_builtin(prune_result_for_output(result, args.debug, args.quick))
     print(json.dumps(cleaned, indent=2, sort_keys=True))
