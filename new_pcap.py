@@ -18,7 +18,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 import time
 from collections import deque
 import subprocess
-
+import shutil
 
 adapter = []
 
@@ -101,6 +101,7 @@ def extract_uplink_macs(reference_data):
 def creation_of_edges_OGM2(*,
                       G,
                       file: str,
+                      encoding: str,
                       start_time: int = 0,
                       OGM2_orig_mac: str,
                       time_interval: float = 1):
@@ -114,7 +115,7 @@ def creation_of_edges_OGM2(*,
     time_interval: How long interval to track over, OGM2 interval is 1 sec and therefore default
     '''
     
-    with open(file, "r", encoding="utf-16", errors="ignore") as f:
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
             OGM2_interval = None
             order = 0
             for i, line in enumerate(f):
@@ -194,6 +195,7 @@ def creation_of_edges_OGM2(*,
 def tracking_of_OGM2_at_source(*,
                                addr_data: str,
                                file: str,
+                               encoding: str,
                                start_time: int = 0,
                                OGM2_orig_mac: str,
                                time_interval: float = 1,
@@ -219,7 +221,7 @@ def tracking_of_OGM2_at_source(*,
     OGM2_parts = OGM2_mac_info.split("/")
     OGM2_node = OGM2_parts[1]
 
-    with open(file, "r", encoding="utf-16", errors="ignore") as f:
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
             stop_time = start_time + time_interval
             throughput = None
             print(f"OGM Original Address at node id: {OGM2_node} with MAC address: {OGM2_orig_mac} | Broadcasted at node id: {src_node} with MAC Adress {eth_src}")
@@ -286,6 +288,7 @@ def edge_with_type_exists(G, src, dst, order):
 def all_link_throughput(*,
                       G,
                       file: str,
+                      encoding: str,
                       start_time: int = 0,
                       stop_time: int,
                       stepsize_anime: float = 1,
@@ -293,7 +296,7 @@ def all_link_throughput(*,
                       browser_html: bool = False,
                       flag_interval: bool = False):
     frame_idx = 0
-    with open(file, "r", encoding="utf-16", errors="ignore") as f:
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
             last_parts = last_line.strip().split()
@@ -408,6 +411,7 @@ def all_link_throughput(*,
 def creation_of_edges_TCP(*,
                       G,
                       file: str,
+                      encoding: str,
                       start_time: int = 0,
                       stop_time: int,
                       stepsize_anime: float = 1,
@@ -417,7 +421,7 @@ def creation_of_edges_TCP(*,
 
     tcp_streams = {}
     frame_idx = 0
-    with open(file, "r", encoding="utf-16", errors="ignore") as f:
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
             last_parts = last_line.strip().split()
@@ -1107,6 +1111,45 @@ def draw_graph(G, path):
     plt.savefig(path)
     plt.close()
 
+def run_tshark(pcap_file, output_txt):
+    # 1. Find tshark
+    tshark_path = shutil.which("tshark")
+
+    if not tshark_path:
+        candidate = r"C:\Program Files\Wireshark\tshark.exe"
+        if os.path.exists(candidate):
+            tshark_path = candidate
+
+    if not tshark_path:
+        raise RuntimeError(
+            "tshark not found. Install Wireshark or add tshark to PATH."
+        )
+
+    # 2. Build command
+    cmd = [
+        tshark_path,
+        "-r", pcap_file,
+        "-T", "fields",
+        "-e", "frame.number",
+        "-e", "frame.time_epoch",
+        "-e", "frame.time_relative",
+        "-e", "eth.src",
+        "-e", "eth.dst",
+        "-e", "eth.type",
+        "-e", "frame.protocols",
+        "-e", "frame.len",
+        "-e", "batadv.batman.packet_type",
+        "-e", "batadv.ogm2.orig",
+        "-e", "batadv.ogm2.throughput",
+        "-e", "batadv.ogm2.ttl"
+    ]
+
+    # 3. Run tshark
+    print("CWD:", os.getcwd())
+    print("Writing to:", os.path.abspath(output_txt))
+    with open(output_txt, "w") as f:
+        subprocess.run(cmd, stdout=f, check=True)
+
 if __name__ == "__main__":
 
     default_start_time = 0
@@ -1128,7 +1171,6 @@ if __name__ == "__main__":
     parser.add_argument("-ogm_orig","--ogmv2_originator", type=str, help ="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
     parser.add_argument("-ogm_eth_src","--ogmv2_ethernet_source", type=str, help ="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
 
-
     args = parser.parse_args()
 
     analysis_file = args.input
@@ -1146,7 +1188,24 @@ if __name__ == "__main__":
     ogmv2_eth_src = args.ogmv2_ethernet_source
     method_type = method_type.strip().lower()
     
-    capture = pyshark.FileCapture(analysis_file)
+    # Allow both pcap and txt from analysis file 
+    if analysis_file.endswith(".txt"):   
+        encoding = "utf-16"
+    if analysis_file.endswith(".pcap"):
+        output_dir = os.path.join(os.getcwd(), "tshark_outputs")
+        os.makedirs(output_dir, exist_ok=True)
+
+        txt_file = os.path.join(
+            output_dir,
+            os.path.splitext(os.path.basename(analysis_file))[0] + ".txt"
+        )
+        encoding = "utf-8"
+        run_tshark(analysis_file, txt_file)
+        analysis_file = txt_file  # continue using the generated txt
+    # ensure input either given txt or converted to txt
+    if not analysis_file.endswith(".txt"):
+        print("ERROR: Failed to resolve analysis file to .txt")
+        exit()
 
     if start_time is not None:
         default_start_time = start_time
@@ -1171,14 +1230,6 @@ if __name__ == "__main__":
     # Build graph
     G = nx.DiGraph()
     F = nx.DiGraph()
-    
-    Mac_a0= mac_node("a0",reference_data=addr_data)
-    Mac_n8= mac_node("n8",reference_data=addr_data)
-    #Mac_n6= mac_node("n6",reference_data=addr_data)
-    #Mac_n5= mac_node("n5",reference_data=addr_data)
-    #Mac_n4= mac_node("n4",reference_data=addr_data)
-    Mac_a4= mac_node("a4",reference_data=addr_data)       
-    Mac_n0= mac_node("n0",reference_data=addr_data)
 
     if method_type == 'ogmv2':
         if ogmv2_orig is None or ogmv2_eth_src is None:
@@ -1204,11 +1255,18 @@ if __name__ == "__main__":
                     exit()
                 else:
                     MAC_eth_src_node = mac_node(src,reference_data=addr_data)
-                    tracking_of_OGM2_at_source(addr_data=addr_data, file=analysis_file,start_time=13,OGM2_orig_mac=MAC_orig_node,time_interval=20,eth_src=MAC_eth_src_node)
+                    tracking_of_OGM2_at_source(addr_data=addr_data, 
+                                               file=analysis_file,
+                                               encoding = encoding,
+                                               start_time=13,
+                                               OGM2_orig_mac=MAC_orig_node,
+                                               time_interval=20,
+                                               eth_src=MAC_eth_src_node)
 
     if method_type == 'tcp' or method_type == 'udp':
         G = creation_of_edges_TCP(G=G,
                               file=analysis_file,
+                              encoding = encoding,
                               start_time=default_start_time,
                               stop_time=default_stop_time,
                               stepsize_anime=default_interval,
@@ -1239,16 +1297,17 @@ if __name__ == "__main__":
                 subprocess.run(ffmpeg_cmd, check=True)
 
                 print("Video saved as network.mp4")
+
     if method_type == 'throughput':
         F = all_link_throughput(G=F,
                             file = analysis_file,
+                            encoding = encoding,
                             start_time=default_start_time,
                             stop_time=default_stop_time,
                             stepsize_anime=default_interval,
                             gif=enable_gif,
                             browser_html=enable_browser,
-                            flag_interval=enable_interval_graph,
-                            )
+                            flag_interval=enable_interval_graph)
         if enable_gif is True or exist_gif is True:
 
             frame_files = sorted(glob.glob("throughput_graphs/frame_*.png"))
@@ -1274,5 +1333,4 @@ if __name__ == "__main__":
 
                 print("Video saved as Throughput.mp4")
 
-    # creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
 
