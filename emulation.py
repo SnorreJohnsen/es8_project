@@ -306,18 +306,12 @@ def run_iperf3_client(server_name: str,
                     start_new_session=True,
                     close_fds=True)
 
-def run_iperf3_connection(server_name: str, 
-                          client_name: str,
-                          out_dir: str, 
-                          timestamp: float,
-                          duration: int = 5, 
-                          udp: bool = False, 
-                          bitrate: str = ''):
-    """
-    run iperf3 connection from two device name spaces.
-    """
-    run_iperf3_server(server_name, client_name)
-    run_iperf3_client(server_name, client_name, out_dir, timestamp, duration, udp, bitrate)
+def start_iperf3_servers(node_names: list[str]):
+    for server in node_names:
+        for client in node_names:
+            if client == server:
+                continue
+            run_iperf3_server(server, client)
 
 def find_closest_node(this: dict, others: list[dict]):
     """
@@ -573,14 +567,14 @@ def do_event(e: SchedEventType, graph: dict, simtime: float):
     if verbosity != "quiet":
         print(f"Event {e} run at {datetime.now()}")
     if isinstance(e, IperfEvent):
-        run_iperf3_connection(
+        run_iperf3_client(
                 server_name=e.server_name,
                 client_name=e.client_name,
                 out_dir=iperf3_dir,
+                timestamp=simtime,
                 duration=e.duration,
                 udp=e.udp,
                 bitrate=e.bitrate,
-                timestamp=simtime,
                 )
     elif isinstance(e, DropoutEvent):
         if e.state != State.UP:
@@ -645,6 +639,7 @@ def main():
     parser.add_argument('graph', help='Graph of the full network mesh (json)')
     parser.add_argument('-s', '--sim-sched', required=False, help='Simulation schedule (json)')
     parser.add_argument('-d', '--duration', type=int, required=False, help='Duration for simulation [s]')
+    parser.add_argument('-l', '--link-loss', type=str, required=False, help='Set link loss fx "1%". If not set the link loss from graph is used.')
     parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', help='Set verbosity.')
     args = parser.parse_args()
 
@@ -674,18 +669,24 @@ def main():
         pprint(graph)
 
     # Place device adapters
-    adapter_pos = [(0.0, 0.0, 0.0), 
-                   (3000.0, 3000.0, 3000.0),
-                   (1000.0, 10000.0, 10000.0), 
-                   (12000.0, 5000.0, 1500.0), 
-                   (25000.0, 9000.0, 3000.0)]
+    adapter_pos = [(765.0, 5000.0, 0.0), 
+                   (5510.0, 2260.0, 0.0),
+                   (15000.0, 7739.0, 0.0), 
+                   (24489.0, 7739.0, 0.0), 
+                   (29234.0, 5000.0, 0.0)]
     place_test_adapters(graph, adapter_pos)
     with open(graph_json_path, "w") as f:
         json.dump(graph, f)
 
     # Create network name spaces with links from json graph
     tc_script = os.path.join(repo_root, "emulation_scripts", "tc.sh")
-    link_command = tc_script + " '{action}' '{ifname}' '{loss_percent}' '{phyrate_mbps}'"
+
+    # set link loss 
+    if args.link_loss:
+        link_command = tc_script + f" '{{action}}' '{{ifname}}' '{args.link_loss}' '{{phyrate_mbps}}'"
+    else:
+        link_command = tc_script + " '{action}' '{ifname}' '{loss_percent}' '{phyrate_mbps}'"
+
     mn_network.apply(graph, link_command=link_command)
 
     # Init batman-adv on all nodes and adapters
@@ -748,10 +749,13 @@ def main():
         device_id = adapter_id.replace("a", "d")
         device_ids.append(device_id)
         create_device(device_id, adapter_id)
+    time.sleep(2)
 
     # Add devices and start tcpdump
     for device_id in device_ids:
         start_tcpdump(device_id, "veth0", f"ns-{device_id}", pcap_dir)
+
+    start_iperf3_servers(device_ids)
 
     # Make json files for IP addrs and MAC addrs overview
     get_all_addrs(graph, device_ids)
