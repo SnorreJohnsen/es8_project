@@ -293,7 +293,6 @@ def all_link_throughput(*,
                       browser_html: bool = False,
                       flag_interval: bool = False):
     frame_idx = 0
-    print('\n________________________________ Link Througput ________________________________\n')
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
@@ -302,12 +301,13 @@ def all_link_throughput(*,
             tot_time = float(clean(last_parts[2]))
             # Sanity check for stop time
             if stop_time < start_time:
-                print('WARNING!! stop time is lower than start time')
+                print('\nWARNING!! stop time is lower than start time')
                 return
             if stop_time > tot_time:
-                print('WARNING!! stop time is higher than total capture time')
+                print('\nWARNING!! stop time is higher than total capture time')
                 print(f'Setting stop time equal to total time: {tot_time}')
                 stop_time = tot_time
+            print('\n________________________________ Link Througput ________________________________\n')
 
             anime_time = stepsize_anime
             first_time_tcp_packet = None
@@ -417,7 +417,6 @@ def creation_of_edges_TCP(*,
 
     tcp_streams = {}
     frame_idx = 0
-    print('\n_________________________________ TCP STREAMS __________________________________\n')
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
@@ -426,12 +425,14 @@ def creation_of_edges_TCP(*,
             tot_time = float(clean(last_parts[2]))
             # Sanity check for stop time
             if stop_time < start_time:
-                print('WARNING!! stop time is lower than start time')
+                print('\nWARNING!! stop time is lower than start time')
                 return
             if stop_time > tot_time:
-                print('WARNING!! stop time is higher than total capture time')
+                print('\nWARNING!! stop time is higher than total capture time')
                 print(f'Setting stop time equal to total time: {tot_time}')
                 stop_time = tot_time
+            
+            print('\n_________________________________ TCP & UDP STREAMS _____________________________\n')
 
             anime_time = stepsize_anime
             first_time_tcp_packet = None
@@ -463,42 +464,49 @@ def creation_of_edges_TCP(*,
                     if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
                         continue
                     
-                    # Only make the batadv packet, not the tcp
-                    if 'batadv' in p and 'tcp' in p and n == 0:
-                        if G.has_edge(s, d):
-                            G[s][d]["weight"] += 1
-                            G[s][d]["last_time"] = time
-                        else:
-                            G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
-                            if first_time_tcp_packet == None:
-                                first_time_tcp_packet = time
-                                time_prev = first_time_tcp_packet
-                                packet_prev = int(pkt_num)
-                    if 'batadv' in p and 'tcp' in p and n == 1:
-                        stream = (s, d)
+                    if 'batadv' in p:
+                        if 'tcp' in p or 'udp' in p:   # check that udp is called 'udp' in txt.
+                            if n == 0:
+                                if G.has_edge(s, d):
+                                    G[s][d]["weight"] += 1
+                                    G[s][d]["last_time"] = time
+                                else:
+                                    G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
+                                    if first_time_tcp_packet == None:
+                                        first_time_tcp_packet = time
+                                        time_prev = first_time_tcp_packet
+                                        packet_prev = int(pkt_num)
+                                
+                            if n == 1:
+                                if 'udp' in p:
+                                    stream_type = 'UDP'
+                                if 'tcp' in p:
+                                    stream_type = 'TCP'
+                                stream = (s, d,stream_type)
 
-                        if stream not in tcp_streams:
-                            src_mac_info = find_mac_path(addr_data, s)
-                            dst_mac_info = find_mac_path(addr_data, d)
+                                if stream not in tcp_streams:
+                                    src_mac_info = find_mac_path(addr_data, s)
+                                    dst_mac_info = find_mac_path(addr_data, d)
 
-                            # find "n0" id and type "veth:.."
-                            src_parts = src_mac_info.split("/")
-                            src_node = src_parts[1]
-                            src_mac_type = src_parts[3]
+                                    # find "n0" id and type "veth:.."
+                                    src_parts = src_mac_info.split("/")
+                                    src_node = src_parts[1]
+                                    src_mac_type = src_parts[3]
 
-                            dst_parts = dst_mac_info.split("/")
-                            dst_node = dst_parts[1]
-                            dst_mac_type = dst_parts[3]
+                                    dst_parts = dst_mac_info.split("/")
+                                    dst_node = dst_parts[1]
+                                    dst_mac_type = dst_parts[3]
 
-                            tcp_streams[stream] = {
-                                "src_node": src_node,
-                                "dst_node": dst_node,
-                                "src_mac_type": src_mac_type, 
-                                "dst_mac_type": dst_mac_type, 
-                                "count": 1                              
-                            }
-                        else:
-                            tcp_streams[stream]["count"] += 1
+                                    tcp_streams[stream] = {
+                                        "src_node": src_node,
+                                        "dst_node": dst_node,
+                                        "src_mac_type": src_mac_type, 
+                                        "dst_mac_type": dst_mac_type, 
+                                        "count": 1                           
+                                    }
+                                else:
+                                    tcp_streams[stream]["count"] += 1
+
                 if time > start_time + anime_time or time == tot_time or time >= stop_time:
                     anime_prev = start_time + anime_time
                     anime_time += stepsize_anime
@@ -507,21 +515,20 @@ def creation_of_edges_TCP(*,
                             print(f"Animation captured Up to Time: {time}")
                             if flag_interval is True:
                                 time_last_anime = anime_prev-stepsize_anime
-                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining TCP packet of interval: {time_last_anime} sec - {time} sec ")
+                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining TCP & UDP packet of interval: {time_last_anime} sec - {time} sec ")
                         else:
                             print(f"Animation Time: {anime_prev} | Time is {time}")
-                        os.makedirs("frames", exist_ok=True)
-                        os.makedirs("graphs", exist_ok=True)
+                        os.makedirs("stream_graphs", exist_ok=True)
                         frame_idx += 1
-                        html_file = f"graphs/graph_{float(time):.2f}.html"
-                        png_file = f"frames/frame_{frame_idx:04d}.png"
-                        print(f"TCP streams existing is:")
+                        html_file = f"stream_graphs/graph_{float(time):.2f}.html"
+                        png_file = f"stream_graphs/frame_{frame_idx:04d}.png"
+                        print(f"TCP & UDP streams existing is:")
 
                         # sort after count amount
-                        for (s, d), info in sorted(tcp_streams.items(),
+                        for (s, d,stream_type), info in sorted(tcp_streams.items(),
                            key=lambda item: item[1]['count'],
                            reverse=True):
-                            print(f"Node: Src {info['src_node']} -> Dst {info['dst_node']} | Link Use Count: {info['count']}|||",
+                            print(f"Type: {stream_type} | Node: Src {info['src_node']} -> Dst {info['dst_node']} | Link Use Count: {info['count']}|||",
                                 f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
                         creation_of_pyvis(G=G,
                                           reference_data=addr_data,
@@ -540,6 +547,7 @@ def creation_of_edges_TCP(*,
 
                         if flag_interval is True:
                             G = nx.DiGraph()
+                            tcp_streams = {}
 
                         # only use this conversion not often slower then a snail
                         if gif is True:
@@ -1116,6 +1124,11 @@ if __name__ == "__main__":
     parser.add_argument("-sta","--start_time", type=float, help ="Choose start time for analysis. Default = 0 sec")
     parser.add_argument("-sto","--stop_time", type=float, help ="Choose stop time for analysis. Default = 30 sec")
     parser.add_argument("-i","--interval", type=float, help ="Choose interval size of windows. Default = 5 sec")
+    parser.add_argument("-m","--method", type=str, help ="Choose type of analysis method. throughput, tcp, udp or ogmv2.")
+    parser.add_argument("-ogm_orig","--ogmv2_originator", type=str, help ="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
+    parser.add_argument("-ogm_eth_src","--ogmv2_ethernet_source", type=str, help ="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
+
+
     args = parser.parse_args()
 
     analysis_file = args.input
@@ -1128,6 +1141,11 @@ if __name__ == "__main__":
     start_time = args.start_time
     stop_time = args.stop_time
     interval_time = args.interval
+    method_type = args.method
+    ogmv2_orig = args.ogmv2_originator
+    ogmv2_eth_src = args.ogmv2_ethernet_source
+    method_type = method_type.strip().lower()
+    
     capture = pyshark.FileCapture(analysis_file)
 
     if start_time is not None:
@@ -1153,6 +1171,7 @@ if __name__ == "__main__":
     # Build graph
     G = nx.DiGraph()
     F = nx.DiGraph()
+    
     Mac_a0= mac_node("a0",reference_data=addr_data)
     Mac_n8= mac_node("n8",reference_data=addr_data)
     #Mac_n6= mac_node("n6",reference_data=addr_data)
@@ -1160,21 +1179,35 @@ if __name__ == "__main__":
     #Mac_n4= mac_node("n4",reference_data=addr_data)
     Mac_a4= mac_node("a4",reference_data=addr_data)       
     Mac_n0= mac_node("n0",reference_data=addr_data)
-    
-    # For debug of why we take a shortcut looking at throughput from OGM2
-    tracking_of_OGM2_at_source(addr_data=addr_data, file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n0)
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
 
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n4,node_id="n4")
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n5,node_id="n5")
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n8,node_id="n8")
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a0,time_interval=20,eth_src=Mac_n6,node_id="n6")
+    if method_type == 'ogmv2':
+        if ogmv2_orig is None or ogmv2_eth_src is None:
+            print("\nERROR: Need to provide both ogmv2 originator and ethernet source node/nodes")
+            exit()
+        ogmv2_origs = [orig.strip() for orig in ogmv2_orig.split(',')]
+        ogmv2_eth_srcs = [src.strip() for src in ogmv2_eth_src.split(',')] 
+        # Load layout data (graph.json)
+        with open(json_link_nodes,"r") as f:
+            node_link_data = json.load(f)
+        nodes_pos_data = node_link_data.get("nodes", [])
+        pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
 
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n4,node_id="n4")
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n5,node_id="n5")
-    # tracking_of_OGM2_at_source(file=analysis_file,start_time=13,OGM2_orig_mac=Mac_a4,time_interval=20,eth_src=Mac_n8,node_id="n8")
+        for orig in ogmv2_origs:
+            if orig not in pos_lookup:
+                print(f'\nThe ogmv2 originator {orig} is not a node in the graph.json')
+                exit()
+            else:
+                MAC_orig_node = mac_node(orig,reference_data=addr_data)
+            for src in ogmv2_eth_srcs:
+                if src not in pos_lookup:
+                    print(f'\nThe ethernet source {src} is not a node in the graph.json')
+                    exit()
+                else:
+                    MAC_eth_src_node = mac_node(src,reference_data=addr_data)
+                    tracking_of_OGM2_at_source(addr_data=addr_data, file=analysis_file,start_time=13,OGM2_orig_mac=MAC_orig_node,time_interval=20,eth_src=MAC_eth_src_node)
 
-    G = creation_of_edges_TCP(G=G,
+    if method_type == 'tcp' or method_type == 'udp':
+        G = creation_of_edges_TCP(G=G,
                               file=analysis_file,
                               start_time=default_start_time,
                               stop_time=default_stop_time,
@@ -1182,63 +1215,64 @@ if __name__ == "__main__":
                               gif=enable_gif,
                               browser_html = enable_browser,
                               flag_interval=enable_interval_graph)
-    if enable_gif is True or exist_gif is True:
+        if enable_gif is True or exist_gif is True:
 
-        frame_files = sorted(glob.glob("frames/frame_*.png"))
+            frame_files = sorted(glob.glob("frames/frame_*.png"))
 
-        if not frame_files:
-            print("No frames found. Skipping video creation.")
-        else:
-            print(f"Creating video from {len(frame_files)} frames...")
+            if not frame_files:
+                print("No frames found. Skipping video creation.")
+            else:
+                print(f"Creating video from {len(frame_files)} frames...")
 
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-y",  # overwrite output
-                "-framerate", "0.5",
-                "-i", "frames/frame_%04d.png",
-                "-c:v", "libx264",
-                "-preset", "slow",
-                "-crf", "18",
-                "-pix_fmt", "yuv420p",
-                "network.mp4"
-            ]
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-y",  # overwrite output
+                    "-framerate", "0.5",
+                    "-i", "frames/frame_%04d.png",
+                    "-c:v", "libx264",
+                    "-preset", "slow",
+                    "-crf", "18",
+                    "-pix_fmt", "yuv420p",
+                    "network.mp4"
+                ]
 
-            subprocess.run(ffmpeg_cmd, check=True)
+                subprocess.run(ffmpeg_cmd, check=True)
 
-            print("Video saved as network.mp4")
-    F = all_link_throughput(G=F,
-                           file = analysis_file,
-                           start_time=default_start_time,
-                           stop_time=default_stop_time,
-                           stepsize_anime=default_interval,
-                           gif=enable_gif,
-                           browser_html=enable_browser,
-                           flag_interval=enable_interval_graph,
-                           )
-    if enable_gif is True or exist_gif is True:
+                print("Video saved as network.mp4")
+    if method_type == 'throughput':
+        F = all_link_throughput(G=F,
+                            file = analysis_file,
+                            start_time=default_start_time,
+                            stop_time=default_stop_time,
+                            stepsize_anime=default_interval,
+                            gif=enable_gif,
+                            browser_html=enable_browser,
+                            flag_interval=enable_interval_graph,
+                            )
+        if enable_gif is True or exist_gif is True:
 
-        frame_files = sorted(glob.glob("throughput_graphs/frame_*.png"))
+            frame_files = sorted(glob.glob("throughput_graphs/frame_*.png"))
 
-        if not frame_files:
-            print("No frames found. Skipping video creation.")
-        else:
-            print(f"Creating video from {len(frame_files)} frames...")
+            if not frame_files:
+                print("No frames found. Skipping video creation.")
+            else:
+                print(f"Creating video from {len(frame_files)} frames...")
 
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-y",  # overwrite output
-                "-framerate", "0.5",
-                "-i", "throughput_graphs/frame_%04d.png",
-                "-c:v", "libx264",
-                "-preset", "slow",
-                "-crf", "18",
-                "-pix_fmt", "yuv420p",
-                "Throughput.mp4"
-            ]
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-y",  # overwrite output
+                    "-framerate", "0.5",
+                    "-i", "throughput_graphs/frame_%04d.png",
+                    "-c:v", "libx264",
+                    "-preset", "slow",
+                    "-crf", "18",
+                    "-pix_fmt", "yuv420p",
+                    "Throughput.mp4"
+                ]
 
-            subprocess.run(ffmpeg_cmd, check=True)
+                subprocess.run(ffmpeg_cmd, check=True)
 
-            print("Video saved as Throughput.mp4")
+                print("Video saved as Throughput.mp4")
 
     # creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
 
