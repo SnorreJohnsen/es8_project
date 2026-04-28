@@ -25,8 +25,8 @@ adapter = []
 '''
 Example: of how to create txt file with nessacary measures and order:
 & tshark -r pcap_file
--T fields -e frame.number -e frame.time_epoch -e frame.time_relative -e eth.src -e eth.dst -e eth.type -e frame.protocols -e batadv.batman.packet_type
--e batadv.ogm2.orig -e batadv.ogm2.throughput -e batadv.ogm2.ttl -e frame.len > edges_d0_d4.txt
+-T fields -e frame.number -e frame.time_epoch -e frame.time_relative -e eth.src -e eth.dst -e eth.type -e frame.protocols -e frame.len -e batadv.batman.packet_type 
+-e batadv.ogm2.orig -e batadv.ogm2.throughput -e batadv.ogm2.ttl > edges_d0_d4.txt
 '''
 # maybe add this when need to track unicast -e batadv.unicast.dst -e batadv.unicast.ttl
 
@@ -60,15 +60,41 @@ def natural_key(text):
         for chunk in re.split(r'(\d+)', text)
     ]
 
-def extract_uplink_macs(reference_data):
-    uplink_macs = []
+# def extract_uplink_macs(reference_data):
+#     uplink_macs = []
 
-    for data in reference_data.values():
-        mac_dict = data.get('mac', {})
+#     for data in reference_data.values():
+#         mac_dict = data.get('mac', {})
+
+#         for iface, mac in mac_dict.items():
+#             if 'uplink' in iface:
+#                 uplink_macs.append(mac)
+#             elif 'veth0' in iface:
+#                 uplink_macs.append(mac)
+
+#     return uplink_macs
+
+def extract_used_macs_from_graph(G):
+    used = set()
+
+    for s, d in G.edges():
+        used.add(s)
+        used.add(d)
+
+    return used
+
+def extract_uplink_macs(reference_data):
+    uplink_macs = set()
+
+    for node, data in reference_data.items():
+        mac_dict = data.get("mac", {})
 
         for iface, mac in mac_dict.items():
-            if 'uplink' in iface:
-                uplink_macs.append(mac)
+            if iface == "lo":
+                continue
+
+            if "uplink" in iface:
+                uplink_macs.add(mac)
 
     return uplink_macs
 
@@ -107,12 +133,12 @@ def creation_of_edges_OGM2(*,
                     protocol = clean(parts[6])
 
                     # may need to split at , for bat_type and OGM2_orig_addr as may entail more then one
-                    if len(parts) == 10:
-                        bat_type = clean(parts[7])
+                    if len(parts) == 12:
+                        bat_type = clean(parts[8])
                         bat_types = [b.strip() for b in bat_type.split(",")]
-                        OGM2_orig_addr = clean(parts[8])
+                        OGM2_orig_addr = clean(parts[9])
                         OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
-                        OGM2_tp = clean(parts[9])
+                        OGM2_tp = clean(parts[10])
                         OGM2_tps = [
                                         TP.strip()[:-1] + "." + TP.strip()[-1]
                                         if len(TP.strip()) > 1 else TP.strip()
@@ -135,13 +161,13 @@ def creation_of_edges_OGM2(*,
                     src = clean(parts[3])
                     dst = clean(parts[4])
                     protocol = clean(parts[6])
-                    if len(parts) == 10:
-                        bat_type = clean(parts[7])
-                        OGM2_orig_addr = clean(parts[8])
+                    if len(parts) == 12:
+                        bat_type = clean(parts[8])
+                        OGM2_orig_addr = clean(parts[9])
                         # may need to split at , for bat_type and OGM2_orig_addr as may entail more then one
                         bat_types = [b.strip() for b in bat_type.split(",")]
                         OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
-                        OGM2_tp = clean(parts[9])
+                        OGM2_tp = clean(parts[10])
                         OGM2_tps = [
                                     TP.strip()[:-1] + "." + TP.strip()[-1]
                                     if len(TP.strip()) > 1 else TP.strip()
@@ -214,19 +240,19 @@ def tracking_of_OGM2_at_source(*,
                     protocol = clean(parts[6])
 
                     # may need to split at, for bat_type and OGM2_orig_addr as may entail more then one
-                    if len(parts) == 11:
+                    if len(parts) == 12:
 
-                        bat_type = clean(parts[7])
+                        bat_type = clean(parts[8])
                         bat_types = [b.strip() for b in bat_type.split(",")]
-                        OGM2_orig_addr = clean(parts[8])
+                        OGM2_orig_addr = clean(parts[9])
                         OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
-                        OGM2_tp = clean(parts[9])
+                        OGM2_tp = clean(parts[10])
                         OGM2_tps = [
                                         TP.strip()[:-1] + "." + TP.strip()[-1]
                                         if len(TP.strip()) > 1 else TP.strip()
                                         for TP in OGM2_tp.split(",")
                                     ]
-                        OGM2_ttl = clean(parts[10])
+                        OGM2_ttl = clean(parts[11])
                         OGM2_ttls = [O.strip() for O in OGM2_ttl.split(",")]
                         #print(f"{src=},{OGM2_orig_addrs=}")
                         #print(f"{eth_src=},{OGM2_orig_mac=}")
@@ -257,6 +283,128 @@ def edge_with_type_exists(G, src, dst, order):
     
     return None
 
+def all_link_throughput(*,
+                      G,
+                      file: str,
+                      start_time: int = 0,
+                      stop_time: int,
+                      stepsize_anime: float = 1,
+                      gif: bool = False,
+                      browser_html: bool = False,
+                      flag_interval: bool = False):
+    frame_idx = 0
+    print('\n________________________________ Link Througput ________________________________\n')
+    with open(file, "r", encoding="utf-16", errors="ignore") as f:
+            lines = f.readlines()
+            last_line = lines[-1]
+            last_parts = last_line.strip().split()
+            tot_pkts = clean(last_parts[0])
+            tot_time = float(clean(last_parts[2]))
+            # Sanity check for stop time
+            if stop_time < start_time:
+                print('WARNING!! stop time is lower than start time')
+                return
+            if stop_time > tot_time:
+                print('WARNING!! stop time is higher than total capture time')
+                print(f'Setting stop time equal to total time: {tot_time}')
+                stop_time = tot_time
+
+            anime_time = stepsize_anime
+            first_time_tcp_packet = None
+            first_before_stop = True
+
+            for i, line in enumerate(lines):
+                parts = line.strip().split()
+                time = float(clean(parts[2]))
+                if time < start_time:
+                    continue
+                elif time > stop_time and first_before_stop == True:
+                    first_before_stop = False
+                elif time > stop_time and first_before_stop == False:
+                    break
+
+                # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST
+                pkt_num = clean(parts[0])
+                src = clean(parts[3])
+                dst = clean(parts[4])
+                # All batman type are above 9 len
+                if len(parts) >= 9:
+                    frame_length = clean(parts[7])
+                # arp and such which dont entail batman
+                elif len(parts) == 8:
+                    frame_length = clean(parts[7])
+                else:
+                    print(parts)
+                    exit()      
+                # To ensure we dont capture batman ttl
+                if ',' in frame_length:
+                        print(f'Suppose to be frame length but get result {frame_length}')
+                        exit()
+                        
+
+                srcs = [s.strip() for s in src.split(",")]
+                dsts = [d.strip() for d in dst.split(",")]
+
+
+                for n, (s,d) in enumerate(zip(srcs, dsts)):
+                    if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
+                        # need to do something if broadcast like maybe at to all links that the node have
+                        continue
+                    
+                    # Only make the batadv packet, not the tcp
+                    if G.has_edge(s, d):
+                        G[s][d]["bits"] += int(frame_length)
+                        G[s][d]["last_time"] = time
+                        G[s][d]['count'] += 1
+                    else:
+                        G.add_edge(s, d, bits=int(frame_length), first_time = time,last_time = time, count=1)
+                        if first_time_tcp_packet == None:
+                            first_time_tcp_packet = time
+                            time_prev = first_time_tcp_packet
+                            packet_prev = int(pkt_num)
+                if time > start_time + anime_time or time == tot_time or time >= stop_time:
+                    anime_prev = start_time + anime_time
+                    anime_time += stepsize_anime
+                    if len(G.edges) > 0:
+                        if time == tot_time or time >= stop_time:
+                            print(f"Animation captured Up to Time: {time}")
+                            if flag_interval is True:
+                                time_last_anime = anime_prev-stepsize_anime
+                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining packet of interval: {time_last_anime} sec - {time} sec ")
+                        else:
+                            print(f"Animation Time: {anime_prev} | Time is {time}")
+                        os.makedirs("throughput_graphs", exist_ok=True)
+                        frame_idx += 1
+                        html_file = f"throughput_graphs/graph_{float(time):.2f}.html"
+                        png_file = f"throughput_graphs/frame_{frame_idx:04d}.png"
+                        creation_of_pyvis(G=G,
+                                          reference_data=addr_data,
+                                          json_nodes=json_link_nodes,
+                                          index=time,output_file=html_file,
+                                          browser_html = browser_html,
+                                          current_pkt = pkt_num,
+                                          total_pkts = tot_pkts,
+                                          time = time,
+                                          total_time = tot_time,
+                                          flag_interval=flag_interval,
+                                          time_prev = time_prev,
+                                          packet_prev=packet_prev,
+                                          plot_type='Throughput')
+                        print("_______________________________________________________________________________")
+                        #first_time_tcp_packet = None
+
+                        if flag_interval is True:
+                            first_time_tcp_packet = None
+                            G = nx.DiGraph()
+
+                        # only use this conversion not often slower then a snail
+                        if gif is True:
+                            html_to_png(html_file, png_file)
+                    else:
+                        print(f"At time: {time} No Packet's found, Will go to next Time Step")
+                        print("_______________________________________________________________________________")
+    return G
+
 def creation_of_edges_TCP(*,
                       G,
                       file: str,
@@ -269,6 +417,7 @@ def creation_of_edges_TCP(*,
 
     tcp_streams = {}
     frame_idx = 0
+    print('\n_________________________________ TCP STREAMS __________________________________\n')
     with open(file, "r", encoding="utf-16", errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
@@ -434,15 +583,20 @@ def html_to_png(html_file, output_png):
     finally:
         driver.quit()
 
-def accumulative_injection(min_w: int,
-                           max_w: int,
-                           q1: int,
-                           q3: int,
-                           mid: int,
+def accumulative_injection(color_bar_title: str,
+                           color_bar_data: list,
                            current_pkt,
                            total_pkts,
                            time,
                            total_time):
+    arr = np.array(color_bar_data)
+
+    min_v = np.min(arr)
+    q1 = np.percentile(arr, 25)
+    median = np.percentile(arr, 50)
+    q3 = np.percentile(arr, 75)
+    max_v = np.max(arr)
+
     injection = """
         <script type="text/javascript">
         window.addEventListener("load", function () {
@@ -505,14 +659,14 @@ def accumulative_injection(min_w: int,
         </style>
 
         <div id="heatmap-legend">
-            <b>TCP packets transmitted on link</b>
+            <b>""" + f'{color_bar_title}' + """</b>
             <div id="heatmap-bar"></div>
             <div id="heatmap-labels">
-                <span>""" + f"{min_w}" + """</span>
-                <span>""" + f"{q1}" + """</span>
-                <span>""" + f"{mid}" + """</span>
-                <span>""" + f"{q3}" + """</span>
-                <span>""" + f"{max_w}" + """</span>
+                <span>""" + f"{format_unit(min_v)}" + """</span>
+                <span>""" + f"{format_unit(q1)}" + """</span>
+                <span>""" + f"{format_unit(median)}" + """</span>
+                <span>""" + f"{format_unit(q3)}" + """</span>
+                <span>""" + f"{format_unit(max_v)}" + """</span>
 
             </div>
         </div>
@@ -539,17 +693,24 @@ def accumulative_injection(min_w: int,
         """
     return injection
 
-def window_injection(min_w: int,
-                           max_w: int,
-                           q1: int,
-                           q3: int,
-                           mid: int,
+def window_injection(color_bar_title: str,
+                     color_bar_data: list,
                            current_pkt: int,
                            total_pkts: int,
                            time: float,
                            total_time: float,
                            time_prev: float,
                            packet_prev: int):
+    
+    
+    arr = np.array(color_bar_data)
+
+    min_v = np.min(arr)
+    q1 = np.percentile(arr, 25)
+    median = np.percentile(arr, 50)
+    q3 = np.percentile(arr, 75)
+    max_v = np.max(arr)
+
     injection = """
         <script type="text/javascript">
         window.addEventListener("load", function () {
@@ -612,14 +773,14 @@ def window_injection(min_w: int,
         </style>
 
         <div id="heatmap-legend">
-            <b>TCP packets transmitted on link</b>
+            <b>""" + f'{color_bar_title}' + """</b>
             <div id="heatmap-bar"></div>
             <div id="heatmap-labels">
-                <span>""" + f"{min_w}" + """</span>
-                <span>""" + f"{q1}" + """</span>
-                <span>""" + f"{mid}" + """</span>
-                <span>""" + f"{q3}" + """</span>
-                <span>""" + f"{max_w}" + """</span>
+                <span>""" + f"{format_unit(min_v)}" + """</span>
+                <span>""" + f"{format_unit(q1)}" + """</span>
+                <span>""" + f"{format_unit(median)}" + """</span>
+                <span>""" + f"{format_unit(q3)}" + """</span>
+                <span>""" + f"{format_unit(max_v)}" + """</span>
 
             </div>
         </div>
@@ -658,8 +819,12 @@ def creation_of_pyvis(G,
                       packet_prev: int,
                       output_file="packet_graph.html",
                       browser_html: bool = False,
-                      flag_interval: bool = False
+                      flag_interval: bool = False,
+                      plot_type: str = 'TCP'
                       ):
+    precision_number = 1e-7
+    # ensure still work even with wierd spacing and upper and lower casing wording
+    plot_type = plot_type.strip().lower()
     print(f"Creating Pyvis HTML at time: {time}")
     # Create PyVis network
     net = Network(height="800px", width="100%", directed=True, bgcolor="grey", font_color="black")
@@ -674,8 +839,11 @@ def creation_of_pyvis(G,
     nodes = []     # Add nodes + edges
 
     # 1. Add nodes that exist in G (only include nodes and adapters that have links)
-    nodes_adapters_macs = extract_uplink_macs(reference_data=reference_data)  # ALL MAC addresses
-    for node in nodes_adapters_macs:
+    uplink_macs = extract_uplink_macs(reference_data)
+    used_macs = set(extract_used_macs_from_graph(G))
+    node_macs = used_macs.union(uplink_macs)
+
+    for node in node_macs:
 
         node_info = find_mac_path(reference_data, node)
 
@@ -704,20 +872,51 @@ def creation_of_pyvis(G,
             x = 30000
             y = 15000
         
-        # for nodes that contains links
+        # node styling
+        color = "gray"
         if "a" in node_id:
-            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id}", size=10, color='red',x=x/10,y=y/10,physics=False, font={'size': 300, 'bold': True})
-            nodes.append((node_id, node, addr_type, addr_type_type))
-        
-        # for nodes that dont contain links
+            color = "red"
         elif "n" in node_id:
-            net.add_node(node, label=f"MAC: {node} \n NODE: {node_id}", size=10, color='blue',x=x/10,y=y/10,physics=False, font={'size': 300, 'bold': True})
-            nodes.append((node_id, node, addr_type, addr_type_type))
+            color = "blue"
+        elif "d" in node_id:
+            color = "green" if plot_type == "throughput" else "blue"
+
+        net.add_node(
+            node,
+            label=f"MAC: {node}\nNODE: {node_id}",
+            size=10,
+            color=color,
+            x=x / 10,
+            y=y / 10,
+            physics=False
+        )
+        
+        if "uplink" in addr_type_type:
+            priority = 0
+        elif "veth" in addr_type_type:
+            priority = 1
+        elif "bat0" in addr_type_type:
+            priority = 2
+        elif "unknown" in addr_type_type:
+            priority = 3
+        else:
+            priority = 4
+
+        nodes.append((node_id, node, addr_type, addr_type_type,priority))
+
 
     # natural sort here
-    nodes.sort(key=lambda x: natural_key(x[0]))
+    nodes.sort(key=lambda x: (x[4], natural_key(x[0])))
 
-    for node_id, mac, addr_type, addr_type_type in nodes:
+    current_priority = None
+    for node_id, mac, addr_type, addr_type_type, priority in nodes:
+
+        if priority != current_priority:
+            current_priority = priority
+            clean_iface = addr_type_type.split("@")[0]
+            text = f" PRIORITY {priority} | {clean_iface} "
+            text = text.ljust(80 - 30, "-")
+            print(f"{'-' * 30}{text}")
         net.add_node(
             mac,
             label=f"MAC: {mac}\nNODE: {node_id}\nADDR TYPE: {addr_type} {addr_type_type}"
@@ -726,21 +925,33 @@ def creation_of_pyvis(G,
             print(f"{node_id} -> {mac}")
         else:
             print(f'{node_id} -> {mac} - This node/adapter do not contain any links')
+    # ensure ALL graph nodes exist
+    for node in G.nodes():
+        if node not in net.get_nodes():
+            net.add_node(
+                node,
+                label=f"MAC: {node}",
+                size=8,
+                color="gray",
+                physics=False
+            )
 
     # Add edges with styling
-    weights = [data.get("weight", 1) for _, _, data in G.edges(data=True)]
-    min_w = min(weights)
-    max_w = max(weights)
-    q1 = int(min_w + 0.25 * (max_w - min_w))
-    mid = int(min_w + 0.5 * (max_w - min_w))
-    q3 = int(min_w + 0.75 * (max_w - min_w))
+    values = []
 
+    for _, _, data in G.edges(data=True):
+        if plot_type == 'tcp':
+            v = data.get('weight', 1)
+        elif plot_type == 'throughput':
+            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
+            bits = data.get("bits", 0)
+            v = bits / dt
+        values.append(v)
+
+    min_v = min(values)
+    max_v = max(values)
+    
     for src, dst, data in G.edges(data=True):
-        weight = data.get('weight',1)
-        norm = normalize(w=weight,min_w=min_w,max_w=max_w)
-        color = heatmap_color(norm=norm)
-
-        
         #  check if reverse edge exists
         has_reverse = G.has_edge(dst, src)
 
@@ -753,20 +964,59 @@ def creation_of_pyvis(G,
         else:
             smooth = False
 
+        if plot_type == 'tcp':
+            value = data.get('weight',1)
+            norm = normalize(w=value,min_w=min_v,max_w=max_v)
+            color = heatmap_color(norm=norm)
+            net.add_edge(
+            src,
+            dst,
+            smooth=smooth,
+            title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {data.get('weight')}",        
+            # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
+            color= color,               
+            width=1 + np.log1p(value)  # optional smoother scaling
+        )
+        elif plot_type == "throughput":
+            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
+            bits = data.get("bits", 0)
+            value = bits / dt
+            norm = normalize(w=value,min_w=min_v,max_w=max_v)
+            color = heatmap_color(norm=norm)
 
-        net.add_edge(
-        src,
-        dst,
-        smooth=smooth,
-        title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {weight}",        
-        # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
-        color= color,               
-        width=1 + np.log1p(weight)  # optional smoother scaling
-    )
+            net.add_edge(
+                src,
+                dst,
+                smooth=smooth,
+                title=(
+                    f"First {data.get('first_time')} | "
+                    f"Last {data.get('last_time')} | "
+                    f"message count: {data.get('count')} | "
+                    f"rate: {format_unit(value)}bit/s | "
+                    f"total: {format_unit(bits)}bit"
+                ),
+                color=color,
+                width = 1 + 0.2 * np.log1p(value)   # width between 1 and 5
+            )
 
     # Save and open
     # Save HTML (DO NOT use show)
     net.write_html(output_file)
+    values = []
+    for _, _, data in G.edges(data=True):
+        if plot_type == 'tcp':
+            v = data.get('weight', 1)
+        elif plot_type == 'throughput':
+            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
+            bits = data.get("bits", 0)
+            v = bits / dt
+        values.append(v)
+    
+    color_bar_data = values
+    if plot_type == 'tcp':
+        color_bar_title = 'TCP packets transmitted on link'
+    elif plot_type == 'throughput':
+        color_bar_title = 'Throughput [bits/s] on link'
 
     # Inject auto-fit script
     with open(output_file, "r+", encoding="utf-8") as f:
@@ -774,11 +1024,8 @@ def creation_of_pyvis(G,
        
         # Inset injection
         if flag_interval == True:
-            injection = window_injection(min_w=min_w,
-                                         max_w=max_w,
-                                         q1=q1,
-                                         q3=q3,
-                                         mid=mid,
+            injection = window_injection(color_bar_title=color_bar_title,
+                                         color_bar_data = color_bar_data,
                                          current_pkt=current_pkt,
                                          total_pkts=total_pkts,
                                          time=time,
@@ -786,11 +1033,8 @@ def creation_of_pyvis(G,
                                          time_prev = time_prev,
                                          packet_prev=packet_prev)
         else:
-            injection = accumulative_injection(min_w=min_w,
-                                         max_w=max_w,
-                                         q1=q1,
-                                         q3=q3,
-                                         mid=mid,
+            injection = accumulative_injection(color_bar_title=color_bar_title,
+                                               color_bar_data = color_bar_data,
                                          current_pkt=current_pkt,
                                          total_pkts=total_pkts,
                                          time=time,
@@ -803,6 +1047,17 @@ def creation_of_pyvis(G,
         f.truncate()
     if browser_html is True:
         webbrowser.open("file://" + os.path.abspath(output_file))
+
+def format_unit(value):
+    units = ["", "K", "M", "G", "T"]
+    scale = 1000.0  # use 1024.0 if you prefer binary units
+
+    i = 0
+    while value >= scale and i < len(units) - 1:
+        value /= scale
+        i += 1
+
+    return f"{value:.2f} {units[i]}"
 
 def normalize(w,min_w,max_w):
     if max_w == min_w:
@@ -897,6 +1152,7 @@ if __name__ == "__main__":
     # TPC stream seing how it goes through the netwrok of iperf tcp stream
     # Build graph
     G = nx.DiGraph()
+    F = nx.DiGraph()
     Mac_a0= mac_node("a0",reference_data=addr_data)
     Mac_n8= mac_node("n8",reference_data=addr_data)
     #Mac_n6= mac_node("n6",reference_data=addr_data)
@@ -944,12 +1200,45 @@ if __name__ == "__main__":
                 "-preset", "slow",
                 "-crf", "18",
                 "-pix_fmt", "yuv420p",
-                "network.gif"
+                "network.mp4"
             ]
 
             subprocess.run(ffmpeg_cmd, check=True)
 
             print("Video saved as network.mp4")
+    F = all_link_throughput(G=F,
+                           file = analysis_file,
+                           start_time=default_start_time,
+                           stop_time=default_stop_time,
+                           stepsize_anime=default_interval,
+                           gif=enable_gif,
+                           browser_html=enable_browser,
+                           flag_interval=enable_interval_graph,
+                           )
+    if enable_gif is True or exist_gif is True:
+
+        frame_files = sorted(glob.glob("throughput_graphs/frame_*.png"))
+
+        if not frame_files:
+            print("No frames found. Skipping video creation.")
+        else:
+            print(f"Creating video from {len(frame_files)} frames...")
+
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-y",  # overwrite output
+                "-framerate", "0.5",
+                "-i", "throughput_graphs/frame_%04d.png",
+                "-c:v", "libx264",
+                "-preset", "slow",
+                "-crf", "18",
+                "-pix_fmt", "yuv420p",
+                "Throughput.mp4"
+            ]
+
+            subprocess.run(ffmpeg_cmd, check=True)
+
+            print("Video saved as Throughput.mp4")
 
     # creation_of_pyvis(G=G,reference_data=addr_data,json_nodes=json_link_nodes)
 
