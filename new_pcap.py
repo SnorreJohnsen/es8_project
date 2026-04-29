@@ -294,7 +294,8 @@ def all_link_throughput(*,
                       stepsize_anime: float = 1,
                       gif: bool = False,
                       browser_html: bool = False,
-                      flag_interval: bool = False):
+                      flag_interval: bool = False,
+                      output_dir: str):
     frame_idx = 0
     with open(file, "r", encoding=encoding, errors="ignore") as f:
             lines = f.readlines()
@@ -376,10 +377,10 @@ def all_link_throughput(*,
                                 print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining packet of interval: {time_last_anime} sec - {time} sec ")
                         else:
                             print(f"Animation Time: {anime_prev} | Time is {time}")
-                        os.makedirs("throughput_graphs", exist_ok=True)
+                        os.makedirs(output_dir, exist_ok=True)
                         frame_idx += 1
-                        html_file = f"throughput_graphs/graph_{float(time):.2f}.html"
-                        png_file = f"throughput_graphs/frame_{frame_idx:04d}.png"
+                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
+                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
                         creation_of_pyvis(G=G,
                                           reference_data=addr_data,
                                           json_nodes=json_link_nodes,
@@ -417,7 +418,8 @@ def creation_of_edges_TCP(*,
                       stepsize_anime: float = 1,
                       gif: bool = False,
                       browser_html: bool = False,
-                      flag_interval: bool = False):
+                      flag_interval: bool = False,
+                      output_dir: str):
 
     tcp_streams = {}
     frame_idx = 0
@@ -522,10 +524,10 @@ def creation_of_edges_TCP(*,
                                 print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining TCP & UDP packet of interval: {time_last_anime} sec - {time} sec ")
                         else:
                             print(f"Animation Time: {anime_prev} | Time is {time}")
-                        os.makedirs("stream_graphs", exist_ok=True)
+                        os.makedirs(output_dir, exist_ok=True)
                         frame_idx += 1
-                        html_file = f"stream_graphs/graph_{float(time):.2f}.html"
-                        png_file = f"stream_graphs/frame_{frame_idx:04d}.png"
+                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
+                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
                         print(f"TCP & UDP streams existing is:")
 
                         # sort after count amount
@@ -1150,6 +1152,33 @@ def run_tshark(pcap_file, output_txt):
     with open(output_txt, "w") as f:
         subprocess.run(cmd, stdout=f, check=True)
 
+def mp4_creation(output_dir: str,
+                 file_name: str
+                 ):
+    
+    frame_files = sorted(glob.glob(f"{output_dir}/frame_*.png"))
+
+    if not frame_files:
+        print("No frames found. Skipping video creation.")
+    else:
+        print(f"Creating video from {len(frame_files)} frames...")
+
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",  # overwrite output
+            "-framerate", "0.5",
+            "-i", "throughput_graphs/frame_%04d.png",
+            "-c:v", "libx264",
+            "-preset", "slow",
+            "-crf", "18",
+            "-pix_fmt", "yuv420p",
+            f"{output_dir}/{file_name}.mp4"
+        ]
+
+        subprocess.run(ffmpeg_cmd, check=True)
+
+        print("Video saved as Throughput.mp4")
+
 if __name__ == "__main__":
 
     default_start_time = 0
@@ -1170,6 +1199,7 @@ if __name__ == "__main__":
     parser.add_argument("-m","--method", type=str, help ="Choose type of analysis method. throughput, tcp, udp or ogmv2.")
     parser.add_argument("-ogm_orig","--ogmv2_originator", type=str, help ="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
     parser.add_argument("-ogm_eth_src","--ogmv2_ethernet_source", type=str, help ="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
+    parser.add_argument("-o","--output_dir", type=str, help ="(Optional) Set an output directory.")
 
     args = parser.parse_args()
 
@@ -1186,14 +1216,30 @@ if __name__ == "__main__":
     method_type = args.method
     ogmv2_orig = args.ogmv2_originator
     ogmv2_eth_src = args.ogmv2_ethernet_source
+    output_dir = args.output_dir
     method_type = method_type.strip().lower()
+
+    if output_dir is None:
+        if method_type == 'throughput':
+            output_dir= "throughput_graphs"
+        if method_type == 'tcp' or method_type == 'udp':
+            output_dir = 'stream_graphs'
+    else:
+        if method_type == 'throughput':
+            output_dir = os.path.join(output_dir, "throughput_graphs")
+        if method_type == 'tcp' or method_type == 'udp':
+            output_dir = os.path.join(output_dir, "stream_graphs")
+    os.makedirs(output_dir, exist_ok=True)
     
     # Allow both pcap and txt from analysis file 
     if analysis_file.endswith(".txt"):   
         encoding = "utf-16"
     if analysis_file.endswith(".pcap"):
-        output_dir = os.path.join(os.getcwd(), "tshark_outputs")
-        os.makedirs(output_dir, exist_ok=True)
+        if output_dir is None:
+            output_dir_tshark = os.path.join(os.getcwd(), "tshark_outputs")
+        else:
+            output_dir_tshark = os.path.join(output_dir, "tshark_outputs")    
+        os.makedirs(output_dir_tshark, exist_ok=True)
 
         txt_file = os.path.join(
             output_dir,
@@ -1213,25 +1259,15 @@ if __name__ == "__main__":
         default_stop_time = stop_time
     if interval_time is not None:
         default_interval = interval_time
-    
-    start = 0
-    end = 10000000
 
     with open(addr_file,"r") as f:
         addr_data = json.load(f)
 
-    # checking order of OGM2 messages being transmitted throughout the network
-    # Build graph
-    #G = nx.MultiDiGraph()
-    #Mac_a4= mac_node("a4",reference_data=addr_data)
-    #G = creation_of_edges_OGM2(G=G,file=analysis_file,start_time=20,OGM2_orig_mac=Mac_a4,time_interval=1)
-
     # TPC stream seing how it goes through the netwrok of iperf tcp stream
     # Build graph
     G = nx.DiGraph()
-    F = nx.DiGraph()
 
-    if method_type == 'ogmv2':
+    if method_type == 'ogmv2' or method_type == 'ogm' or method_type == 'ogm2':
         if ogmv2_orig is None or ogmv2_eth_src is None:
             print("\nERROR: Need to provide both ogmv2 originator and ethernet source node/nodes")
             exit()
@@ -1272,34 +1308,14 @@ if __name__ == "__main__":
                               stepsize_anime=default_interval,
                               gif=enable_gif,
                               browser_html = enable_browser,
-                              flag_interval=enable_interval_graph)
+                              flag_interval=enable_interval_graph,
+                              output_dir = output_dir)
+        
         if enable_gif is True or exist_gif is True:
-
-            frame_files = sorted(glob.glob("frames/frame_*.png"))
-
-            if not frame_files:
-                print("No frames found. Skipping video creation.")
-            else:
-                print(f"Creating video from {len(frame_files)} frames...")
-
-                ffmpeg_cmd = [
-                    "ffmpeg",
-                    "-y",  # overwrite output
-                    "-framerate", "0.5",
-                    "-i", "frames/frame_%04d.png",
-                    "-c:v", "libx264",
-                    "-preset", "slow",
-                    "-crf", "18",
-                    "-pix_fmt", "yuv420p",
-                    "network.mp4"
-                ]
-
-                subprocess.run(ffmpeg_cmd, check=True)
-
-                print("Video saved as network.mp4")
+            mp4_creation(output_dir=output_dir, file_name='tcp_and_udp_streams')
 
     if method_type == 'throughput':
-        F = all_link_throughput(G=F,
+        F = all_link_throughput(G=G,
                             file = analysis_file,
                             encoding = encoding,
                             start_time=default_start_time,
@@ -1307,30 +1323,12 @@ if __name__ == "__main__":
                             stepsize_anime=default_interval,
                             gif=enable_gif,
                             browser_html=enable_browser,
-                            flag_interval=enable_interval_graph)
+                            flag_interval=enable_interval_graph,
+                            output_dir=output_dir)
+        
         if enable_gif is True or exist_gif is True:
+            mp4_creation(output_dir=output_dir, file_name='Throughput')
 
-            frame_files = sorted(glob.glob("throughput_graphs/frame_*.png"))
-
-            if not frame_files:
-                print("No frames found. Skipping video creation.")
-            else:
-                print(f"Creating video from {len(frame_files)} frames...")
-
-                ffmpeg_cmd = [
-                    "ffmpeg",
-                    "-y",  # overwrite output
-                    "-framerate", "0.5",
-                    "-i", "throughput_graphs/frame_%04d.png",
-                    "-c:v", "libx264",
-                    "-preset", "slow",
-                    "-crf", "18",
-                    "-pix_fmt", "yuv420p",
-                    "Throughput.mp4"
-                ]
-
-                subprocess.run(ffmpeg_cmd, check=True)
-
-                print("Video saved as Throughput.mp4")
+            
 
 
