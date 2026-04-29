@@ -1,13 +1,11 @@
 import numpy as np
 import os
-from pathlib import Path
 from tqdm import tqdm
 import json
-from mesh_design_lib import (
-                            distance_calc,
-                            lookup_table_halow_module_MM8108,
-                            lookup_table_wifi7_eht_GI0_8_OFDM,
-                            lookup_table_wifi7_eht_GI3_2_OFDMA)
+from mesh_design_lib import (distance_calc,
+                             lookup_table_halow_module_MM8108,
+                             lookup_table_wifi7_eht_GI0_8_OFDM,
+                             lookup_table_wifi7_eht_GI3_2_OFDMA)
 from drone_grids import (drone_sq_grid,
                          drone_triangle_grid)
 from cli_utils import (parse_arguments,
@@ -406,7 +404,6 @@ if __name__ == "__main__":
     test_grid_func = drone_sq_grid
 
     # Directory Root
-    #default_dir = "C:/UNI/8.Semester/Project"
     default_dir = "/home/aau/meshsim/output"
     base_dir = default_dir
     dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
@@ -473,8 +470,7 @@ if __name__ == "__main__":
                 test_grid_func = drone_triangle_grid
                 break
             else:
-                print(f"Warning: NOT A GRID TYPE: {grid}")
-                print()
+                print(f"Warning: NOT A GRID TYPE: {grid}\n")
             
             # Directory Root
             dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
@@ -504,8 +500,7 @@ if __name__ == "__main__":
             if debug_int in (1,2):
                 break
             else:
-                print(f"WARNING: NEED TO SET DEBUG PLOT OFF (1) OR ON (2): NOT {debug_int}")
-                print()
+                print(f"WARNING: NEED TO SET DEBUG PLOT OFF (1) OR ON (2): NOT {debug_int}\n")
 
         if wifi_module == 1:
             dist_comm,use_lookup_table = inputs_define(dir_origin=dir_origin,
@@ -515,7 +510,6 @@ if __name__ == "__main__":
                                                        metadata=metadata,
                                                        freq_Mhz = 6000,
                                                        enable_graph_plots=Enable_debug_plots)
-
 
         elif wifi_module == 2:
             dist_comm,use_lookup_table = inputs_define(dir_origin=dir_origin,
@@ -548,13 +542,11 @@ if __name__ == "__main__":
             for i in range(len(default_dropout_rates)):
                 rate = default_dropout_rates[i]
                 if rate > 1 and rate <= 100:
-                    print()
-                    print(f"WARNING: dropout rate {rate} is not in range 0 to 1")
+                    print(f"\nWARNING: dropout rate {rate} is not in range 0 to 1")
                     default_dropout_rates[i] = rate / 100
                     print(f"EXPECTED: you meant to write {default_dropout_rates[i]}")
                 if rate > 100:
-                    print()
-                    print(f"WARNING: THE RATES ARE SUPPORTED FOR 0.0 to 1.0, {rate} IS NOT WITHIN RANGE")
+                    print(f"\nWARNING: THE RATES ARE SUPPORTED FOR 0.0 to 1.0, {rate} IS NOT WITHIN RANGE")
                     exit()
         if root_path is not None:
             root_path = os.path.expanduser(root_path)
@@ -584,13 +576,11 @@ if __name__ == "__main__":
             test_grid_meta_prefix = "Triangle"
             test_grid_func = drone_triangle_grid
         else:
-            print(f"Warning: NOT A GRID TYPE: {grid}")
-            print()
+            print(f"Warning: NOT A GRID TYPE: {grid}\n")
             exit()
 
         # Directory Root
         dir_origin = os.path.join(base_dir, f"{test_grid_meta_prefix}_mesh_design")
-        #dir_origin = f"./{test_grid_meta_prefix}_mesh_design_out"
 
         if wifi_module == "halow":
             freq_Mhz = 868
@@ -605,7 +595,6 @@ if __name__ == "__main__":
                                                          link_budget_model=link_budget_model,
                                                          transmit_power_dbm=transmit_power_dbm,
                                                          metadata=metadata)
-            
         elif wifi_module == "7":
             freq_Mhz = 6000
             dist_comm,use_lookup_table = argument_define(dir_origin=dir_origin,
@@ -618,22 +607,20 @@ if __name__ == "__main__":
                                                          enable_graph_plots=Enable_debug_plots,
                                                          link_budget_model=link_budget_model,
                                                          transmit_power_dbm=transmit_power_dbm,
-                                                         metadata=metadata)
-            
+                                                         metadata=metadata)   
         else:
             print(f"Warning: NOT AN AVAILABLE WIFI MODULE: {wifi_module}")
             exit()
 
     print(f"The range is calculate to be {dist_comm} [m]")
     if use_lookup_table == True:
-        print()
-        print("Warning: using rounded to reference thresholds from lookup table")
+        print("\nWarning: using rounded to reference thresholds from lookup table")
 
     # Both a device_grid and a device_point can be used in process_drone_mesh
     device_point = np.array([[100,100,device_height]])
     device_grid = make_device_grid(dim=test_dim,
-                                    z_height=device_height,
-                                    sample_resolution=test_samples)
+                                   z_height=device_height,
+                                   sample_resolution=test_samples)
 
     # Process a drone mesh to give metadata and plots
     process_drone_mesh(grid_prefix=test_grid_meta_prefix,
@@ -648,7 +635,6 @@ if __name__ == "__main__":
                        dropout_iters=default_drop_iter,
                        margin_loss_db=margin_loss_db,
                        device_grid=device_grid,
-                       link_budget_model = use_lookup_table,
-                       debug_plots = Enable_debug_plots,
-                       grid_func=test_grid_func
-                    )
+                       link_budget_model=use_lookup_table,
+                       debug_plots=Enable_debug_plots,
+                       grid_func=test_grid_func)
