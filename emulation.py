@@ -636,11 +636,20 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('graph', help='Graph of the full network mesh (json)')
-    parser.add_argument('-s', '--sim-sched', required=False, help='Simulation schedule (json)')
-    parser.add_argument('-d', '--duration', type=int, required=False, help='Duration for simulation [s]')
-    parser.add_argument('-l', '--link-loss', type=str, required=False, help='Set link loss fx "1%". If not set the link loss from graph is used.')
-    parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', help='Set verbosity.')
+    parser.add_argument('graph', 
+                        help='Graph of the full network mesh (json)')
+    parser.add_argument('-s', '--sim-sched', required=False, 
+                        help='Simulation schedule (json)')
+    parser.add_argument('-g', '--gen-sched', required=False, action="store_true",
+                        help='Generate schedule with iperf3 traffic')
+    parser.add_argument('--drop-model', type=float, required=False,
+                        help='Add dropout model schedule with given drop percentage per timestep to schedule.')
+    parser.add_argument('-d', '--duration', type=int, required=False, 
+                        help='Duration for simulation [s]')
+    parser.add_argument('-l', '--link-loss', type=str, required=False, 
+                        help='Set link loss fx "1%%". If not set the link loss from graph is used.')
+    parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', 
+                        help='Set verbosity.')
     args = parser.parse_args()
 
     global verbosity
@@ -700,7 +709,11 @@ def main():
         start_tcpdump(id, f"br-{id}", "switch", pcap_dir)
     time.sleep(0.5)  # allow to launch tcpdumps
     
+
     # Load or generate schedule
+    sched = None
+
+    # load sched
     if args.sim_sched:
         if verbosity != "quiet":
             print(f"Loading simulation schedule from file {args.sim_sched}")
@@ -712,15 +725,24 @@ def main():
             duration = sim_obj.duration
         except:
             raise ValueError(f"Invalid sim schedule file {args.sim_sched}")
-    else:
+
+    # generate sched
+    if args.gen_sched:
         if not args.duration:
             raise ValueError("Cannot generate schedule without arg --duration")
         duration = args.duration
         if verbosity != "quiet":
             print("Generating simulation schedule")
+
+        sched = stub_iperf_sched()
+
+    # add drop model to sched if argument is set
+    if args.drop_model:
+        if sched is None: 
+            raise ValueError("Adding drop model to schedule requires existing schedule")
         # set Dropout model parameters and generate schedule
         dropout_params = DropoutParams(
-                        failure_probability = 0.001,
+                        failure_probability = args.drop_model,
                         replacement_distribution_sampler = lambda : 100*random.random()+50,
                         time_step = 10,
                         fly_up_time = 30,
@@ -730,11 +752,15 @@ def main():
                 )
         dropout_sched = gen_dropout_sched(nodes=drone_ids,
                           t_start_step=50,
-                          t_sim_end=1000,
+                          t_sim_end=args.duration,
                           params=dropout_params)
 
-        iperf_sched = stub_iperf_sched()
-        sched = dropout_sched + iperf_sched
+        sched = dropout_sched + sched
+
+    if sched is None:
+        raise ValueError("Cannot perform simulation without a schedule")
+
+
 
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
