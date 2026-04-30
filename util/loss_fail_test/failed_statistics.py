@@ -45,7 +45,7 @@ def summary_print(stats):
 
         print(line.center(width))
 
-def plot_failed_stats(stats):
+def plot_failed_stats(stats, save_path=None):
     import matplotlib.pyplot as plt
     import numpy as np
 
@@ -84,16 +84,23 @@ def plot_failed_stats(stats):
     plt.legend([legend_text])
 
     plt.tight_layout()
-    plt.show()
+
+    if save_path:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
 
 def main():
     parser = argparse.ArgumentParser(description="Tool to show stats for link loss tests")
-    parser.add_argument('-d', '--directory', 
-                        required=True,
+    parser.add_argument('directory',
                         help='Directory with raw iperf3 json output of form: "directory/{link_loss}/iperf3/raw')
     parser.add_argument('-p', '--plot-show',
                         action="store_true",
                         help='Show graph of failed percentage vs link losses')
+    parser.add_argument('-P', '--plot-save',
+                        required=False,
+                        help='Save graph of failed percentage vs link losses to specified path')
     args = parser.parse_args()
 
     stats = defaultdict(lambda: {"success": 0, "failed": 0})
@@ -110,8 +117,8 @@ def main():
             else:
                 stats[folder_name]["success"] += 1
 
-    if args.plot_show:
-        plot_failed_stats(stats)
+    if args.plot_show or args.plot_save:
+        plot_failed_stats(stats, save_path=args.plot_save)
 
     summary_print(stats)
 
