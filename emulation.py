@@ -712,6 +712,7 @@ def main():
 
     # Load or generate schedule
     sched = None
+    duration = None
 
     # load sched
     if args.sim_sched:
@@ -759,6 +760,8 @@ def main():
 
     if sched is None:
         raise ValueError("Cannot perform simulation without a schedule")
+    if duration is None: 
+        raise ValueError("Cannot perform simulation if duration is not set with --duration or specified in the loaded schedule")
 
 
 
