@@ -3,6 +3,8 @@ import argparse
 from pathlib import Path
 from collections import defaultdict
 
+
+
 def is_iperf3_failed(json_file: Path) -> bool:
     try:
         with open(json_file, "r") as f:
