@@ -104,10 +104,12 @@ if not ok:
 # List of processes for termination end of script
 tcpdump_procs = []
 iperf3_servers = []
+nsperf_servers = []
 
 # Directory paths for outputs
 output_root = os.path.join(sim_root, "output", "emulation")
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
+nsperf_dir = os.path.join(output_root, "nsperf", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
 node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
 graph_json_path = os.path.join(output_root, "graph.json")
@@ -115,21 +117,30 @@ sim_sched_json_path = os.path.join(output_root, "sim_sched.json")
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
+NSPERF_PORT = 50000
 
 # Simulation schedule types
 class IperfEvent(BaseModel):
+    iperf_header: str
     client_name: str
     server_name: str
     bitrate: str # 4M or 3K for example
     udp: bool
     duration: int
 
-SchedEventType = DropoutEvent | IperfEvent # cooked that this is called *Type and the others aren't. maybe none of them are called that...
+class NsperfEvent(BaseModel):
+    nsperf_header: str
+    client_name: str
+    server_name: str
+    bitrate: str # 4M or 3K for example
+    duration: str # 5s
+
+SchedEvent = DropoutEvent | IperfEvent | NsperfEvent
 
 @total_ordering
 class SchedEntry(BaseModel):
     time: float
-    event: SchedEventType
+    event: SchedEvent
 
     def __le__(self, other):
         return self.time <= other.time
@@ -275,14 +286,14 @@ def run_iperf3_client(server_name: str,
     udp: flag for choosing UDP test (default TCP)
     bitrate: max bitrate stream try to achieve (default=none)
     """
-    # extract ip and port from server device
+    # extract ip and port from client device
     client_num = int(client_name.strip("d"))
     server_port = IPERF3_REF_PORT + client_num
 
     server_num = int(server_name.strip("d"))
     server_ip = f"10.200.100.{server_num+10}"
 
-    iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}_{timestamp:.1f}.json")
+    iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}_{timestamp:.0f}.json")
     iperf3_args = ["-c", server_ip, "-p", server_port, "-t", duration, "--json"]
     if udp:
         iperf3_args.append("-u")
@@ -312,6 +323,61 @@ def start_iperf3_servers(node_names: list[str]):
             if client == server:
                 continue
             run_iperf3_server(server, client)
+
+def run_nsperf_client(server_name: str,
+                      client_name: str,
+                      out_dir: str, 
+                      timestamp: float,
+                      duration: str, 
+                      bitrate: str):
+    # extract ip and port from server device
+    server_port = NSPERF_PORT
+    server_ipv4, subnet_bits = ipv4_addr(server_name)
+
+    nsperf_path = os.path.join(out_dir, f"{server_name}_{client_name}_{timestamp:.0f}.send.csv")
+
+    run_id = "run-" + datetime.now().isoformat(timespec="seconds").replace("+00:00", "Z")
+    flow_id = f"{server_name}_{client_name}_{timestamp:.0f}"
+
+    client_cmd = ["ip", "netns", "exec", f"ns-{server_name}", 
+                  "nsperf", "client", "--dst", server_ipv4, "--port", str(server_port), 
+                  "--bitrate", bitrate, "--duration", duration, 
+                  "--run-id", run_id, "--flow-id", flow_id, "--out", nsperf_path]
+
+    if verbosity == "verbose":
+        print(f"run_nsperf_client({server_name=}, {client_name=}, {out_dir=})")
+        print(" ".join(client_cmd))
+
+    subprocess.Popen(client_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    start_new_session=True,
+                    close_fds=True)
+
+def run_nsperf_server(server_name: str, out_dir: str):
+    server_port = NSPERF_PORT
+    server_ipv4, subnet_bits = ipv4_addr(server_name)
+
+    nsperf_path =  os.path.join(out_dir, f"{server_name}.recv.csv")
+    server_cmd = ["ip", "netns", "exec", f"ns-{server_name}", 
+                  "nsperf", "server", "--bind", server_ipv4, "--port", str(server_port), "--out", nsperf_path]
+    server_proc = subprocess.Popen(server_cmd,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+
+    nsperf_servers.append(server_proc)
+
+    if verbosity == "verbose":
+        print(f"run_nsperf_server({server_name=})")
+        print(" ".join(server_cmd))
+
+def start_nsperf_servers(node_names: list[str]):
+    for server in node_names:
+            run_nsperf_server(server, nsperf_dir)
+
+def stop_all_nsperf_servers():
+    sigint_all(nsperf_servers)
 
 def find_closest_node(this: dict, others: list[dict]):
     """
@@ -560,20 +626,30 @@ def stub_iperf_sched():
 
     return events
 
-def do_event(e: SchedEventType, graph: dict, simtime: float):
+def do_event(e: SchedEvent, graph: dict, simtime: float):
     """
     performs either iperf or dropout event from given graph and schedule event type
     """
     if verbosity != "quiet":
         print(f"Event {e} run at {datetime.now()}")
     if isinstance(e, IperfEvent):
+        e_: IperfEvent = e # just to make pyright happy :(
         run_iperf3_client(
                 server_name=e.server_name,
                 client_name=e.client_name,
                 out_dir=iperf3_dir,
                 timestamp=simtime,
-                duration=e.duration,
+                duration=e_.duration,
                 udp=e.udp,
+                bitrate=e.bitrate,
+                )
+    elif isinstance(e, NsperfEvent):
+        run_nsperf_client(
+                server_name=e.server_name,
+                client_name=e.client_name,
+                out_dir=nsperf_dir,
+                timestamp=simtime,
+                duration=e.duration,
                 bitrate=e.bitrate,
                 )
     elif isinstance(e, DropoutEvent):
@@ -660,11 +736,13 @@ def main():
     try:
         shutil.rmtree(pcap_dir)
         shutil.rmtree(iperf3_dir)
+        shutil.rmtree(nsperf_dir)
     except FileNotFoundError as e:
         pass
 
     os.makedirs(exist_ok=False, name=pcap_dir)
     os.makedirs(exist_ok=False, name=iperf3_dir)
+    os.makedirs(exist_ok=False, name=nsperf_dir)
 
     # Load mesh json
     if not os.path.isfile(args.graph):
@@ -723,7 +801,7 @@ def main():
             with open(args.sim_sched, "r") as f:
                 sim_obj = Sim.model_validate(from_json(f.read()))
             sched = sim_obj.sched_plan
-            duration = sim_obj.duration
+            duration = args.duration or sim_obj.duration
         except:
             raise ValueError(f"Invalid sim schedule file {args.sim_sched}")
 
@@ -785,6 +863,7 @@ def main():
         start_tcpdump(device_id, "veth0", f"ns-{device_id}", pcap_dir)
 
     start_iperf3_servers(device_ids)
+    start_nsperf_servers(device_ids)
 
     # Make json files for IP addrs and MAC addrs overview
     get_all_addrs(graph, device_ids)
@@ -806,6 +885,7 @@ def main():
     # input("Press Enter to end emulation")
 
     stop_all_iperf3_servers()
+    stop_all_nsperf_servers()
     stop_all_tcpdump()
     stop_all_terminals()
 
