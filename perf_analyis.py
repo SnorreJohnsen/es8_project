@@ -3,7 +3,9 @@ from pathlib import Path
 import json
 from typing import Tuple, Optional, Dict, Any
 
-WIDTH = 120
+WIDTH = 150
+PLOT_SPACING = 10
+WINDOW_START_END_SPACING = 5
 
 def extract_percentile_data(dict_name: str, file_data: dict, percentile: str) -> dict:
     data = file_data.get(dict_name, {})
@@ -33,7 +35,8 @@ def extract_percentile_data(dict_name: str, file_data: dict, percentile: str) ->
 
 def sorting_data_nsperf(file_data: dict,
                         percentile: str,
-                        interval_step: float = None,) -> Tuple[dict, str]:
+                        max_window: int = None,
+                        interval_step: float = None) -> Tuple[dict, str]:
     # For full NSPERF file, interval not set
 
     flow_id = file_data.get("flow_id")
@@ -62,17 +65,20 @@ def sorting_data_nsperf(file_data: dict,
     else: 
         windows = file_data.get("intervals", {}).get("windows", [])
 
-        for w, window in enumerate(windows[:3]):
+        for w, window in enumerate(windows[:max_window]):
             end_time = window.get("end_s")
             start_time= window.get("start_s")
             # not hundred percent sure this how i want to do it yet can get nested results alot then
             # still also need to load in the rest then aswell this only deliveryy for send window
             delivery = extract_percentile_data(dict_name = "delivery_for_send_window",file_data=window,percentile=percentile)
-
+            send = extract_percentile_data(dict_name = "send_window",file_data=window,percentile=percentile)
+            recieve = extract_percentile_data(dict_name = "receive_window",file_data=window,percentile=percentile)
             results[f"window_{w}"] = {
                                         "start": start_time,
                                         "end": end_time,
-                                        "delivery": delivery
+                                        "delivery": delivery,
+                                        "recieve": recieve,
+                                        "send": send
                                     }
 
     
@@ -117,7 +123,13 @@ def nsperf_interval_set(file: Path) -> Tuple[Optional[dict], dict]:
         data = json.load(f)
 
     intervals = data.get("intervals",{}).get("interval_seconds")
-    return intervals, data
+    windows = data.get("intervals", {}).get("windows", [])
+    end_time = None
+    if windows:
+        last_window = windows[-1]
+        end_time = last_window.get("end_s")
+
+    return intervals, data, end_time
 
 def percentile_refactor(percentile: float) -> str:
     if not (0 <= percentile <= 100):
@@ -201,11 +213,10 @@ def extract_variable_full(data: dict,
         value += float(nsperf_variable[3])
         return value
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
     parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
-    parser.add_argument('-p','--percentile',type=float,required=True,help='What data is of interest for the analysis 0 = mean 50%,95\% 99\% percentile (Json Format IPERF/NSPERF)')
+    parser.add_argument('-p','--percentile',type=float,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
     parser.add_argument('-x','--x_axis',type=str,required=True,help='Variable for X axis')
     parser.add_argument('-y','--y_axis',type=str,required=True,help='Variable for Y axis')
     args = parser.parse_args()
@@ -249,34 +260,49 @@ if __name__ == "__main__":
     path_width= max(len(str(f)) for f in json_files) + 2
 
     for f in json_files:
-        interval_step, json_file_data = nsperf_interval_set(file=f)
+        interval_step, json_file_data, end_time = nsperf_interval_set(file=f)
 
         interval_steps.append(interval_step)
         file_data_list.append(json_file_data)
 
-        print(f"{str(f).ljust(path_width)} | interval: {interval_step}")
+        if end_time is None:
+            print(f"{str(f).ljust(path_width)} | interval: {str(interval_step).ljust(PLOT_SPACING)}")
+        else:
+            print(f"{str(f).ljust(path_width)} | interval: {str(interval_step).ljust(PLOT_SPACING)} | End time {str(end_time).ljust(PLOT_SPACING)}")
+
 
     print("-" * WIDTH)
 
     for i, f in enumerate(json_files):
-        data,ids = sorting_data_nsperf(file_data=file_data_list[i],interval_step=interval_steps[i],percentile=percentile)
-        file_text = f" Extracted data from file \'{f}\' with ID {ids.get("flow_id")} "
-        print(file_text.center(WIDTH, "-"))
-        # if interval_steps[i] is None:
-        #     print(data)
-        # else:
+        data,ids = sorting_data_nsperf(file_data=file_data_list[i],interval_step=interval_steps[i],percentile=percentile,max_window=None)
 
-        # This just for intermediate for seing what is saved
-        for w_key, w_data in data.items():
-            print(w_key)      # e.g. "window_0"
-            print(w_data)     # the inner dict
+        """         This just for intermediate for seing what is saved    """
+        # file_text = f" Extracted data from file \'{f}\' with ID {ids.get("flow_id")} "
+        # print(file_text.center(WIDTH, "-"))
+        # for w_key, w_data in data.items():
+        #     print(w_key)      # e.g. "window_0"
+        #     print(w_data)     # the inner dict
         
         plot_text = f" Plot Creation for file \'{f}\' ID {ids.get("flow_id")} | Axis | X: {axis_names[0]} | Y: {axis_names[1]} "
         print()
         print(plot_text.center(WIDTH, "-"))
-        axis_values = []
-        for axis_nsperf in axis_nsperfs:
-            axis_value = extract_variable_full(data=data, nsperf_variable=axis_nsperf)
-            axis_values.append(axis_value)
 
-        print(f"X value = {axis_values[0]} | Y value = {axis_values[1]}")
+        if interval_steps[i] is None:
+            axis_values = []
+            for axis_nsperf in axis_nsperfs:
+                    axis_value = extract_variable_full(data=data,nsperf_variable=axis_nsperf)
+                    axis_values.append(axis_value)
+            print(f" X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+        else:
+            for w_key, w_data in data.items():
+                axis_values = []
+                w_idx = w_key.split("_")[1]
+                start = w_data.get("start")
+                end = w_data.get("end")
+                window_info = f"Start {start} End {end} s"
+                for axis_nsperf in axis_nsperfs:
+                    axis_value = extract_variable_full(data=w_data,nsperf_variable=axis_nsperf)
+                    axis_values.append(axis_value)
+
+                print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+                
