@@ -30,6 +30,10 @@ Example: of how to create txt file with nessacary measures and order:
 '''
 # maybe add this when need to track unicast -e batadv.unicast.dst -e batadv.unicast.ttl
 
+###############################################################################
+#__________________________ HELPER FUNCTIONS _________________________________#
+###############################################################################
+
 def find_mac_path(obj, target_mac, path=""):
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -60,20 +64,6 @@ def natural_key(text):
         for chunk in re.split(r'(\d+)', text)
     ]
 
-# def extract_uplink_macs(reference_data):
-#     uplink_macs = []
-
-#     for data in reference_data.values():
-#         mac_dict = data.get('mac', {})
-
-#         for iface, mac in mac_dict.items():
-#             if 'uplink' in iface:
-#                 uplink_macs.append(mac)
-#             elif 'veth0' in iface:
-#                 uplink_macs.append(mac)
-
-#     return uplink_macs
-
 def extract_used_macs_from_graph(G):
     used = set()
 
@@ -98,183 +88,6 @@ def extract_uplink_macs(reference_data):
 
     return uplink_macs
 
-def creation_of_edges_OGM2(*,
-                      G,
-                      file: str,
-                      encoding: str,
-                      start_time: int = 0,
-                      OGM2_orig_mac: str,
-                      time_interval: float = 1):
-    
-    '''
-    docstring:
-    G: networksx with need to be nx.MultiDiGraph()
-    file: network stream with format of:
-    frame_number | time | relative time | eth.src | eth.dst | eth.type | frame.protocols | bat_packet_type | bat_ogm2.orig
-    OGM2_orig_mac: Need to uplink from reference data of the desired node
-    time_interval: How long interval to track over, OGM2 interval is 1 sec and therefore default
-    '''
-    
-    with open(file, "r", encoding=encoding, errors="ignore") as f:
-            OGM2_interval = None
-            order = 0
-            for i, line in enumerate(f):
-
-                # get the relative time
-                parts = line.strip().split()
-                time = float(clean(parts[2]))
-
-                # ensure above desired start time
-                if time < start_time:
-                    continue
-                # find first OGM of Orig send from the ORIG addr
-                elif time > start_time and OGM2_interval is None:
-                    src = clean(parts[3])
-                    dst = clean(parts[4])
-                    protocol = clean(parts[6])
-
-                    # may need to split at , for bat_type and OGM2_orig_addr as may entail more then one
-                    if len(parts) == 12:
-                        bat_type = clean(parts[8])
-                        bat_types = [b.strip() for b in bat_type.split(",")]
-                        OGM2_orig_addr = clean(parts[9])
-                        OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
-                        OGM2_tp = clean(parts[10])
-                        OGM2_tps = [
-                                        TP.strip()[:-1] + "." + TP.strip()[-1]
-                                        if len(TP.strip()) > 1 else TP.strip()
-                                        for TP in OGM2_tp.split(",")
-                                    ]
-                        # if find orig OGM2 message at the orig we start timer 
-                        if src == OGM2_orig_mac and OGM2_orig_mac in OGM2_orig_addrs and 'batadv' in protocol and '4' in bat_types:
-                            index = OGM2_orig_addrs.index(OGM2_orig_mac)
-
-                            print(f"OGM2 Original Address {OGM2_orig_mac} Massage found at time {time} with throughput: {OGM2_tps[index]} mbit/s ")
-                            OGM2_interval = time_interval
-                            stop_time = time+OGM2_interval
-                            G.add_edge(src, dst, type=order,TP=OGM2_tps[index], weight=1)
-                        else:
-                            continue
-                    else:
-                        continue
-                # find route of the OGM2 massages
-                elif time < stop_time:
-                    src = clean(parts[3])
-                    dst = clean(parts[4])
-                    protocol = clean(parts[6])
-                    if len(parts) == 12:
-                        bat_type = clean(parts[8])
-                        OGM2_orig_addr = clean(parts[9])
-                        # may need to split at , for bat_type and OGM2_orig_addr as may entail more then one
-                        bat_types = [b.strip() for b in bat_type.split(",")]
-                        OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
-                        OGM2_tp = clean(parts[10])
-                        OGM2_tps = [
-                                    TP.strip()[:-1] + "." + TP.strip()[-1]
-                                    if len(TP.strip()) > 1 else TP.strip()
-                                    for TP in OGM2_tp.split(",")
-                                ]
-                        # found transmition with the OGM2_orig_mac within
-                        if src != OGM2_orig_mac and OGM2_orig_mac in OGM2_orig_addrs and 'batadv' in protocol and '4' in bat_types:
-                            index = OGM2_orig_addrs.index(OGM2_orig_mac)
-                            edge_key = edge_with_type_exists(G, src, dst, order)
-                            if edge_key is not None:
-                                G[src][dst][edge_key]["weight"] += 1
-                            else:
-                                order += 1
-                                G.add_edge(src, dst, type=order,TP=OGM2_tps[index], weight=1)
-                                
-                    else:
-                        continue
-                else:
-                    print(f"the full OGM2 interval: {OGM2_interval} sec is now done, Time is: {time}")
-                    break
-
-    return G
-
-def tracking_of_OGM2_at_source(*,
-                               addr_data: str,
-                               file: str,
-                               encoding: str,
-                               start_time: int = 0,
-                               OGM2_orig_mac: str,
-                               time_interval: float = 1,
-                               eth_src: str = None):
-    
-    '''
-    docstring:
-    G: networksx with need to be nx.MultiDiGraph()
-    file: network stream with format of:
-    frame_number | time | relative time | eth.src | eth.dst | eth.type | frame.protocols | bat_packet_type | bat_ogm2.orig
-    OGM2_orig_mac: Need to uplink from reference data of the desired node
-    time_interval: How long interval to track over, OGM2 interval is 1 sec and therefore default
-    '''
-
-    src_mac_info = find_mac_path(addr_data, eth_src)
-    OGM2_mac_info = find_mac_path(addr_data, OGM2_orig_mac)
-
-    # find "n0" id and type "veth:.."
-    src_parts = src_mac_info.split("/")
-    src_node = src_parts[1]
-
-    # find "n0" id and type "veth:.."
-    OGM2_parts = OGM2_mac_info.split("/")
-    OGM2_node = OGM2_parts[1]
-
-    with open(file, "r", encoding=encoding, errors="ignore") as f:
-            stop_time = start_time + time_interval
-            throughput = None
-            print(f"OGM Original Address at node id: {OGM2_node} with MAC address: {OGM2_orig_mac} | Broadcasted at node id: {src_node} with MAC Adress {eth_src}")
-            print("------------------------------------------------------------------------------------------------------------")
-            for i, line in enumerate(f):
-
-                # get the relative time
-                parts = line.strip().split()
-                time = float(clean(parts[2]))
-
-                # ensure above desired start time
-                if time < start_time:
-                    continue
-                # find first OGM of Orig send from the ORIG addr
-                elif time > start_time and time < stop_time:
-                    src = clean(parts[3])
-                    dst = clean(parts[4])
-                    protocol = clean(parts[6])
-
-                    # may need to split at, for bat_type and OGM2_orig_addr as may entail more then one
-                    if len(parts) == 12:
-
-                        bat_type = clean(parts[8])
-                        bat_types = [b.strip() for b in bat_type.split(",")]
-                        OGM2_orig_addr = clean(parts[9])
-                        OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
-                        OGM2_tp = clean(parts[10])
-                        OGM2_tps = [
-                                        TP.strip()[:-1] + "." + TP.strip()[-1]
-                                        if len(TP.strip()) > 1 else TP.strip()
-                                        for TP in OGM2_tp.split(",")
-                                    ]
-                        OGM2_ttl = clean(parts[11])
-                        OGM2_ttls = [O.strip() for O in OGM2_ttl.split(",")]
-                        #print(f"{src=},{OGM2_orig_addrs=}")
-                        #print(f"{eth_src=},{OGM2_orig_mac=}")
-                        # if find orig OGM2 message at the orig we start timer 
-                        if src == eth_src and OGM2_orig_mac in OGM2_orig_addrs and 'batadv' in protocol and '4' in bat_types:
-                            index = OGM2_orig_addrs.index(OGM2_orig_mac)
-                            # only print when throughput changes
-                            if throughput != OGM2_tps[index]:
-                                throughput = OGM2_tps[index]
-                                ttl = int(OGM2_ttls[index])
-                                print(f"Time is {time:6.2f} | Throughput: {float(OGM2_tps[index]):6.2f} mbit/s | TTL: {ttl} -> Hops: {50 - ttl}")
-                        else:
-                            continue
-                    else:   
-                        continue
-                else:
-                    continue
-    print("_______________________________________________________________________________")
-    return 
-
 def edge_with_type_exists(G, src, dst, order):
     if not G.has_edge(src, dst):
         return None
@@ -285,283 +98,192 @@ def edge_with_type_exists(G, src, dst, order):
     
     return None
 
-def all_link_throughput(*,
-                      G,
-                      file: str,
-                      encoding: str,
-                      start_time: int = 0,
-                      stop_time: int,
-                      stepsize_anime: float = 1,
-                      gif: bool = False,
-                      browser_html: bool = False,
-                      flag_interval: bool = False,
-                      output_dir: str):
-    frame_idx = 0
-    with open(file, "r", encoding=encoding, errors="ignore") as f:
-            lines = f.readlines()
-            last_line = lines[-1]
-            last_parts = last_line.strip().split()
-            tot_pkts = clean(last_parts[0])
-            tot_time = float(clean(last_parts[2]))
-            # Sanity check for stop time
-            if stop_time < start_time:
-                print('\nWARNING!! stop time is lower than start time')
-                return
-            if stop_time > tot_time:
-                print('\nWARNING!! stop time is higher than total capture time')
-                print(f'Setting stop time equal to total time: {tot_time}')
-                stop_time = tot_time
-            print('\n________________________________ Link Througput ________________________________\n')
+def format_unit(value):
+    units = ["", "K", "M", "G", "T"]
+    scale = 1000.0  # use 1024.0 if you prefer binary units
 
-            anime_time = stepsize_anime
-            first_time_tcp_packet = None
-            first_before_stop = True
+    i = 0
+    while value >= scale and i < len(units) - 1:
+        value /= scale
+        i += 1
 
-            for i, line in enumerate(lines):
-                parts = line.strip().split()
-                time = float(clean(parts[2]))
-                if time < start_time:
-                    continue
-                elif time > stop_time and first_before_stop == True:
-                    first_before_stop = False
-                elif time > stop_time and first_before_stop == False:
-                    break
+    return f"{value:.2f} {units[i]}"
 
-                # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST
-                pkt_num = clean(parts[0])
-                src = clean(parts[3])
-                dst = clean(parts[4])
-                # All batman type are above 9 len
-                if len(parts) >= 9:
-                    frame_length = clean(parts[7])
-                # arp and such which dont entail batman
-                elif len(parts) == 8:
-                    frame_length = clean(parts[7])
-                else:
-                    print(parts)
-                    exit()      
-                # To ensure we dont capture batman ttl
-                if ',' in frame_length:
-                        print(f'Suppose to be frame length but get result {frame_length}')
-                        exit()
-                        
+def normalize(w,min_w,max_w):
+    if max_w == min_w:
+        return 0.5
+    return (w - min_w) / (max_w - min_w)
 
-                srcs = [s.strip() for s in src.split(",")]
-                dsts = [d.strip() for d in dst.split(",")]
+def mac_node(node_id: str, reference_data: dict):
+    macs = reference_data[node_id]["mac"]
+    
+    for interface, mac in macs.items():
+        if interface.startswith("uplink"):
+            return mac
+    print(f"No Mac address of uplink found for {node_id} in {reference_data}")
+    return None
 
+def heatmap_color(norm):
+    if norm < 0.25:
+        return f"rgb(0,{int(255 * norm * 4)},255)"         # blue → cyan
+    elif norm < 0.5:
+        return f"rgb(0,255,{int(255 * (1 - (norm - 0.25)*4))})"  # cyan → green
+    elif norm < 0.75:
+        return f"rgb({int(255 * (norm - 0.5)*4)},255,0)"   # green → yellow
+    else:
+        return f"rgb(255,{int(255 * (1 - (norm - 0.75)*4))},0)"  # yellow → red
 
-                for n, (s,d) in enumerate(zip(srcs, dsts)):
-                    if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
-                        # need to do something if broadcast like maybe at to all links that the node have
-                        continue
-                    
-                    # Only make the batadv packet, not the tcp
-                    if G.has_edge(s, d):
-                        G[s][d]["bits"] += int(frame_length)
-                        G[s][d]["last_time"] = time
-                        G[s][d]['count'] += 1
-                    else:
-                        G.add_edge(s, d, bits=int(frame_length), first_time = time,last_time = time, count=1)
-                        if first_time_tcp_packet == None:
-                            first_time_tcp_packet = time
-                            time_prev = first_time_tcp_packet
-                            packet_prev = int(pkt_num)
-                if time > start_time + anime_time or time == tot_time or time >= stop_time:
-                    anime_prev = start_time + anime_time
-                    anime_time += stepsize_anime
-                    if len(G.edges) > 0:
-                        if time == tot_time or time >= stop_time:
-                            print(f"Animation captured Up to Time: {time}")
-                            if flag_interval is True:
-                                time_last_anime = anime_prev-stepsize_anime
-                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining packet of interval: {time_last_anime} sec - {time} sec ")
-                        else:
-                            print(f"Animation Time: {anime_prev} | Time is {time}")
-                        os.makedirs(output_dir, exist_ok=True)
-                        frame_idx += 1
-                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
-                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
-                        creation_of_pyvis(G=G,
-                                          reference_data=addr_data,
-                                          json_nodes=json_link_nodes,
-                                          index=time,output_file=html_file,
-                                          browser_html = browser_html,
-                                          current_pkt = pkt_num,
-                                          total_pkts = tot_pkts,
-                                          time = time,
-                                          total_time = tot_time,
-                                          flag_interval=flag_interval,
-                                          time_prev = time_prev,
-                                          packet_prev=packet_prev,
-                                          plot_type='Throughput')
-                        print("_______________________________________________________________________________")
-                        #first_time_tcp_packet = None
+def draw_graph(G, path):
+    plt.figure(figsize=(6, 6))
 
-                        if flag_interval is True:
-                            first_time_tcp_packet = None
-                            G = nx.DiGraph()
+    pos = nx.spring_layout(G, seed=42)
 
-                        # only use this conversion not often slower then a snail
-                        if gif is True:
-                            html_to_png(html_file, png_file)
-                    else:
-                        print(f"At time: {time} No Packet's found, Will go to next Time Step")
-                        print("_______________________________________________________________________________")
-    return G
+    nx.draw(
+        G,
+        pos,
+        with_labels=True,
+        node_size=500,
+        font_size=10
+    )
 
-def creation_of_edges_TCP(*,
-                      G,
-                      file: str,
-                      encoding: str,
-                      start_time: int = 0,
-                      stop_time: int,
-                      stepsize_anime: float = 1,
-                      gif: bool = False,
-                      browser_html: bool = False,
-                      flag_interval: bool = False,
-                      output_dir: str):
+    plt.savefig(path)
+    plt.close()
 
-    tcp_streams = {}
-    frame_idx = 0
-    with open(file, "r", encoding=encoding, errors="ignore") as f:
-            lines = f.readlines()
-            last_line = lines[-1]
-            last_parts = last_line.strip().split()
-            tot_pkts = clean(last_parts[0])
-            tot_time = float(clean(last_parts[2]))
-            # Sanity check for stop time
-            if stop_time < start_time:
-                print('\nWARNING!! stop time is lower than start time')
-                return
-            if stop_time > tot_time:
-                print('\nWARNING!! stop time is higher than total capture time')
-                print(f'Setting stop time equal to total time: {tot_time}')
-                stop_time = tot_time
-            
-            print('\n_________________________________ TCP & UDP STREAMS _____________________________\n')
+def run_tshark(pcap_file, output_txt):
+    # 1. Find tshark
+    tshark_path = shutil.which("tshark")
 
-            anime_time = stepsize_anime
-            first_time_tcp_packet = None
-            first_before_stop = True
+    if not tshark_path:
+        candidate = r"C:\Program Files\Wireshark\tshark.exe"
+        if os.path.exists(candidate):
+            tshark_path = candidate
 
-            for i, line in enumerate(lines):
-                parts = line.strip().split()
-                time = float(clean(parts[2]))
-                if time < start_time:
-                    continue
-                elif time > stop_time and first_before_stop == True:
-                    first_before_stop = False
-                elif time > stop_time and first_before_stop == False:
-                    break
+    if not tshark_path:
+        raise RuntimeError(
+            "tshark not found. Install Wireshark or add tshark to PATH."
+        )
 
-                # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST TYPE PROTOCOLS BATMAN_TYPE BATMAN_ORIG
-                pkt_num = clean(parts[0])
-                src = clean(parts[3])
-                dst = clean(parts[4])
-                type = clean(parts[5])
-                protocol = clean(parts[6])
+    # 2. Build command
+    cmd = [
+        tshark_path,
+        "-r", pcap_file,
+        "-T", "fields",
+        "-e", "frame.number",
+        "-e", "frame.time_epoch",
+        "-e", "frame.time_relative",
+        "-e", "eth.src",
+        "-e", "eth.dst",
+        "-e", "eth.type",
+        "-e", "frame.protocols",
+        "-e", "frame.len",
+        "-e", "batadv.batman.packet_type",
+        "-e", "batadv.ogm2.orig",
+        "-e", "batadv.ogm2.throughput",
+        "-e", "batadv.ogm2.ttl"
+    ]
 
-                protocols = [p.strip() for p in protocol.split(",")]
-                srcs = [s.strip() for s in src.split(",")]
-                dsts = [d.strip() for d in dst.split(",")]
-                types = [t.strip() for t in type.split(",")]
+    # 3. Run tshark
+    print("CWD:", os.getcwd())
+    print("Writing to:", os.path.abspath(output_txt))
+    with open(output_txt, "w") as f:
+        subprocess.run(cmd, stdout=f, check=True)
 
-                for n, (s, d,t,p) in enumerate(zip(srcs, dsts,types,protocols * len(srcs))):
-                    if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
-                        continue
-                    
-                    if 'batadv' in p:
-                        if 'tcp' in p or 'udp' in p:   # check that udp is called 'udp' in txt.
-                            if n == 0:
-                                if G.has_edge(s, d):
-                                    G[s][d]["weight"] += 1
-                                    G[s][d]["last_time"] = time
-                                else:
-                                    G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
-                                    if first_time_tcp_packet == None:
-                                        first_time_tcp_packet = time
-                                        time_prev = first_time_tcp_packet
-                                        packet_prev = int(pkt_num)
-                                
-                            if n == 1:
-                                if 'udp' in p:
-                                    stream_type = 'UDP'
-                                if 'tcp' in p:
-                                    stream_type = 'TCP'
-                                stream = (s, d,stream_type)
+def mp4_creation(output_dir: str,
+                 file_name: str
+                 ):
+    
+    frame_files = sorted(glob.glob(f"{output_dir}/frame_*.png"))
 
-                                if stream not in tcp_streams:
-                                    src_mac_info = find_mac_path(addr_data, s)
-                                    dst_mac_info = find_mac_path(addr_data, d)
+    if not frame_files:
+        print("No frames found. Skipping video creation.")
+    else:
+        print(f"Creating video from {len(frame_files)} frames...")
 
-                                    # find "n0" id and type "veth:.."
-                                    src_parts = src_mac_info.split("/")
-                                    src_node = src_parts[1]
-                                    src_mac_type = src_parts[3]
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",  # overwrite output
+            "-framerate", "0.5",
+            "-i", "throughput_graphs/frame_%04d.png",
+            "-c:v", "libx264",
+            "-preset", "slow",
+            "-crf", "18",
+            "-pix_fmt", "yuv420p",
+            f"{output_dir}/{file_name}.mp4"
+        ]
 
-                                    dst_parts = dst_mac_info.split("/")
-                                    dst_node = dst_parts[1]
-                                    dst_mac_type = dst_parts[3]
+        subprocess.run(ffmpeg_cmd, check=True)
 
-                                    tcp_streams[stream] = {
-                                        "src_node": src_node,
-                                        "dst_node": dst_node,
-                                        "src_mac_type": src_mac_type, 
-                                        "dst_mac_type": dst_mac_type, 
-                                        "count": 1                           
-                                    }
-                                else:
-                                    tcp_streams[stream]["count"] += 1
+        print("Video saved as Throughput.mp4")
 
-                if time > start_time + anime_time or time == tot_time or time >= stop_time:
-                    anime_prev = start_time + anime_time
-                    anime_time += stepsize_anime
-                    if len(G.edges) > 0:
-                        if time == tot_time or time >= stop_time:
-                            print(f"Animation captured Up to Time: {time}")
-                            if flag_interval is True:
-                                time_last_anime = anime_prev-stepsize_anime
-                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining TCP & UDP packet of interval: {time_last_anime} sec - {time} sec ")
-                        else:
-                            print(f"Animation Time: {anime_prev} | Time is {time}")
-                        os.makedirs(output_dir, exist_ok=True)
-                        frame_idx += 1
-                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
-                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
-                        print(f"TCP & UDP streams existing is:")
+def get_state_changes(sim_file: str):
 
-                        # sort after count amount
-                        for (s, d,stream_type), info in sorted(tcp_streams.items(),
-                           key=lambda item: item[1]['count'],
-                           reverse=True):
-                            print(f"Type: {stream_type} | Node: Src {info['src_node']} -> Dst {info['dst_node']} | Link Use Count: {info['count']}|||",
-                                f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
-                        creation_of_pyvis(G=G,
-                                          reference_data=addr_data,
-                                          json_nodes=json_link_nodes,
-                                          index=time,output_file=html_file,
-                                          browser_html = browser_html,
-                                          current_pkt = pkt_num,
-                                          total_pkts = tot_pkts,
-                                          time = time,
-                                          total_time = tot_time,
-                                          flag_interval=flag_interval,
-                                          time_prev = time_prev,
-                                          packet_prev=packet_prev)
-                        print("_______________________________________________________________________________")
-                        first_time_tcp_packet = None
+    states = {}
 
-                        if flag_interval is True:
-                            G = nx.DiGraph()
-                            tcp_streams = {}
+    with open(sim_file) as f:
+        data = json.load(f)
 
-                        # only use this conversion not often slower then a snail
-                        if gif is True:
-                            html_to_png(html_file, png_file)
-                    else:
-                        print(f"At time: {time} No TCP Packet's found, Will go to next Time Step")
-                        print("_______________________________________________________________________________")
-    return G
+    for item in data['sched_plan']:   # Should maybe be changed to sched_real
+        event = item['event']
+
+        if 'state' in event:
+            name = event['name']
+            time = item['time']
+            state = event['state']
+
+            if name not in states:
+                states[name] = []
+
+            states[name].append((time, state))
+
+    return states
+
+def setting_node_attributes(node_mac,
+                            node_id,
+                            node_states: dict,
+                            last_rendered_time: float,
+                            time: float,
+                            flag_interval: bool,
+                            plot_type: str):
+    
+    # Setting label and shape for different states
+    label = f"MAC: {node_mac}\nNODE: {node_id}"
+    shape = "dot"
+    current_state = None
+
+    if node_id in node_states:
+
+        # Find current state at time
+        for t, state in node_states[node_id]:
+            if t <= time:
+                current_state = state
+            else:
+                break
+
+        # Find event in current interval
+        for t, state in node_states[node_id]:
+            if last_rendered_time < t <= time:
+                label += f"\nSTATE CHANGE: {state} at {t:.2f}s"
+
+        # Set shape based on current state
+        if current_state == "DOWN":
+            shape = "triangle" if flag_interval else "square"
+        else:
+            shape = "dot"
+
+    # Node coloring
+    color = "gray"
+    if "a" in node_id:
+        color = "red"
+    elif "n" in node_id:
+        color = "blue"
+    elif "d" in node_id:
+        color = "green" if plot_type == "throughput" else "blue"
+    
+    return label, shape, color
+
+###############################################################################
+#_______________________________ HTML FUNCTIONS ______________________________#
+###############################################################################
 
 def html_to_png(html_file, output_png):
     assert os.path.exists(html_file), html_file
@@ -815,11 +537,483 @@ def window_injection(color_bar_title: str,
         </style>
 
         <div id="packet-info">
-            <div>Packet interval <b>""" + f"{packet_prev}" + """ - """ + f'{current_pkt}' + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
+            <div>Packet interval <b>""" + f"{packet_prev}" + """ - """ + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
             <div>Time of interval <b>""" + f"{time_prev:.2f}" + """ - """ + f"{time:.2f}"  + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+            <div>UP/DOWN  snapshot at <b>""" + f"{time:.2f}" """</b></div>
         </div>
         """
     return injection
+
+###############################################################################
+#__________________________ EXECUTION FUNCTIONS ______________________________#
+###############################################################################
+
+def creation_of_edges_OGM2(*,
+                      G,
+                      file: str,
+                      encoding: str,
+                      start_time: int = 0,
+                      OGM2_orig_mac: str,
+                      time_interval: float = 1):
+    
+    '''
+    docstring:
+    G: networksx with need to be nx.MultiDiGraph()
+    file: network stream with format of:
+    frame_number | time | relative time | eth.src | eth.dst | eth.type | frame.protocols | bat_packet_type | bat_ogm2.orig
+    OGM2_orig_mac: Need to uplink from reference data of the desired node
+    time_interval: How long interval to track over, OGM2 interval is 1 sec and therefore default
+    '''
+    
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
+            OGM2_interval = None
+            order = 0
+            for i, line in enumerate(f):
+
+                # get the relative time
+                parts = line.strip().split()
+                time = float(clean(parts[2]))
+
+                # ensure above desired start time
+                if time < start_time:
+                    continue
+                # find first OGM of Orig send from the ORIG addr
+                elif time > start_time and OGM2_interval is None:
+                    src = clean(parts[3])
+                    dst = clean(parts[4])
+                    protocol = clean(parts[6])
+
+                    # may need to split at, for bat_type and OGM2_orig_addr as may entail more then one
+                    if len(parts) == 12:
+                        bat_type = clean(parts[8])
+                        bat_types = [b.strip() for b in bat_type.split(",")]
+                        OGM2_orig_addr = clean(parts[9])
+                        OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
+                        OGM2_tp = clean(parts[10])
+                        OGM2_tps = [
+                                        TP.strip()[:-1] + "." + TP.strip()[-1]
+                                        if len(TP.strip()) > 1 else TP.strip()
+                                        for TP in OGM2_tp.split(",")
+                                    ]
+                        # if find orig OGM2 message at the orig we start timer 
+                        if src == OGM2_orig_mac and OGM2_orig_mac in OGM2_orig_addrs and 'batadv' in protocol and '4' in bat_types:
+                            index = OGM2_orig_addrs.index(OGM2_orig_mac)
+
+                            print(f"OGM2 Original Address {OGM2_orig_mac} Massage found at time {time} with throughput: {OGM2_tps[index]} mbit/s ")
+                            OGM2_interval = time_interval
+                            stop_time = time+OGM2_interval
+                            G.add_edge(src, dst, type=order,TP=OGM2_tps[index], weight=1)
+                        else:
+                            continue
+                    else:
+                        continue
+                # find route of the OGM2 massages
+                elif time < stop_time:
+                    src = clean(parts[3])
+                    dst = clean(parts[4])
+                    protocol = clean(parts[6])
+                    if len(parts) == 12:
+                        bat_type = clean(parts[8])
+                        OGM2_orig_addr = clean(parts[9])
+                        # may need to split at, for bat_type and OGM2_orig_addr as may entail more then one
+                        bat_types = [b.strip() for b in bat_type.split(",")]
+                        OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
+                        OGM2_tp = clean(parts[10])
+                        OGM2_tps = [
+                                    TP.strip()[:-1] + "." + TP.strip()[-1]
+                                    if len(TP.strip()) > 1 else TP.strip()
+                                    for TP in OGM2_tp.split(",")
+                                ]
+                        # found transmition with the OGM2_orig_mac within
+                        if src != OGM2_orig_mac and OGM2_orig_mac in OGM2_orig_addrs and 'batadv' in protocol and '4' in bat_types:
+                            index = OGM2_orig_addrs.index(OGM2_orig_mac)
+                            edge_key = edge_with_type_exists(G, src, dst, order)
+                            if edge_key is not None:
+                                G[src][dst][edge_key]["weight"] += 1
+                            else:
+                                order += 1
+                                G.add_edge(src, dst, type=order,TP=OGM2_tps[index], weight=1)
+                                
+                    else:
+                        continue
+                else:
+                    print(f"the full OGM2 interval: {OGM2_interval} sec is now done, Time is: {time}")
+                    break
+
+    return G
+
+def tracking_of_OGM2_at_source(*,
+                               addr_data: str,
+                               file: str,
+                               encoding: str,
+                               start_time: int = 0,
+                               OGM2_orig_mac: str,
+                               time_interval: float = 1,
+                               eth_src: str = None):
+    
+    '''
+    docstring:
+    G: networksx with need to be nx.MultiDiGraph()
+    file: network stream with format of:
+    frame_number | time | relative time | eth.src | eth.dst | eth.type | frame.protocols | bat_packet_type | bat_ogm2.orig
+    OGM2_orig_mac: Need to uplink from reference data of the desired node
+    time_interval: How long interval to track over, OGM2 interval is 1 sec and therefore default
+    '''
+
+    src_mac_info = find_mac_path(addr_data, eth_src)
+    OGM2_mac_info = find_mac_path(addr_data, OGM2_orig_mac)
+
+    # find "n0" id and type "veth:.."
+    src_parts = src_mac_info.split("/")
+    src_node = src_parts[1]
+
+    # find "n0" id and type "veth:.."
+    OGM2_parts = OGM2_mac_info.split("/")
+    OGM2_node = OGM2_parts[1]
+
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
+            stop_time = start_time + time_interval
+            throughput = None
+            print(f"OGM Original Address at node id: {OGM2_node} with MAC address: {OGM2_orig_mac} | Broadcasted at node id: {src_node} with MAC Adress {eth_src}")
+            print("------------------------------------------------------------------------------------------------------------")
+            for i, line in enumerate(f):
+
+                # get the relative time
+                parts = line.strip().split()
+                time = float(clean(parts[2]))
+
+                # ensure above desired start time
+                if time < start_time:
+                    continue
+                # find first OGM of Orig send from the ORIG addr
+                elif time > start_time and time < stop_time:
+                    src = clean(parts[3])
+                    dst = clean(parts[4])
+                    protocol = clean(parts[6])
+
+                    # may need to split at, for bat_type and OGM2_orig_addr as may entail more then one
+                    if len(parts) == 12:
+
+                        bat_type = clean(parts[8])
+                        bat_types = [b.strip() for b in bat_type.split(",")]
+                        OGM2_orig_addr = clean(parts[9])
+                        OGM2_orig_addrs = [O.strip() for O in OGM2_orig_addr.split(",")]
+                        OGM2_tp = clean(parts[10])
+                        OGM2_tps = [
+                                        TP.strip()[:-1] + "." + TP.strip()[-1]
+                                        if len(TP.strip()) > 1 else TP.strip()
+                                        for TP in OGM2_tp.split(",")
+                                    ]
+                        OGM2_ttl = clean(parts[11])
+                        OGM2_ttls = [O.strip() for O in OGM2_ttl.split(",")]
+                        #print(f"{src=},{OGM2_orig_addrs=}")
+                        #print(f"{eth_src=},{OGM2_orig_mac=}")
+                        # if find orig OGM2 message at the orig we start timer 
+                        if src == eth_src and OGM2_orig_mac in OGM2_orig_addrs and 'batadv' in protocol and '4' in bat_types:
+                            index = OGM2_orig_addrs.index(OGM2_orig_mac)
+                            # only print when throughput changes
+                            if throughput != OGM2_tps[index]:
+                                throughput = OGM2_tps[index]
+                                ttl = int(OGM2_ttls[index])
+                                print(f"Time is {time:6.2f} | Throughput: {float(OGM2_tps[index]):6.2f} mbit/s | TTL: {ttl} -> Hops: {50 - ttl}")
+                        else:
+                            continue
+                    else:   
+                        continue
+                else:
+                    continue
+    print("_______________________________________________________________________________")
+    return 
+
+def all_link_throughput(*,
+                      G,
+                      file: str,
+                      encoding: str,
+                      start_time: int = 0,
+                      stop_time: int,
+                      stepsize_anime: float = 1,
+                      gif: bool = False,
+                      browser_html: bool = False,
+                      flag_interval: bool = False,
+                      output_dir: str,
+                      states: tuple = None):
+    
+    last_rendered_time = start_time
+    frame_idx = 0
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
+            lines = f.readlines()
+            last_line = lines[-1]
+            last_parts = last_line.strip().split()
+            tot_pkts = clean(last_parts[0])
+            tot_time = float(clean(last_parts[2]))
+            # Sanity check for stop time
+            if stop_time < start_time:
+                print('\nWARNING!! stop time is lower than start time')
+                return
+            if stop_time > tot_time:
+                print('\nWARNING!! stop time is higher than total capture time')
+                print(f'Setting stop time equal to total time: {tot_time}')
+                stop_time = tot_time
+            print('\n________________________________ Link Througput ________________________________\n')
+
+            anime_time = stepsize_anime
+            first_time_tcp_packet = None
+            first_before_stop = True
+
+            for i, line in enumerate(lines):
+                parts = line.strip().split()
+                time = float(clean(parts[2]))
+                if time < start_time:
+                    continue
+                elif time > stop_time and first_before_stop == True:
+                    first_before_stop = False
+                elif time > stop_time and first_before_stop == False:
+                    break
+
+                # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST
+                pkt_num = clean(parts[0])
+                src = clean(parts[3])
+                dst = clean(parts[4])
+                # All batman type are above 9 len
+                if len(parts) >= 9:
+                    frame_length = clean(parts[7])
+                # arp and such which dont entail batman
+                elif len(parts) == 8:
+                    frame_length = clean(parts[7])
+                else:
+                    print(parts)
+                    exit()      
+                # To ensure we dont capture batman ttl
+                if ',' in frame_length:
+                        print(f'Suppose to be frame length but get result {frame_length}')
+                        exit()
+                        
+
+                srcs = [s.strip() for s in src.split(",")]
+                dsts = [d.strip() for d in dst.split(",")]
+
+
+                for n, (s,d) in enumerate(zip(srcs, dsts)):
+                    if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
+                        # need to do something if broadcast like maybe at to all links that the node have
+                        continue
+                    
+                    # Only make the batadv packet, not the tcp
+                    if G.has_edge(s, d):
+                        G[s][d]["bits"] += int(frame_length)
+                        G[s][d]["last_time"] = time
+                        G[s][d]['count'] += 1
+                    else:
+                        G.add_edge(s, d, bits=int(frame_length), first_time = time,last_time = time, count=1)
+                        if first_time_tcp_packet == None:
+                            first_time_tcp_packet = time
+                            time_prev = first_time_tcp_packet
+                            packet_prev = int(pkt_num)
+
+                if time > start_time + anime_time or time == tot_time or time >= stop_time:
+                    anime_prev = start_time + anime_time
+                    anime_time += stepsize_anime
+                    if len(G.edges) > 0:
+                        if time == tot_time or time >= stop_time:
+                            print(f"Animation captured Up to Time: {time}")
+                            if flag_interval is True:
+                                time_last_anime = anime_prev-stepsize_anime
+                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining packet of interval: {time_last_anime} sec - {time} sec ")
+                        else:
+                            print(f"Animation Time: {anime_prev} | Time is {time}")
+                        os.makedirs(output_dir, exist_ok=True)
+                        frame_idx += 1
+                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
+                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
+                        creation_of_pyvis(G=G,
+                                          reference_data=addr_data,
+                                          json_nodes=json_link_nodes,
+                                          index=time,output_file=html_file,
+                                          browser_html = browser_html,
+                                          current_pkt = pkt_num,
+                                          total_pkts = tot_pkts,
+                                          time = time,
+                                          total_time = tot_time,
+                                          flag_interval=flag_interval,
+                                          time_prev = time_prev,
+                                          last_rendered_time=last_rendered_time,
+                                          packet_prev=packet_prev,
+                                          states=states,
+                                          plot_type='Throughput')
+                        print("_______________________________________________________________________________")
+                        #first_time_tcp_packet = None
+                        last_rendered_time = time
+
+                        if flag_interval is True:
+                            first_time_tcp_packet = None
+                            G = nx.DiGraph()
+
+                        # only use this conversion not often slower then a snail
+                        if gif is True:
+                            html_to_png(html_file, png_file)
+                    else:
+                        print(f"At time: {time} No Packet's found, Will go to next Time Step")
+                        print("_______________________________________________________________________________")
+    return G
+
+def creation_of_edges_TCP(*,
+                      G,
+                      file: str,
+                      encoding: str,
+                      start_time: int = 0,
+                      stop_time: int,
+                      stepsize_anime: float = 1,
+                      gif: bool = False,
+                      browser_html: bool = False,
+                      flag_interval: bool = False,
+                      output_dir: str,
+                      states=None):
+    
+    last_rendered_time = start_time
+    tcp_streams = {}
+    frame_idx = 0
+    with open(file, "r", encoding=encoding, errors="ignore") as f:
+            lines = f.readlines()
+            last_line = lines[-1]
+            last_parts = last_line.strip().split()
+            tot_pkts = clean(last_parts[0])
+            tot_time = float(clean(last_parts[2]))
+            # Sanity check for stop time
+            if stop_time < start_time:
+                print('\nWARNING!! stop time is lower than start time')
+                return
+            if stop_time > tot_time:
+                print('\nWARNING!! stop time is higher than total capture time')
+                print(f'Setting stop time equal to total time: {tot_time}')
+                stop_time = tot_time
+            
+            print('\n_________________________________ TCP & UDP STREAMS _____________________________\n')
+
+            anime_time = stepsize_anime
+            first_time_tcp_packet = None
+            first_before_stop = True
+
+            for i, line in enumerate(lines):
+                parts = line.strip().split()
+                time = float(clean(parts[2]))
+                if time < start_time:
+                    continue
+                elif time > stop_time and first_before_stop == True:
+                    first_before_stop = False
+                elif time > stop_time and first_before_stop == False:
+                    break
+
+                # FRAME_NR EPOCH_TIME RELATIVE_TIME SRC DST TYPE PROTOCOLS BATMAN_TYPE BATMAN_ORIG
+                pkt_num = clean(parts[0])
+                src = clean(parts[3])
+                dst = clean(parts[4])
+                type = clean(parts[5])
+                protocol = clean(parts[6])
+
+                protocols = [p.strip() for p in protocol.split(",")]
+                srcs = [s.strip() for s in src.split(",")]
+                dsts = [d.strip() for d in dst.split(",")]
+                types = [t.strip() for t in type.split(",")]
+
+                for n, (s, d,t,p) in enumerate(zip(srcs, dsts,types,protocols * len(srcs))):
+                    if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
+                        continue
+                    
+                    if 'batadv' in p:
+                        if 'tcp' in p or 'udp' in p:   # check that udp is called 'udp' in txt.
+                            if n == 0:
+                                if G.has_edge(s, d):
+                                    G[s][d]["weight"] += 1
+                                    G[s][d]["last_time"] = time
+                                else:
+                                    G.add_edge(s, d, type=t, weight=1, first_time = time,last_time = time)
+                                    if first_time_tcp_packet == None:
+                                        first_time_tcp_packet = time
+                                        time_prev = first_time_tcp_packet
+                                        packet_prev = int(pkt_num)
+                                
+                            if n == 1:
+                                if 'udp' in p:
+                                    stream_type = 'UDP'
+                                if 'tcp' in p:
+                                    stream_type = 'TCP'
+                                stream = (s, d,stream_type)
+
+                                if stream not in tcp_streams:
+                                    src_mac_info = find_mac_path(addr_data, s)
+                                    dst_mac_info = find_mac_path(addr_data, d)
+
+                                    # find "n0" id and type "veth:.."
+                                    src_parts = src_mac_info.split("/")
+                                    src_node = src_parts[1]
+                                    src_mac_type = src_parts[3]
+
+                                    dst_parts = dst_mac_info.split("/")
+                                    dst_node = dst_parts[1]
+                                    dst_mac_type = dst_parts[3]
+
+                                    tcp_streams[stream] = {
+                                        "src_node": src_node,
+                                        "dst_node": dst_node,
+                                        "src_mac_type": src_mac_type, 
+                                        "dst_mac_type": dst_mac_type, 
+                                        "count": 1                           
+                                    }
+                                else:
+                                    tcp_streams[stream]["count"] += 1
+
+                if time > start_time + anime_time or time == tot_time or time >= stop_time:
+                    anime_prev = start_time + anime_time
+                    anime_time += stepsize_anime
+                    if len(G.edges) > 0:
+                        if time == tot_time or time >= stop_time:
+                            print(f"Animation captured Up to Time: {time}")
+                            if flag_interval is True:
+                                time_last_anime = anime_prev-stepsize_anime
+                                print(f"Shows last {time-time_last_anime:.2f} secs | Being the remaining TCP & UDP packet of interval: {time_last_anime} sec - {time} sec ")
+                        else:
+                            print(f"Animation Time: {anime_prev} | Time is {time}")
+                        os.makedirs(output_dir, exist_ok=True)
+                        frame_idx += 1
+                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
+                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
+                        print(f"TCP & UDP streams existing is:")
+
+                        # sort after count amount
+                        for (s, d,stream_type), info in sorted(tcp_streams.items(),
+                           key=lambda item: item[1]['count'],
+                           reverse=True):
+                            print(f"Type: {stream_type} | Node: Src {info['src_node']} -> Dst {info['dst_node']} | Link Use Count: {info['count']}|||",
+                                f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
+                        creation_of_pyvis(G=G,
+                                          reference_data=addr_data,
+                                          json_nodes=json_link_nodes,
+                                          index=time,output_file=html_file,
+                                          browser_html = browser_html,
+                                          current_pkt = pkt_num,
+                                          total_pkts = tot_pkts,
+                                          time = time,
+                                          total_time = tot_time,
+                                          flag_interval=flag_interval,
+                                          time_prev = time_prev,
+                                          last_rendered_time=last_rendered_time,
+                                          packet_prev=packet_prev,
+                                          states=states)
+                        print("_______________________________________________________________________________")
+                        first_time_tcp_packet = None
+                        last_rendered_time = time
+
+                        if flag_interval is True:
+                            G = nx.DiGraph()
+                            tcp_streams = {}
+
+                        # only use this conversion not often slower then a snail
+                        if gif is True:
+                            html_to_png(html_file, png_file)
+                    else:
+                        print(f"At time: {time} No TCP Packet's found, Will go to next Time Step")
+                        print("_______________________________________________________________________________")
+    return G
 
 def creation_of_pyvis(G,
                       index: str,
@@ -830,13 +1024,19 @@ def creation_of_pyvis(G,
                       time: float,
                       total_time: float,
                       time_prev: float,
+                      last_rendered_time: float,
                       packet_prev: int,
-                      output_file="packet_graph.html",
+                      output_file: str = "packet_graph.html",
+                      states: tuple = None,
                       browser_html: bool = False,
                       flag_interval: bool = False,
-                      plot_type: str = 'TCP'
-                      ):
+                      plot_type: str = 'TCP'):
+    
     precision_number = 1e-7
+
+    # Get name, time and state for when states changes
+    node_states = states if states else {}
+
     # ensure still work even with wierd spacing and upper and lower casing wording
     plot_type = plot_type.strip().lower()
     print(f"Creating Pyvis HTML at time: {time}")
@@ -885,24 +1085,24 @@ def creation_of_pyvis(G,
             addr_type_type = "unknown"
             x = 30000
             y = 15000
-        
-        # node styling
-        color = "gray"
-        if "a" in node_id:
-            color = "red"
-        elif "n" in node_id:
-            color = "blue"
-        elif "d" in node_id:
-            color = "green" if plot_type == "throughput" else "blue"
+
+        label, shape, color = setting_node_attributes(node_mac=node,
+                                                      node_id=node_id,
+                                                      node_states=node_states,
+                                                      last_rendered_time=last_rendered_time,
+                                                      time=time,
+                                                      flag_interval=flag_interval,
+                                                      plot_type=plot_type)
 
         net.add_node(
             node,
-            label=f"MAC: {node}\nNODE: {node_id}",
+            label=label,
             size=10,
             color=color,
             x=x / 10,
             y=y / 10,
-            physics=False
+            physics=False,
+            shape=shape
         )
         
         if "uplink" in addr_type_type:
@@ -917,7 +1117,6 @@ def creation_of_pyvis(G,
             priority = 4
 
         nodes.append((node_id, node, addr_type, addr_type_type,priority))
-
 
     # natural sort here
     nodes.sort(key=lambda x: (x[4], natural_key(x[0])))
@@ -939,6 +1138,7 @@ def creation_of_pyvis(G,
             print(f"{node_id} -> {mac}")
         else:
             print(f'{node_id} -> {mac} - This node/adapter do not contain any links')
+
     # ensure ALL graph nodes exist
     for node in G.nodes():
         if node not in net.get_nodes():
@@ -947,7 +1147,8 @@ def creation_of_pyvis(G,
                 label=f"MAC: {node}",
                 size=8,
                 color="gray",
-                physics=False
+                physics=False,
+                shape=shape
             )
 
     # Add edges with styling
@@ -1036,7 +1237,7 @@ def creation_of_pyvis(G,
     with open(output_file, "r+", encoding="utf-8") as f:
         html = f.read()
        
-        # Inset injection
+        # Insert injection
         if flag_interval == True:
             injection = window_injection(color_bar_title=color_bar_title,
                                          color_bar_data = color_bar_data,
@@ -1049,10 +1250,9 @@ def creation_of_pyvis(G,
         else:
             injection = accumulative_injection(color_bar_title=color_bar_title,
                                                color_bar_data = color_bar_data,
-                                         current_pkt=current_pkt,
-                                         total_pkts=total_pkts,
-                                         time=time,
-                                         total_time=total_time)
+                                               current_pkt=current_pkt,
+                                               total_pkts=total_pkts,time=time,
+                                               total_time=total_time)
 
         html = html.replace("</body>", injection + "\n</body>")
 
@@ -1062,123 +1262,6 @@ def creation_of_pyvis(G,
     if browser_html is True:
         webbrowser.open("file://" + os.path.abspath(output_file))
 
-def format_unit(value):
-    units = ["", "K", "M", "G", "T"]
-    scale = 1000.0  # use 1024.0 if you prefer binary units
-
-    i = 0
-    while value >= scale and i < len(units) - 1:
-        value /= scale
-        i += 1
-
-    return f"{value:.2f} {units[i]}"
-
-def normalize(w,min_w,max_w):
-    if max_w == min_w:
-        return 0.5
-    return (w - min_w) / (max_w - min_w)
-
-def mac_node(node_id: str, reference_data: dict):
-    macs = reference_data[node_id]["mac"]
-    
-    for interface, mac in macs.items():
-        if interface.startswith("uplink"):
-            return mac
-    print(f"No Mac address of uplink found for {node_id} in {reference_data}")
-    return None
-
-def heatmap_color(norm):
-    if norm < 0.25:
-        return f"rgb(0,{int(255 * norm * 4)},255)"         # blue → cyan
-    elif norm < 0.5:
-        return f"rgb(0,255,{int(255 * (1 - (norm - 0.25)*4))})"  # cyan → green
-    elif norm < 0.75:
-        return f"rgb({int(255 * (norm - 0.5)*4)},255,0)"   # green → yellow
-    else:
-        return f"rgb(255,{int(255 * (1 - (norm - 0.75)*4))},0)"  # yellow → red
-
-def draw_graph(G, path):
-    plt.figure(figsize=(6, 6))
-
-    pos = nx.spring_layout(G, seed=42)
-
-    nx.draw(
-        G,
-        pos,
-        with_labels=True,
-        node_size=500,
-        font_size=10
-    )
-
-    plt.savefig(path)
-    plt.close()
-
-def run_tshark(pcap_file, output_txt):
-    # 1. Find tshark
-    tshark_path = shutil.which("tshark")
-
-    if not tshark_path:
-        candidate = r"C:\Program Files\Wireshark\tshark.exe"
-        if os.path.exists(candidate):
-            tshark_path = candidate
-
-    if not tshark_path:
-        raise RuntimeError(
-            "tshark not found. Install Wireshark or add tshark to PATH."
-        )
-
-    # 2. Build command
-    cmd = [
-        tshark_path,
-        "-r", pcap_file,
-        "-T", "fields",
-        "-e", "frame.number",
-        "-e", "frame.time_epoch",
-        "-e", "frame.time_relative",
-        "-e", "eth.src",
-        "-e", "eth.dst",
-        "-e", "eth.type",
-        "-e", "frame.protocols",
-        "-e", "frame.len",
-        "-e", "batadv.batman.packet_type",
-        "-e", "batadv.ogm2.orig",
-        "-e", "batadv.ogm2.throughput",
-        "-e", "batadv.ogm2.ttl"
-    ]
-
-    # 3. Run tshark
-    print("CWD:", os.getcwd())
-    print("Writing to:", os.path.abspath(output_txt))
-    with open(output_txt, "w") as f:
-        subprocess.run(cmd, stdout=f, check=True)
-
-def mp4_creation(output_dir: str,
-                 file_name: str
-                 ):
-    
-    frame_files = sorted(glob.glob(f"{output_dir}/frame_*.png"))
-
-    if not frame_files:
-        print("No frames found. Skipping video creation.")
-    else:
-        print(f"Creating video from {len(frame_files)} frames...")
-
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-y",  # overwrite output
-            "-framerate", "0.5",
-            "-i", "throughput_graphs/frame_%04d.png",
-            "-c:v", "libx264",
-            "-preset", "slow",
-            "-crf", "18",
-            "-pix_fmt", "yuv420p",
-            f"{output_dir}/{file_name}.mp4"
-        ]
-
-        subprocess.run(ffmpeg_cmd, check=True)
-
-        print("Video saved as Throughput.mp4")
-
 if __name__ == "__main__":
 
     default_start_time = 0
@@ -1186,26 +1269,28 @@ if __name__ == "__main__":
     default_interval = 5
 
     parser = argparse.ArgumentParser(description="What Parameters mean")
-    parser.add_argument("-in","--input", type=str ,help ="Input file location | NEEDS TO BE TXT")
-    parser.add_argument("-addr","--addresses",type=str, help ="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
-    parser.add_argument("-j","--json",type=str, help ="Json file Including pos of nodes (graph.json)")
-    parser.add_argument("-gif","--gif_enabled",action="store_true", help ="enable creation of gif from png's, (png's are not created if gif is disabled)")
-    parser.add_argument("-e","--existing_png_for_gif",action="store_true", help ="Don't recreate png, for gif instead use already existing pngs created previously")
-    parser.add_argument("-b","--browser",action="store_true", help ="If to enable that the HTML plots are opened in the browser")
-    parser.add_argument("-f","--flag_interval",action="store_true", help ="Set to enable HTML for intervals")
-    parser.add_argument("-sta","--start_time", type=float, help ="Choose start time for analysis. Default = 0 sec")
-    parser.add_argument("-sto","--stop_time", type=float, help ="Choose stop time for analysis. Default = 30 sec")
-    parser.add_argument("-i","--interval", type=float, help ="Choose interval size of windows. Default = 5 sec")
-    parser.add_argument("-m","--method", type=str, help ="Choose type of analysis method. throughput, tcp, udp or ogmv2.")
-    parser.add_argument("-ogm_orig","--ogmv2_originator", type=str, help ="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
-    parser.add_argument("-ogm_eth_src","--ogmv2_ethernet_source", type=str, help ="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
-    parser.add_argument("-o","--output_dir", type=str, help ="(Optional) Set an output directory.")
+    parser.add_argument("-in", "--input", type=str, help="Input file location | NEEDS TO BE TXT")
+    parser.add_argument("-addr", "--addresses", type=str, help="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
+    parser.add_argument("-j", "--json", type=str, help="Json file including pos of nodes (graph.json)")
+    parser.add_argument("-s", "--states", type=str, help="Json file for simulation schedule (sim_sched.json)")
+    parser.add_argument("-gif", "--gif_enabled", action="store_true", help="enable creation of gif from png's, (png's are not created if gif is disabled)")
+    parser.add_argument("-e", "--existing_png_for_gif", action="store_true", help="Don't recreate png, for gif instead use already existing pngs created previously")
+    parser.add_argument("-b", "--browser", action="store_true", help="If to enable that the HTML plots are opened in the browser")
+    parser.add_argument("-f", "--flag_interval", action="store_true", help="Set to enable HTML for intervals")
+    parser.add_argument("-sta", "--start_time", type=float, help="Choose start time for analysis. Default = 0 sec")
+    parser.add_argument("-sto", "--stop_time", type=float, help="Choose stop time for analysis. Default = 30 sec")
+    parser.add_argument("-i", "--interval", type=float, help="Choose interval size of windows. Default = 5 sec")
+    parser.add_argument("-m", "--method", type=str, help="Choose type of analysis method. throughput, tcp, udp or ogmv2.")
+    parser.add_argument("-ogm_orig", "--ogmv2_originator", type=str, help="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
+    parser.add_argument("-ogm_eth_src", "--ogmv2_ethernet_source", type=str, help="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
+    parser.add_argument("-o", "--output_dir", type=str, help="(Optional) Set an output directory.")
 
     args = parser.parse_args()
 
     analysis_file = args.input
     addr_file = args.addresses
     json_link_nodes = args.json
+    states_json = args.states
     enable_gif = args.gif_enabled
     exist_gif = args.existing_png_for_gif
     enable_browser = args.browser
@@ -1218,6 +1303,10 @@ if __name__ == "__main__":
     ogmv2_eth_src = args.ogmv2_ethernet_source
     output_dir = args.output_dir
     method_type = method_type.strip().lower()
+
+    states = None
+    if states_json is not None:
+        states = get_state_changes(states_json)
 
     if output_dir is None:
         if method_type == 'throughput':
@@ -1293,7 +1382,7 @@ if __name__ == "__main__":
                     MAC_eth_src_node = mac_node(src,reference_data=addr_data)
                     tracking_of_OGM2_at_source(addr_data=addr_data, 
                                                file=analysis_file,
-                                               encoding = encoding,
+                                               encoding=encoding,
                                                start_time=13,
                                                OGM2_orig_mac=MAC_orig_node,
                                                time_interval=20,
@@ -1302,33 +1391,31 @@ if __name__ == "__main__":
     if method_type == 'tcp' or method_type == 'udp':
         G = creation_of_edges_TCP(G=G,
                               file=analysis_file,
-                              encoding = encoding,
+                              encoding=encoding,
                               start_time=default_start_time,
                               stop_time=default_stop_time,
                               stepsize_anime=default_interval,
                               gif=enable_gif,
-                              browser_html = enable_browser,
+                              browser_html=enable_browser,
                               flag_interval=enable_interval_graph,
-                              output_dir = output_dir)
+                              output_dir=output_dir,
+                              states=states)
         
         if enable_gif is True or exist_gif is True:
             mp4_creation(output_dir=output_dir, file_name='tcp_and_udp_streams')
 
     if method_type == 'throughput':
         F = all_link_throughput(G=G,
-                            file = analysis_file,
-                            encoding = encoding,
+                            file=analysis_file,
+                            encoding=encoding,
                             start_time=default_start_time,
                             stop_time=default_stop_time,
                             stepsize_anime=default_interval,
                             gif=enable_gif,
                             browser_html=enable_browser,
                             flag_interval=enable_interval_graph,
-                            output_dir=output_dir)
+                            output_dir=output_dir,
+                            states=states)
         
         if enable_gif is True or exist_gif is True:
             mp4_creation(output_dir=output_dir, file_name='Throughput')
-
-            
-
-
