@@ -889,5 +889,8 @@ def main():
     stop_all_tcpdump()
     stop_all_terminals()
 
+    if verbosity != "quiet":
+        print("Simulation done!")
+
 if __name__ == "__main__":
     main()
