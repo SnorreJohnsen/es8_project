@@ -52,7 +52,7 @@ def mac_node(node_id: str, reference_data: dict):
     return None
 
 def run_tshark(pcap_file, output_txt):
-    # 1. Find tshark
+    # Find tshark
     tshark_path = shutil.which("tshark")
 
     if not tshark_path:
@@ -65,7 +65,7 @@ def run_tshark(pcap_file, output_txt):
             "tshark not found. Install Wireshark or add tshark to PATH."
         )
 
-    # 2. Build command
+    # Build command
     cmd = [
         tshark_path,
         "-r", pcap_file,
@@ -84,7 +84,7 @@ def run_tshark(pcap_file, output_txt):
         "-e", "batadv.ogm2.ttl"
     ]
 
-    # 3. Run tshark
+    # Run tshark
     print("CWD:", os.getcwd())
     print("Writing to:", os.path.abspath(output_txt))
     with open(output_txt, "w") as f:
@@ -103,26 +103,33 @@ def mp4_creation(output_dir: str,
 
         ffmpeg_cmd = [
             "ffmpeg",
-            "-y",  # overwrite output
+            "-y",
             "-framerate", "0.5",
-            "-i", "throughput_graphs/frame_%04d.png",
+            "-i", f"{output_dir}/frame_%04d.png",
+            "-vf", "scale=1920:1080:flags=lanczos",
             "-c:v", "libx264",
-            "-preset", "slow",
-            "-crf", "18",
+            "-preset", "veryslow",
+            "-crf", "12",
             "-pix_fmt", "yuv420p",
             f"{output_dir}/{file_name}.mp4"
         ]
 
         subprocess.run(ffmpeg_cmd, check=True)
 
-        print("Video saved as Throughput.mp4")
+        print(f"Video saved at {output_dir}/{file_name}.mp4")
 
 def html_to_png(html_file, output_png):
     assert os.path.exists(html_file), html_file
 
+    WIDTH = 1920
+    HEIGHT = 1200
+
     options = Options()
     options.add_argument("--headless=new")
-    options.add_argument("--window-size=1200,800")
+    options.add_argument(f"--window-size={WIDTH},{HEIGHT}")
+    options.add_argument("--force-device-scale-factor=2")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
 
     # Insert this for thias to work
     service = Service(ChromeDriverManager().install())
@@ -134,16 +141,19 @@ def html_to_png(html_file, output_png):
         # load page
         driver.get("file://" + os.path.abspath(html_file))
 
-        # wait for page to fully load
-        WebDriverWait(driver, 10).until(
-            lambda d: d.execute_script("return document.readyState") == "complete"
-        )
+        # # wait for page to fully load
+        # WebDriverWait(driver, 10).until(
+        #     lambda d: d.execute_script("return document.readyState") == "complete"
+        # )
 
         # extra wait for PyVis JS rendering
+        WebDriverWait(driver, 10).until(
+            lambda d: d.execute_script("return window.network !== undefined")
+        )
         time.sleep(2)
 
         # enforce size (important for consistent PNGs)
-        driver.set_window_size(1200, 800)
+        driver.set_window_size(WIDTH, HEIGHT)
 
         # screenshot
         driver.save_screenshot(output_png)
@@ -664,7 +674,7 @@ if __name__ == "__main__":
     parser.add_argument("-sto", "--stop_time", type=float, help="Choose stop time for analysis. Default = 30 sec")
     parser.add_argument("-i", "--interval", type=float, help="Choose interval size of windows. Default = 5 sec")
 
-    parser.add_argument("-m", "--method", type=str, help="Choose type of analysis method. throughput, tcp, udp or ogmv2.")
+    parser.add_argument("-m", "--method", type=str, help="Choose type of analysis method. throughput, tcp, udp or (ogm, ogm2, ogmv2).")
     parser.add_argument("-ogm_orig", "--ogmv2_originator", type=str, help="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
     parser.add_argument("-ogm_eth_src", "--ogmv2_ethernet_source", type=str, help="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
     parser.add_argument("-o", "--output_dir", type=str, help="(Optional) Set an output directory.")

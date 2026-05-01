@@ -94,6 +94,16 @@ def setting_node_attributes(node_mac,
                             flag_interval: bool,
                             plot_type: str):
     
+    
+    # Node coloring
+    color = "gray"
+    if "a" in node_id:
+        color = "red"
+    elif "n" in node_id:
+        color = "blue"
+    elif "d" in node_id:
+        color = "green" if plot_type == "throughput" else "blue"
+
     # Setting label and shape for different states
     label = f"MAC: {node_mac}\nNODE: {node_id}"
     shape = "dot"
@@ -115,18 +125,10 @@ def setting_node_attributes(node_mac,
 
         # Set shape based on current state
         if current_state == "DOWN":
-            shape = "triangle" if flag_interval else "square"
+            shape = "square"
+            color = 'black'
         else:
             shape = "dot"
-
-    # Node coloring
-    color = "gray"
-    if "a" in node_id:
-        color = "red"
-    elif "n" in node_id:
-        color = "blue"
-    elif "d" in node_id:
-        color = "green" if plot_type == "throughput" else "blue"
     
     return label, shape, color
 
@@ -389,7 +391,7 @@ def creation_of_pyvis(G,
     plot_type = plot_type.strip().lower()
     print(f"Creating Pyvis HTML at time: {time}")
     # Create PyVis network
-    net = Network(height="800px", width="100%", directed=True, bgcolor="grey", font_color="black")
+    net = Network(height="100vh", width="100vw", directed=True, bgcolor="grey", font_color="black")
     # Optional: better physics (important for mesh graphs)
     net.barnes_hut()
 
