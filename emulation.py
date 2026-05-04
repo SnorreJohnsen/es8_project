@@ -339,7 +339,7 @@ def run_nsperf_client(server_name: str,
     run_id = "run-" + datetime.now().isoformat(timespec="seconds").replace("+00:00", "Z")
     flow_id = f"{server_name}_{client_name}_{timestamp:.0f}"
 
-    client_cmd = ["ip", "netns", "exec", f"ns-{server_name}", 
+    client_cmd = ["ip", "netns", "exec", f"ns-{client_name}", 
                   "nsperf", "client", "--dst", server_ipv4, "--port", str(server_port), 
                   "--bitrate", bitrate, "--duration", duration, 
                   "--run-id", run_id, "--flow-id", flow_id, "--out", nsperf_path]
