@@ -3,7 +3,8 @@ from pathlib import Path
 import json
 from typing import Tuple, Optional, Dict, Any
 import re
-
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
 WIDTH = 150
 PLOT_SPACING = 10
@@ -274,21 +275,10 @@ def is_number(s: str) -> bool:
     except ValueError:
         return False
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
-    parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
-    parser.add_argument('-g','--graph',type=json_path,help='The directory or file which is the entail nodes and links desription (Json Format)')
-    parser.add_argument('-p','--percentile',type=float,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
-    parser.add_argument('-x','--x_axis',type=str,required=True,help='Variable for X axis')
-    parser.add_argument('-y','--y_axis',type=str,required=True,help='Variable for Y axis')
-    args = parser.parse_args()
-
-    input_path = args.input
-
+def pairing_files(input: Path) -> list:
     experiments = []
-
-    if input_path.is_dir():
-        dirs = [d for d in input_path.iterdir() if d.is_dir() and is_number(d.name)]
+    if input.is_dir():
+        dirs = [d for d in input.iterdir() if d.is_dir() and is_number(d.name)]
         
         for d in dirs:
             nsperf_files = get_json_files(d / "nsperf" / "streams")
@@ -299,8 +289,87 @@ if __name__ == "__main__":
                 "nsperf": nsperf_files,
                 "graphs": graph_file
             })
+        return experiments
     else:
         print(f"expected different formatting of directory")
+        exit()
+
+def plot_graph(x_axis: list,
+               y_axis: list,
+               file_path: Path,
+               file_name: str,
+               fontsize: int = 12,
+               picture_size: tuple = (16,9),
+               type_graph: int = 1):
+
+    fig, ax = plt.subplots(figsize=picture_size)
+    if type_graph == 1:
+        ax.plot(x_axis, y_axis, 'o')
+    elif type_graph == 2:
+        ax.plot(x_axis, y_axis, marker='o')
+    else:
+        print("Choose type avaible for plotting")
+        exit()
+
+    ax.set_xlabel("X Axis", fontsize=fontsize)
+    ax.set_ylabel("Y Axis", fontsize=fontsize)
+    ax.tick_params(axis='both', labelsize=fontsize)
+
+    ax.grid(True)
+
+    plt.tight_layout()
+
+    output_file = file_path / file_name
+
+    # ensure folder exists
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(output_file)
+    plt.close(fig)
+
+def plot_boxplot(boxplot_data: list,
+                 file_path: Path,
+                 file_name: str,
+                 fontsize: int = 12,
+                 picture_size: tuple = (16,9)):
+    labels = list(box_data.keys())
+    values = list(box_data.values())
+
+    fig, ax = plt.subplots(figsize=picture_size)
+
+    ax.boxplot(values, tick_labels=labels)
+
+    ax.set_xlabel("X Axis",fontsize=fontsize)
+    ax.set_ylabel("Y Axis",fontsize=fontsize)
+    ax.grid(True)
+
+    plt.tight_layout()
+
+    output_file = file_path / file_name
+
+    # ensure folder exists
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(output_file)
+    plt.show()
+    plt.close(fig)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
+    parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
+    parser.add_argument('-o','--output',type=Path,help='The desired directory for saving PLOTS')
+    parser.add_argument('-g','--graph',type=json_path,help='The directory or file which is the entail nodes and links desription (Json Format)')
+    parser.add_argument('-p','--percentile',type=float,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
+    parser.add_argument('-x','--x_axis',type=str,required=True,help='Variable for X axis')
+    parser.add_argument('-y','--y_axis',type=str,required=True,help='Variable for Y axis')
+    args = parser.parse_args()
+
+    input_path = args.input
+
+    output_path = args.output or Path("./plots")
+
+    experiments = pairing_files(input=input_path)
     percentile = percentile_refactor(args.percentile)
 
     experiments = sorted(experiments, key=lambda e: float(e["name"]))
@@ -334,7 +403,6 @@ if __name__ == "__main__":
     path_width = max(len(str(f))for exp in experiments for f in exp["nsperf"]) + 2
 
 
-
     title = " Files used for analysis "
     print(title.center(WIDTH, "-"))
 
@@ -360,7 +428,7 @@ if __name__ == "__main__":
             )
 
     print("-" * WIDTH)
-
+    plot_data = defaultdict(list)
     for i, exp in enumerate(experiments):
         exp["nsperf"] = sorted(exp["nsperf"], key=nsperf_key)
         nsperf_files = exp["nsperf"]
@@ -387,12 +455,8 @@ if __name__ == "__main__":
             # for w_key, w_data in data.items():
             #     print(w_key)      # e.g. "window_0"
             #     print(w_data)     # the inner dict
-
-            # TODO: NEED TO CHANGE LINK LOSS TO JUST DIR NAME
-            grid,nodes, link_loss = extract_graph(graph_file)
-            if is_number(exp["name"]):
-                file_name = float(exp["name"])
-                link_loss = f"{file_name:.2f}"
+            grid,nodes, graph_link_loss = extract_graph(graph_file)
+            link_loss = float(exp["name"]) if is_number(exp["name"]) else graph_link_loss
             mesh_size = len(nodes)
             if interval_step is None:
                 axis_values = []
@@ -402,6 +466,14 @@ if __name__ == "__main__":
                         axis_value = extract_variable_full(data=data,nsperf_variable=axis_nsperf)
                         axis_values.append(axis_value)
                 print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+
+                plot_data[link_loss].append({
+                                            "client": client,
+                                            "server": server,
+                                            "num": num,
+                                            "x_axis": axis_values[0],
+                                            "y_axis": axis_values[1]
+                                            })
             else:
                 for w_key, w_data in data.items():
                     axis_values = []
@@ -416,4 +488,33 @@ if __name__ == "__main__":
                         axis_values.append(axis_value)
 
                     print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-                    
+
+    for loss, runs in plot_data.items():
+        x_axis_values = []
+        y_axis_values = []
+        client_server = []
+        box_data = defaultdict(list)
+        for entry in runs:
+            x_axis_values.append(entry["x_axis"])
+            y_axis_values.append(entry["y_axis"])
+            client_server.append(f"{entry['client']}-{entry['server']}")
+            value = entry["y_axis"]
+            # as of now done fixed needs to so can use with the different arguments avaible for plotting
+            box_data[f"{entry['client']}-{entry['server']}"].append(value if value is not None else 0)
+        
+        plot_graph(
+            x_axis=client_server,
+            y_axis=y_axis_values,
+            fontsize=12,
+            picture_size=(16, 9),
+            file_path=output_path,
+            type_graph = 1,
+            file_name=f"link_loss_{loss}_X_{axis_names[0]}_Y_{axis_names[1]}.png"
+        )
+        plot_boxplot(
+            boxplot_data=box_data,
+            fontsize=12,
+            picture_size=(16, 9),
+            file_path=output_path,
+            file_name=f"link_loss_{loss}_X_{axis_names[0]}_Y_{axis_names[1]}_boxplot.png"
+        )
