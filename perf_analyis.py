@@ -217,7 +217,7 @@ def extract_variable_full(data: dict,
             return None
         value = calc_tuple_nsperf(key_1=value_1,key_2=value_2,sign=sign)
         value += float(nsperf_variable[3])
-        return value
+        return abs(value)
 
 def normalize_nsperf(name: str) -> str:
     return name.removeprefix("nsperf_")
@@ -296,6 +296,7 @@ def pairing_files(input: Path) -> list:
 
 def plot_graph(x_axis: list,
                y_axis: list,
+               axis_labels,
                file_path: Path,
                file_name: str,
                fontsize: int = 12,
@@ -311,8 +312,8 @@ def plot_graph(x_axis: list,
         print("Choose type avaible for plotting")
         exit()
 
-    ax.set_xlabel("X Axis", fontsize=fontsize)
-    ax.set_ylabel("Y Axis", fontsize=fontsize)
+    ax.set_xlabel(axis_labels[0],fontsize=fontsize)
+    ax.set_ylabel(axis_labels[1],fontsize=fontsize)
     ax.tick_params(axis='both', labelsize=fontsize)
 
     ax.grid(True)
@@ -328,19 +329,24 @@ def plot_graph(x_axis: list,
     plt.close(fig)
 
 def plot_boxplot(boxplot_data: list,
+                 axis_labels,
                  file_path: Path,
                  file_name: str,
                  fontsize: int = 12,
                  picture_size: tuple = (16,9)):
-    labels = list(box_data.keys())
-    values = list(box_data.values())
+    sorted_items = sorted(box_data.items(), key=lambda x: float(x[0]))
+
+    labels = [k for k, _ in sorted_items]
+    values = [v for _, v in sorted_items]
+    # labels = list(boxplot_data.keys())
+    # values = list(boxplot_data.values())
 
     fig, ax = plt.subplots(figsize=picture_size)
 
     ax.boxplot(values, tick_labels=labels)
 
-    ax.set_xlabel("X Axis",fontsize=fontsize)
-    ax.set_ylabel("Y Axis",fontsize=fontsize)
+    ax.set_xlabel(axis_labels[0],fontsize=fontsize)
+    ax.set_ylabel(axis_labels[1],fontsize=fontsize)
     ax.grid(True)
 
     plt.tight_layout()
@@ -351,7 +357,6 @@ def plot_boxplot(boxplot_data: list,
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     plt.savefig(output_file)
-    plt.show()
     plt.close(fig)
 
 
@@ -363,11 +368,14 @@ if __name__ == "__main__":
     parser.add_argument('-p','--percentile',type=float,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
     parser.add_argument('-x','--x_axis',type=str,required=True,help='Variable for X axis')
     parser.add_argument('-y','--y_axis',type=str,required=True,help='Variable for Y axis')
+    parser.add_argument('-c','--client',type=str,help='If Desire only observe one specific Stream Set Client and Server')
+    parser.add_argument('-s','--server',type=str,help='If Desire only observe one specific Stream Set Client and Server')
     args = parser.parse_args()
 
     input_path = args.input
-
     output_path = args.output or Path("./plots")
+    req_client = args.client
+    req_server = args.server
 
     experiments = pairing_files(input=input_path)
     percentile = percentile_refactor(args.percentile)
@@ -488,6 +496,13 @@ if __name__ == "__main__":
                         axis_values.append(axis_value)
 
                     print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+    if req_client and req_server:
+        stream = f"STREAM | Client: {req_client} | Server: {req_server}"
+    else:
+        stream = "ALL STREAMS USED"
+    title = f" Creating Plots | {stream} "
+
+    print(title.center(WIDTH, "_"))
 
     for loss, runs in plot_data.items():
         x_axis_values = []
@@ -495,26 +510,41 @@ if __name__ == "__main__":
         client_server = []
         box_data = defaultdict(list)
         for entry in runs:
-            x_axis_values.append(entry["x_axis"])
-            y_axis_values.append(entry["y_axis"])
-            client_server.append(f"{entry['client']}-{entry['server']}")
-            value = entry["y_axis"]
-            # as of now done fixed needs to so can use with the different arguments avaible for plotting
-            box_data[f"{entry['client']}-{entry['server']}"].append(value if value is not None else 0)
+            # IF set to one specific stream only save data for this stream
+            # else use every stream
+            if req_client and req_server:
+                if entry['client'] == req_client and entry['server'] == req_server:
+                    client_server.append(f"{entry['client']}-{entry['server']}")
+                    x_axis_values.append(entry["x_axis"])
+                    y_axis_values.append(entry["y_axis"])
+                    value = entry["y_axis"]
+                    box_data[entry["x_axis"]].append(value if value is not None else 0)
+                    plot_title = f"link_loss_{link_loss}_{axis_names[0]}_{axis_names[1]}_stream_{entry['client']}_{entry['server']}"
+            else:
+                client_server.append(f"{entry['client']}-{entry['server']}")
+                x_axis_values.append(entry["x_axis"])
+                y_axis_values.append(entry["y_axis"])
+                value = entry["y_axis"]
+                box_data[entry["x_axis"]].append(value if value is not None else 0)
+                #box_data[f"{entry['client']}-{entry['server']}"].append(value if value is not None else 0)
+                plot_title = f"{link_loss=}_axis_{axis_names[0]}_{axis_names[1]}_stream_all"
+    
         
         plot_graph(
-            x_axis=client_server,
+            x_axis=x_axis_values,
             y_axis=y_axis_values,
+            axis_labels = axis_names,
             fontsize=12,
             picture_size=(16, 9),
             file_path=output_path,
             type_graph = 1,
-            file_name=f"link_loss_{loss}_X_{axis_names[0]}_Y_{axis_names[1]}.png"
+            file_name=f"{plot_title}.png"
         )
         plot_boxplot(
             boxplot_data=box_data,
+            axis_labels = axis_names,
             fontsize=12,
             picture_size=(16, 9),
             file_path=output_path,
-            file_name=f"link_loss_{loss}_X_{axis_names[0]}_Y_{axis_names[1]}_boxplot.png"
+            file_name=f"{plot_title}_boxplot.png"
         )
