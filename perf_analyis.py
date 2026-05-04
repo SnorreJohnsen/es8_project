@@ -2,6 +2,8 @@ import argparse
 from pathlib import Path
 import json
 from typing import Tuple, Optional, Dict, Any
+import re
+
 
 WIDTH = 150
 PLOT_SPACING = 10
@@ -150,6 +152,9 @@ def percentile_refactor(percentile: float) -> str:
         return f"p{closest}_ns"
 
 def find_nsperf_variable(data: dict, target: str) -> Optional[Tuple[str, str]]:
+    if target in data:
+        return None, data[target]
+    #nested check
     for section_name, section_data in data.items():
         if isinstance(section_data, dict) and target in section_data:
             return section_name, section_data[target]
@@ -213,19 +218,95 @@ def extract_variable_full(data: dict,
         value += float(nsperf_variable[3])
         return value
 
+def normalize_nsperf(name: str) -> str:
+    return name.removeprefix("nsperf_")
+
+def normalize_graph(name: str) -> str:
+    return name.removeprefix("graph_")
+
+def pair_nsperf_graph(nsperf_files: list,
+                      graph_files: list) -> tuple[list,list]:
+    
+    pairs = []
+    if len(graph_files) == 1:
+        for n in nsperf_files:
+            pairs.append((n,graph_files))
+    if len(graph_files) < 1:
+        pass
+    pass
+
+def extract_graph(file: Path) -> dict:
+
+    grid_id = []
+    nodes_id = []
+    with file.open() as f:
+        data = json.load(f)
+    
+    nodes = data['nodes']
+    for node in nodes:
+        node_id= node['id']
+        grid_id.append(node_id)
+        if "n" in node_id:
+            nodes_id.append(node_id)
+    
+    links = data['links']
+    # if we assume that the link losses are all set the same
+    # else need to do something differently
+    for link in links:
+        link_loss = link['loss_percent']
+    return grid_id,nodes_id, f"{link_loss:.2f}"
+
+def nsperf_key(p: Path):
+    stem = Path(p).stem  
+
+    client, server, num = stem.split("_")
+
+    client_id = int(re.findall(r"\d+", client)[0])
+    server_id = int(re.findall(r"\d+", server)[0])
+    run_id = int(num)
+
+    return (client_id, server_id, run_id)
+
+def is_number(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
     parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
+    parser.add_argument('-g','--graph',type=json_path,help='The directory or file which is the entail nodes and links desription (Json Format)')
     parser.add_argument('-p','--percentile',type=float,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
     parser.add_argument('-x','--x_axis',type=str,required=True,help='Variable for X axis')
     parser.add_argument('-y','--y_axis',type=str,required=True,help='Variable for Y axis')
     args = parser.parse_args()
 
-    json_files = get_json_files(args.input)
+    input_path = args.input
+
+    experiments = []
+
+    if input_path.is_dir():
+        dirs = [d for d in input_path.iterdir() if d.is_dir() and is_number(d.name)]
+        
+        for d in dirs:
+            nsperf_files = get_json_files(d / "nsperf" / "streams")
+            graph_file = (d / "graph.json")
+
+            experiments.append({
+                "name": d.name,
+                "nsperf": nsperf_files,
+                "graphs": graph_file
+            })
+    else:
+        print(f"expected different formatting of directory")
     percentile = percentile_refactor(args.percentile)
 
+    experiments = sorted(experiments, key=lambda e: float(e["name"]))
+
     variable_map  = []
-    variable_map .append({"name": "link_loss", "aliases": ["link_loss", "link loss"], "nsperf": "IDK"})                     #Need to change to just what's in graph
+    variable_map .append({"name": "link_loss", "aliases": ["link_loss", "link loss"], "nsperf": "link_loss"})                     #Need to change to just what's in graph
     variable_map .append({"name": "total_loss", "aliases": ["total_loss", "total loss"], "nsperf": ["received_bits", "/", "generated_bits","-1"]})
     variable_map .append({"name": "throughput", "aliases": ["throughput", "tp"], "nsperf": "received_bps"})
     variable_map .append({"name": "latency", "aliases": ["latency", "lat"], "nsperf": "host_local_latency_estimate_ns"})    #IDK if this is the right latency
@@ -233,7 +314,7 @@ if __name__ == "__main__":
     variable_map .append({"name": "num_streams", "aliases": ["num_streams", "num streams"], "nsperf": "IDK"})
     variable_map .append({"name": "request_throughput", "aliases": ["request_throughput", "request throughput", "req_tp", "req tp"], "nsperf": "generated_bps"}) # NOT Sure if the right one
     variable_map .append({"name": "hops", "aliases": ["hops"], "nsperf": "IDK"})                                            # STILL NOT SURE IF POSSIBLE
-    variable_map .append({"name": "mesh_size", "aliases": ["mesh_size", "mesh size"], "nsperf": "IDK"})                           #ALSO TAKE FROM GRAPH
+    variable_map .append({"name": "mesh_size", "aliases": ["mesh_size", "mesh size"], "nsperf": "mesh_size"})                           #ALSO TAKE FROM GRAPH
 
     # sanity check if that varaible for axis are avaliable
     axis_names = []
@@ -248,61 +329,91 @@ if __name__ == "__main__":
         axis_names.append(name)
         axis_nsperfs.append(nsperf)
         
-
-
     print(f"{percentile=}")
+
+    path_width = max(len(str(f))for exp in experiments for f in exp["nsperf"]) + 2
+
+
 
     title = " Files used for analysis "
     print(title.center(WIDTH, "-"))
-    interval_steps = []
-    file_data_list = []
 
-    path_width= max(len(str(f)) for f in json_files) + 2
+    for exp in experiments:
+        exp["nsperf"] = sorted(exp["nsperf"], key=nsperf_key)
+        nsperf_files = exp["nsperf"]
+        graph_file = exp["graphs"]
 
-    for f in json_files:
-        interval_step, json_file_data, end_time = nsperf_interval_set(file=f)
+        title = f" Link loss: {exp['name']} "
+        print()
+        print(title.center(WIDTH, "_"))
 
-        interval_steps.append(interval_step)
-        file_data_list.append(json_file_data)
+        for f in nsperf_files:
+            interval_step, json_file_data, end_time = nsperf_interval_set(f)
 
-        if end_time is None:
-            print(f"{str(f).ljust(path_width)} | interval: {str(interval_step).ljust(PLOT_SPACING)}")
-        else:
-            print(f"{str(f).ljust(path_width)} | interval: {str(interval_step).ljust(PLOT_SPACING)} | End time {str(end_time).ljust(PLOT_SPACING)}")
+            end_str = "" if end_time is None else str(end_time)
 
+            print(
+                f"{str(f).ljust(path_width)} | "
+                f"interval: {str(interval_step).ljust(PLOT_SPACING)} | "
+                f"End time {end_str.ljust(PLOT_SPACING)} | "
+                f"Graph: {str(graph_file).ljust(path_width)}"
+            )
 
     print("-" * WIDTH)
 
-    for i, f in enumerate(json_files):
-        data,ids = sorting_data_nsperf(file_data=file_data_list[i],interval_step=interval_steps[i],percentile=percentile,max_window=None)
-
-        """         This just for intermediate for seing what is saved    """
-        # file_text = f" Extracted data from file \'{f}\' with ID {ids.get("flow_id")} "
-        # print(file_text.center(WIDTH, "-"))
-        # for w_key, w_data in data.items():
-        #     print(w_key)      # e.g. "window_0"
-        #     print(w_data)     # the inner dict
+    for i, exp in enumerate(experiments):
+        exp["nsperf"] = sorted(exp["nsperf"], key=nsperf_key)
+        nsperf_files = exp["nsperf"]
+        graph_file = exp["graphs"]
         
-        plot_text = f" Plot Creation for file \'{f}\' ID {ids.get("flow_id")} | Axis | X: {axis_names[0]} | Y: {axis_names[1]} "
+        title = f" Plot Creation for directory \'{exp["name"]}\' | Axis | X: {axis_names[0]} | Y: {axis_names[1]} "
         print()
-        print(plot_text.center(WIDTH, "-"))
+        print(title.center(WIDTH, "_"))
+        prev_client = None
+        first_client = True
+        for f in nsperf_files:
+            # Just for structure
+            stem = Path(f).stem  
+            client, server, num = stem.split("_")
+            if client != prev_client and first_client is False:
+                    print("=" * WIDTH)
+            interval_step, json_file_data, end_time = nsperf_interval_set(f)
+            data,ids = sorting_data_nsperf(file_data=json_file_data,interval_step=interval_step,percentile=percentile,max_window=None)
+            prev_client = client
+            first_client = False
+            """         This just for intermediate for seing what is saved    """
+            # file_text = f" Extracted data from file \'{f}\' with ID {ids.get("flow_id")} "
+            # print(file_text.center(WIDTH, "-"))
+            # for w_key, w_data in data.items():
+            #     print(w_key)      # e.g. "window_0"
+            #     print(w_data)     # the inner dict
 
-        if interval_steps[i] is None:
-            axis_values = []
-            for axis_nsperf in axis_nsperfs:
-                    axis_value = extract_variable_full(data=data,nsperf_variable=axis_nsperf)
-                    axis_values.append(axis_value)
-            print(f" X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-        else:
-            for w_key, w_data in data.items():
+            # TODO: NEED TO CHANGE LINK LOSS TO JUST DIR NAME
+            grid,nodes, link_loss = extract_graph(graph_file)
+            if is_number(exp["name"]):
+                file_name = float(exp["name"])
+                link_loss = f"{file_name:.2f}"
+            mesh_size = len(nodes)
+            if interval_step is None:
                 axis_values = []
-                w_idx = w_key.split("_")[1]
-                start = w_data.get("start")
-                end = w_data.get("end")
-                window_info = f"Start {start} End {end} s"
+                data["mesh_size"] = mesh_size
+                data["link_loss"] = link_loss
                 for axis_nsperf in axis_nsperfs:
-                    axis_value = extract_variable_full(data=w_data,nsperf_variable=axis_nsperf)
-                    axis_values.append(axis_value)
+                        axis_value = extract_variable_full(data=data,nsperf_variable=axis_nsperf)
+                        axis_values.append(axis_value)
+                print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+            else:
+                for w_key, w_data in data.items():
+                    axis_values = []
+                    w_data["link_loss"] = link_loss
+                    w_data["mesh_size"] = mesh_size
+                    w_idx = w_key.split("_")[1]
+                    start = w_data.get("start")
+                    end = w_data.get("end")
+                    window_info = f"Start {start} End {end} s"
+                    for axis_nsperf in axis_nsperfs:
+                        axis_value = extract_variable_full(data=w_data,nsperf_variable=axis_nsperf)
+                        axis_values.append(axis_value)
 
-                print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-                
+                    print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+                    
