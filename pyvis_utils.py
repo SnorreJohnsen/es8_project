@@ -91,9 +91,7 @@ def setting_node_attributes(node_mac,
                             node_states: dict,
                             last_rendered_time: float,
                             time: float,
-                            flag_interval: bool,
                             plot_type: str):
-    
     
     # Node coloring
     color = "gray"
@@ -376,11 +374,11 @@ def creation_of_pyvis(G,
                       time_prev: float,
                       last_rendered_time: float,
                       packet_prev: int,
-                      output_file: str = "packet_graph.html",
+                      plot_type: str,
+                      output_file: str,
                       states: tuple = None,
                       browser_html: bool = False,
-                      flag_interval: bool = False,
-                      plot_type: str = 'TCP'):
+                      flag_interval: bool = False):
     
     precision_number = 1e-7
 
@@ -441,7 +439,6 @@ def creation_of_pyvis(G,
                                                       node_states=node_states,
                                                       last_rendered_time=last_rendered_time,
                                                       time=time,
-                                                      flag_interval=flag_interval,
                                                       plot_type=plot_type)
 
         net.add_node(
@@ -503,9 +500,10 @@ def creation_of_pyvis(G,
 
     # Add edges with styling
     values = []
-
     for _, _, data in G.edges(data=True):
         if plot_type == 'tcp':
+            v = data.get('weight', 1)
+        elif plot_type == 'udp':
             v = data.get('weight', 1)
         elif plot_type == 'throughput':
             dt = max(data.get('last_time') - data.get('first_time'), precision_number)
@@ -530,6 +528,19 @@ def creation_of_pyvis(G,
             smooth = False
 
         if plot_type == 'tcp':
+            value = data.get('weight',1)
+            norm = normalize(w=value,min_w=min_v,max_w=max_v)
+            color = heatmap_color(norm=norm)
+            net.add_edge(
+            src,
+            dst,
+            smooth=smooth,
+            title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {data.get('weight')}",        
+            # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
+            color= color,               
+            width=1 + np.log1p(value)  # optional smoother scaling
+        )
+        elif plot_type == 'udp':
             value = data.get('weight',1)
             norm = normalize(w=value,min_w=min_v,max_w=max_v)
             color = heatmap_color(norm=norm)
@@ -571,6 +582,8 @@ def creation_of_pyvis(G,
     for _, _, data in G.edges(data=True):
         if plot_type == 'tcp':
             v = data.get('weight', 1)
+        elif plot_type == 'udp':
+            v = data.get('weight', 1)
         elif plot_type == 'throughput':
             dt = max(data.get('last_time') - data.get('first_time'), precision_number)
             bits = data.get("bits", 0)
@@ -580,9 +593,11 @@ def creation_of_pyvis(G,
     color_bar_data = values
     if plot_type == 'tcp':
         color_bar_title = 'TCP packets transmitted on link'
+    elif plot_type == 'udp':
+        color_bar_title = 'UDP packets transmitted on link'
     elif plot_type == 'throughput':
         color_bar_title = 'Throughput [bits/s] on link'
-
+    
     # Inject auto-fit script
     with open(output_file, "r+", encoding="utf-8") as f:
         html = f.read()

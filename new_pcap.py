@@ -6,6 +6,7 @@ import time
 import glob
 import subprocess
 import shutil
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -374,6 +375,7 @@ def all_link_throughput(*,
                       gif: bool = False,
                       browser_html: bool = False,
                       flag_interval: bool = False,
+                      input_pcap_name: str,
                       output_dir: str,
                       states: tuple = None):
     
@@ -462,23 +464,25 @@ def all_link_throughput(*,
                             print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs(output_dir, exist_ok=True)
                         frame_idx += 1
-                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
+                        html_file = f"{output_dir}/graph_{input_pcap_name}/graph_{float(time):.2f}_{input_pcap_name}.html"
                         png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
+                        Path(html_file).parent.mkdir(parents=True, exist_ok=True)
                         creation_of_pyvis(G=G,
+                                          index=time,
                                           reference_data=addr_data,
                                           json_nodes=json_link_nodes,
-                                          index=time,output_file=html_file,
-                                          browser_html = browser_html,
                                           current_pkt = pkt_num,
                                           total_pkts = tot_pkts,
                                           time = time,
                                           total_time = tot_time,
-                                          flag_interval=flag_interval,
                                           time_prev = time_prev,
                                           last_rendered_time=last_rendered_time,
                                           packet_prev=packet_prev,
+                                          plot_type='Throughput',
+                                          output_file=html_file,
                                           states=states,
-                                          plot_type='Throughput')
+                                          browser_html = browser_html,
+                                          flag_interval=flag_interval)
                         print("_______________________________________________________________________________")
                         #first_time_tcp_packet = None
                         last_rendered_time = time
@@ -496,18 +500,20 @@ def all_link_throughput(*,
     return G
 
 def creation_of_edges_TCP(*,
-                      G,
-                      file: str,
-                      encoding: str,
-                      start_time: int = 0,
-                      stop_time: int,
-                      stepsize_anime: float = 1,
-                      gif: bool = False,
-                      browser_html: bool = False,
-                      flag_interval: bool = False,
-                      output_dir: str,
-                      states=None):
-    
+                          G,
+                          file: str,
+                          encoding: str,
+                          start_time: int = 0,
+                          stop_time: int,
+                          stepsize_anime: float = 1,
+                          gif: bool = False,
+                          browser_html: bool = False,
+                          flag_interval: bool = False,
+                          states: dict = None,
+                          plot_type: str,
+                          input_pcap_name: str,
+                          output_dir: str):
+
     last_rendered_time = start_time
     tcp_streams = {}
     frame_idx = 0
@@ -614,8 +620,9 @@ def creation_of_edges_TCP(*,
                             print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs(output_dir, exist_ok=True)
                         frame_idx += 1
-                        html_file = f"{output_dir}/graph_{float(time):.2f}.html"
+                        html_file = f"{output_dir}/graph_{input_pcap_name}/graph_{float(time):.2f}_{input_pcap_name}.html"
                         png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
+                        Path(html_file).parent.mkdir(parents=True, exist_ok=True)
                         print(f"TCP & UDP streams existing is:")
 
                         # sort after count amount
@@ -625,19 +632,21 @@ def creation_of_edges_TCP(*,
                             print(f"Type: {stream_type} | Node: Src {info['src_node']} -> Dst {info['dst_node']} | Link Use Count: {info['count']}|||",
                                 f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
                         creation_of_pyvis(G=G,
+                                          index=time,
                                           reference_data=addr_data,
                                           json_nodes=json_link_nodes,
-                                          index=time,output_file=html_file,
-                                          browser_html = browser_html,
-                                          current_pkt = pkt_num,
-                                          total_pkts = tot_pkts,
-                                          time = time,
-                                          total_time = tot_time,
-                                          flag_interval=flag_interval,
-                                          time_prev = time_prev,
+                                          current_pkt=pkt_num,
+                                          total_pkts=tot_pkts,
+                                          time=time,
+                                          total_time=tot_time,
+                                          time_prev=time_prev,
                                           last_rendered_time=last_rendered_time,
                                           packet_prev=packet_prev,
-                                          states=states)
+                                          plot_type=plot_type,
+                                          output_file=html_file,
+                                          states=states,
+                                          browser_html=browser_html,
+                                          flag_interval=flag_interval)
                         print("_______________________________________________________________________________")
                         first_time_tcp_packet = None
                         last_rendered_time = time
@@ -661,19 +670,17 @@ if __name__ == "__main__":
     default_interval = 5
 
     parser = argparse.ArgumentParser(description="What Parameters mean")
-    parser.add_argument("-in", "--input", type=str, help="Input file location | NEEDS TO BE TXT")
+    parser.add_argument("-in", "--input", type=str, help="Input file location | Either folder of pcaps, single pcap or txt file")
     parser.add_argument("-addr", "--addresses", type=str, help="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
     parser.add_argument("-j", "--json", type=str, help="Json file including pos of nodes (graph.json)")
-    parser.add_argument("-s", "--states", type=str, help="Json file for simulation schedule (sim_sched.json)")
+    parser.add_argument("-s", "--states", type=str, help="Json file for simulation schedule (reroute.json)")
     parser.add_argument("-gif", "--gif_enabled", action="store_true", help="enable creation of gif from png's, (png's are not created if gif is disabled)")
     parser.add_argument("-e", "--existing_png_for_gif", action="store_true", help="Don't recreate png, for gif instead use already existing pngs created previously")
     parser.add_argument("-b", "--browser", action="store_true", help="If to enable that the HTML plots are opened in the browser")
     parser.add_argument("-f", "--flag_interval", action="store_true", help="Set to enable HTML for intervals")
-
     parser.add_argument("-sta", "--start_time", type=float, help="Choose start time for analysis. Default = 0 sec")
     parser.add_argument("-sto", "--stop_time", type=float, help="Choose stop time for analysis. Default = 30 sec")
     parser.add_argument("-i", "--interval", type=float, help="Choose interval size of windows. Default = 5 sec")
-
     parser.add_argument("-m", "--method", type=str, help="Choose type of analysis method. throughput, tcp, udp or (ogm, ogm2, ogmv2).")
     parser.add_argument("-ogm_orig", "--ogmv2_originator", type=str, help="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
     parser.add_argument("-ogm_eth_src", "--ogmv2_ethernet_source", type=str, help="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
@@ -701,6 +708,16 @@ if __name__ == "__main__":
     states = None
     if states_json is not None:
         states = get_state_changes(states_json)
+
+    if start_time is not None:
+        default_start_time = start_time
+    if stop_time is not None:
+        default_stop_time = stop_time
+    if interval_time is not None:
+        default_interval = interval_time
+
+    with open(addr_file,"r") as f:
+        addr_data = json.load(f)
     
     # Save files in method_type folder
     method_dirs = {
@@ -723,104 +740,110 @@ if __name__ == "__main__":
     else:
         output_dir = os.path.join(output_dir, subdir)
     os.makedirs(output_dir, exist_ok=True)
-    
-    # Allow both pcap and txt from analysis file 
-    if analysis_file.endswith(".txt"):   
-        encoding = "utf-16"
-    if analysis_file.endswith(".pcap"):
-        if output_dir is None:
-            output_dir_tshark = os.path.join(os.getcwd(), "tshark_outputs")
-        else:
-            output_dir_tshark = os.path.join(output_dir, "tshark_outputs")    
-        os.makedirs(output_dir_tshark, exist_ok=True)
 
-        txt_file = os.path.join(
-            output_dir_tshark,
-            os.path.splitext(os.path.basename(analysis_file))[0] + ".txt"
-        )
-        encoding = "utf-8"
-        run_tshark(analysis_file, txt_file)
-        analysis_file = txt_file  # continue using the generated txt
+    # Makes it possible to input multiple pcaps from folder or a single pcap    
+    input_path = Path(analysis_file)
 
-    # ensure input either given txt or converted to txt
-    if not analysis_file.endswith(".txt"):
-        print("ERROR: Failed to resolve analysis file to .txt")
-        exit()
+    if input_path.is_dir():
+        pcap_files = list(input_path.glob("*.pcap"))
+    else:
+        pcap_files = [input_path]
 
-    if start_time is not None:
-        default_start_time = start_time
-    if stop_time is not None:
-        default_stop_time = stop_time
-    if interval_time is not None:
-        default_interval = interval_time
+    # Allow both pcap and txt from analysis file
+    for pcap in pcap_files:
+        analysis_file = str(pcap)
+        input_name = pcap.stem
+        print(f"Processing: {pcap.name}")
 
-    with open(addr_file,"r") as f:
-        addr_data = json.load(f)
-
-    # TPC stream seing how it goes through the netwrok of iperf tcp stream
-    # Build graph
-    G = nx.DiGraph()
-
-    if method_type == 'ogmv2' or method_type == 'ogm' or method_type == 'ogm2':
-        if ogmv2_orig is None or ogmv2_eth_src is None:
-            print("\nERROR: Need to provide both ogmv2 originator and ethernet source node/nodes")
-            exit()
-        ogmv2_origs = [orig.strip() for orig in ogmv2_orig.split(',')]
-        ogmv2_eth_srcs = [src.strip() for src in ogmv2_eth_src.split(',')] 
-        # Load layout data (graph.json)
-        with open(json_link_nodes,"r") as f:
-            node_link_data = json.load(f)
-        nodes_pos_data = node_link_data.get("nodes", [])
-        pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
-
-        for orig in ogmv2_origs:
-            if orig not in pos_lookup:
-                print(f'\nThe ogmv2 originator {orig} is not a node in the graph.json')
-                exit()
+        if analysis_file.endswith(".txt"):   
+            encoding = "utf-16"
+        if analysis_file.endswith(".pcap"):
+            if output_dir is None:
+                output_dir_tshark = os.path.join(os.getcwd(), "tshark_outputs")
             else:
-                MAC_orig_node = mac_node(orig,reference_data=addr_data)
-            for src in ogmv2_eth_srcs:
-                if src not in pos_lookup:
-                    print(f'\nThe ethernet source {src} is not a node in the graph.json')
+                output_dir_tshark = os.path.join(output_dir, "tshark_outputs")    
+            os.makedirs(output_dir_tshark, exist_ok=True)
+
+            txt_file = os.path.join(
+                output_dir_tshark,
+                os.path.splitext(os.path.basename(analysis_file))[0] + ".txt"
+            )
+            encoding = "utf-8"
+            run_tshark(analysis_file, txt_file)
+            analysis_file = txt_file  # continue using the generated txt
+
+        # ensure input either given txt or converted to txt
+        if not analysis_file.endswith(".txt"):
+            print(f"ERROR: Failed to resolve analysis file ({pcap}) to .txt")
+            exit()
+
+        # TPC stream seing how it goes through the netwrok of iperf tcp stream
+        # Build graph
+        G = nx.DiGraph()
+
+        if method_type == 'ogmv2' or method_type == 'ogm' or method_type == 'ogm2':
+            if ogmv2_orig is None or ogmv2_eth_src is None:
+                print("\nERROR: Need to provide both ogmv2 originator and ethernet source node/nodes")
+                exit()
+            ogmv2_origs = [orig.strip() for orig in ogmv2_orig.split(',')]
+            ogmv2_eth_srcs = [src.strip() for src in ogmv2_eth_src.split(',')] 
+            # Load layout data (graph.json)
+            with open(json_link_nodes,"r") as f:
+                node_link_data = json.load(f)
+            nodes_pos_data = node_link_data.get("nodes", [])
+            pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
+
+            for orig in ogmv2_origs:
+                if orig not in pos_lookup:
+                    print(f'\nThe ogmv2 originator {orig} is not a node in the graph.json')
                     exit()
                 else:
-                    MAC_eth_src_node = mac_node(src,reference_data=addr_data)
-                    tracking_of_OGM2_at_source(addr_data=addr_data, 
-                                               file=analysis_file,
-                                               encoding=encoding,
-                                               start_time=13,
-                                               OGM2_orig_mac=MAC_orig_node,
-                                               time_interval=20,
-                                               eth_src=MAC_eth_src_node)
+                    MAC_orig_node = mac_node(orig,reference_data=addr_data)
+                for src in ogmv2_eth_srcs:
+                    if src not in pos_lookup:
+                        print(f'\nThe ethernet source {src} is not a node in the graph.json')
+                        exit()
+                    else:
+                        MAC_eth_src_node = mac_node(src,reference_data=addr_data)
+                        tracking_of_OGM2_at_source(addr_data=addr_data, 
+                                                file=analysis_file,
+                                                encoding=encoding,
+                                                start_time=13,
+                                                OGM2_orig_mac=MAC_orig_node,
+                                                time_interval=20,
+                                                eth_src=MAC_eth_src_node)
 
-    if method_type == 'tcp' or method_type == 'udp':
-        G = creation_of_edges_TCP(G=G,
-                              file=analysis_file,
-                              encoding=encoding,
-                              start_time=default_start_time,
-                              stop_time=default_stop_time,
-                              stepsize_anime=default_interval,
-                              gif=enable_gif,
-                              browser_html=enable_browser,
-                              flag_interval=enable_interval_graph,
-                              output_dir=output_dir,
-                              states=states)
-        
-        if enable_gif is True or exist_gif is True:
-            mp4_creation(output_dir=output_dir, file_name='tcp_and_udp_streams')
+        if method_type == 'tcp' or method_type == 'udp':
+            G = creation_of_edges_TCP(G=G,
+                                    file=analysis_file,
+                                    encoding=encoding,
+                                    start_time=default_start_time,
+                                    stop_time=default_stop_time,
+                                    stepsize_anime=default_interval,
+                                    gif=enable_gif,
+                                    browser_html=enable_browser,
+                                    flag_interval=enable_interval_graph,
+                                    states=states,
+                                    plot_type=method_type,
+                                    input_pcap_name=input_name,
+                                    output_dir=output_dir)
+            
+            if enable_gif is True or exist_gif is True:
+                mp4_creation(output_dir=output_dir, file_name='tcp_and_udp_streams')
 
-    if method_type == 'throughput':
-        F = all_link_throughput(G=G,
-                            file=analysis_file,
-                            encoding=encoding,
-                            start_time=default_start_time,
-                            stop_time=default_stop_time,
-                            stepsize_anime=default_interval,
-                            gif=enable_gif,
-                            browser_html=enable_browser,
-                            flag_interval=enable_interval_graph,
-                            output_dir=output_dir,
-                            states=states)
-        
-        if enable_gif is True or exist_gif is True:
-            mp4_creation(output_dir=output_dir, file_name='Throughput')
+        if method_type == 'throughput':
+            F = all_link_throughput(G=G,
+                                    file=analysis_file,
+                                    encoding=encoding,
+                                    start_time=default_start_time,
+                                    stop_time=default_stop_time,
+                                    stepsize_anime=default_interval,
+                                    gif=enable_gif,
+                                    browser_html=enable_browser,
+                                    flag_interval=enable_interval_graph,
+                                    input_pcap_name=input_name,
+                                    output_dir=output_dir,
+                                    states=states)
+            
+            if enable_gif is True or exist_gif is True:
+                mp4_creation(output_dir=output_dir, file_name='Throughput')
