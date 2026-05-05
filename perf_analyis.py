@@ -466,26 +466,33 @@ if __name__ == "__main__":
     # title = " Files used for analysis "
     # print(title.center(WIDTH, "-"))
 
-    for exp in experiments:
-        exp["nsperf"] = sorted(exp["nsperf"], key=nsperf_key)
-        nsperf_files = exp["nsperf"]
-        graph_file = exp["graphs"]
+    # for exp in experiments:
+    #     exp["nsperf"] = sorted(exp["nsperf"], key=nsperf_key)
+    #     nsperf_files = exp["nsperf"]
+    #     graph_file = exp["graphs"]
 
-        # title = f" Link loss: {exp['name']} "
-        # print()
-        # print(title.center(WIDTH, "_"))
+    #     # title = f" Link loss: {exp['name']} "
+    #     # print()
+    #     # print(title.center(WIDTH, "_"))
 
-        for f in nsperf_files:
-            interval_step, json_file_data, end_time = nsperf_interval_set(f)
+    #     for f in nsperf_files:
+    #         interval_step, json_file_data, end_time = nsperf_interval_set(f)
 
-            end_str = "" if end_time is None else str(end_time)
+    #         end_str = "" if end_time is None else str(end_time)
 
-            # print(
-            #     f"{str(f).ljust(path_width)} | "
-            #     f"interval: {str(interval_step).ljust(PLOT_SPACING)} | "
-            #     f"End time {end_str.ljust(PLOT_SPACING)} | "
-            #     f"Graph: {str(graph_file).ljust(path_width)}"
-            # )
+    #         # print(
+    #         #     f"{str(f).ljust(path_width)} | "
+    #         #     f"interval: {str(interval_step).ljust(PLOT_SPACING)} | "
+    #         #     f"End time {end_str.ljust(PLOT_SPACING)} | "
+    #         #     f"Graph: {str(graph_file).ljust(path_width)}"
+    #         # )
+
+    graph_reference_path = experiments[0]["graphs"]
+
+    with open(graph_reference_path) as f:
+        graph_reference = json.load(f)
+        
+    graph_same = True
 
     print("-" * WIDTH)
     plot_data = defaultdict(list)
@@ -494,6 +501,12 @@ if __name__ == "__main__":
         nsperf_files = exp["nsperf"]
         graph_file = exp["graphs"]
         
+        # check if they are the same graphs used
+        with open(graph_file) as f:
+            graph_data = json.load(f)
+        if graph_reference != graph_data:
+            graph_same = False
+
         title = f" Files in directory \'{exp["name"]}\' | Axis | X: {axis_names[0]} | Y: {axis_names[1]} "
         print()
         print(title.center(WIDTH, "_"))
@@ -650,3 +663,5 @@ if __name__ == "__main__":
 
     if "total_loss" in axis_names or "link_loss":
         print("\nPercentile Setting does not matter for parameters 'total_loss' or 'link_loss'")
+    if graph_same is False:
+        print("\nWARNING: Graphs used don't have same structure")
