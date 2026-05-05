@@ -5,6 +5,7 @@ from typing import Tuple, Optional, Dict, Any
 import re
 import matplotlib.pyplot as plt
 from collections import defaultdict
+import numpy as np
 
 WIDTH = 150
 PLOT_SPACING = 10
@@ -195,7 +196,10 @@ def extract_variable_full(data: dict,
     # NSPERF IS A STRING
     if isinstance(nsperf_variable, str):
         _, value = find_nsperf_variable(data, nsperf_variable)
-        return value
+        if value is not None:
+            return round(value,2)
+        else:
+            return None
     # NSPERF IS A TUPLE
     if isinstance(nsperf_variable, list) and len(nsperf_variable) == 3:
         _,value_1 = find_nsperf_variable(data=data,target=nsperf_variable[0])
@@ -206,7 +210,10 @@ def extract_variable_full(data: dict,
             print("Missing values in equation")
             return None
         value = calc_tuple_nsperf(key_1=value_1,key_2=value_2,sign=sign)
-        return value
+        if value is not None:
+            return round(value,2)
+        else:
+            return None
     if isinstance(nsperf_variable, list) and len(nsperf_variable) == 4:
         _,value_1 = find_nsperf_variable(data=data,target=nsperf_variable[0])
         sign = nsperf_variable[1]
@@ -217,7 +224,10 @@ def extract_variable_full(data: dict,
             return None
         value = calc_tuple_nsperf(key_1=value_1,key_2=value_2,sign=sign)
         value += float(nsperf_variable[3])
-        return abs(value)
+        if value is not None:
+            return abs(round(value,2))
+        else:
+            return None
 
 def normalize_nsperf(name: str) -> str:
     return name.removeprefix("nsperf_")
@@ -294,6 +304,10 @@ def pairing_files(input: Path) -> list:
         print(f"expected different formatting of directory")
         exit()
 
+######################################################
+##### PLOT ###########################
+######################################
+
 def plot_graph(x_axis: list,
                y_axis: list,
                axis_labels,
@@ -358,6 +372,37 @@ def plot_boxplot(boxplot_data: list,
 
     plt.savefig(output_file)
     plt.close(fig)
+
+def axis_units(axis_names: list) -> tuple[list,list]:
+
+    unitless = ["link_loss","total_loss","num_streams","hops","mesh_size"]
+    unit_mb = ["throughput","request_throughput"]
+    unit_time = ["latency","jitter"]
+
+    units = []
+    unit_scales = []
+
+    for name in axis_names:
+        if name in unitless:
+            unit = "[-]"
+            unitscale = 1
+        elif name in unit_mb:
+            unit = "[Mb]"
+            unitscale = 1e-6
+        elif name in unit_time:
+            unit = "[ms]"
+            unitscale = 1e-6 #maybe change ot milli if to high numbers
+        else:
+            unit = "[-]"
+            unitscale = 1
+            print(f"Could not find an Unit for this variable | Unit = {unit} | unitscale = {unitscale}")
+        units.append(unit)
+        unit_scales.append(unitscale)
+
+    return units, unit_scales
+
+def bin_size():
+    pass
 
 
 if __name__ == "__main__":
@@ -428,12 +473,12 @@ if __name__ == "__main__":
 
             end_str = "" if end_time is None else str(end_time)
 
-            print(
-                f"{str(f).ljust(path_width)} | "
-                f"interval: {str(interval_step).ljust(PLOT_SPACING)} | "
-                f"End time {end_str.ljust(PLOT_SPACING)} | "
-                f"Graph: {str(graph_file).ljust(path_width)}"
-            )
+            # print(
+            #     f"{str(f).ljust(path_width)} | "
+            #     f"interval: {str(interval_step).ljust(PLOT_SPACING)} | "
+            #     f"End time {end_str.ljust(PLOT_SPACING)} | "
+            #     f"Graph: {str(graph_file).ljust(path_width)}"
+            # )
 
     print("-" * WIDTH)
     plot_data = defaultdict(list)
@@ -442,7 +487,7 @@ if __name__ == "__main__":
         nsperf_files = exp["nsperf"]
         graph_file = exp["graphs"]
         
-        title = f" Plot Creation for directory \'{exp["name"]}\' | Axis | X: {axis_names[0]} | Y: {axis_names[1]} "
+        title = f" Files in directory \'{exp["name"]}\' | Axis | X: {axis_names[0]} | Y: {axis_names[1]} "
         print()
         print(title.center(WIDTH, "_"))
         prev_client = None
@@ -496,7 +541,45 @@ if __name__ == "__main__":
                         axis_values.append(axis_value)
 
                     print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-    if req_client and req_server:
+    
+    x_axis_values = []
+    y_axis_values = []
+    client_server = []
+    files_not_used = []
+    for loss, runs in plot_data.items():
+        box_data = defaultdict(list)
+        for entry in runs:
+            # IF set to one specific stream only save data for this stream
+            # else use every stream
+            if req_client is not None and req_server is not None:
+                if entry['client'] == req_client and entry['server'] == req_server:
+                    if entry["x_axis"] is not None and entry["y_axis"] is not None:     # if they are none we dont want them
+                        client_server.append(f"{entry['client']}-{entry['server']}")
+                        x_axis_values.append(entry["x_axis"])
+                        y_axis_values.append(entry["y_axis"])
+                        value = entry["y_axis"]
+                    else:
+                        files_not_used.append(f"{entry['client']}-{entry['server']}_{entry["num"]}")
+                plot_title = f"link_loss_{link_loss}_{axis_names[0]}_{axis_names[1]}_stream_{entry['client']}_{entry['server']}"
+            else:
+                if entry["x_axis"] is not None and entry["y_axis"] is not None:
+                    client_server.append(f"{entry['client']}-{entry['server']}")
+                    x_axis_values.append(entry["x_axis"])
+                    y_axis_values.append(entry["y_axis"])
+                    value = entry["y_axis"] 
+                    box_data[entry["x_axis"]].append(value)
+                else:
+                    files_not_used.append(f"{entry['client']}_{entry['server']}_{entry['num']}")
+                plot_title = f"{link_loss=}_axis_{axis_names[0]}_{axis_names[1]}_stream_all"
+    title = " Files NOT used | Because entail values of None"
+    print(title.center(WIDTH, "_"))
+    # finding file which is not use
+    for file_id in files_not_used:
+        for path in nsperf_files:
+            if file_id in str(path):
+                print(path)
+
+    if req_client is not None and req_server is not None:
         stream = f"STREAM | Client: {req_client} | Server: {req_server}"
     else:
         stream = "ALL STREAMS USED"
@@ -504,47 +587,31 @@ if __name__ == "__main__":
 
     print(title.center(WIDTH, "_"))
 
-    for loss, runs in plot_data.items():
-        x_axis_values = []
-        y_axis_values = []
-        client_server = []
-        box_data = defaultdict(list)
-        for entry in runs:
-            # IF set to one specific stream only save data for this stream
-            # else use every stream
-            if req_client and req_server:
-                if entry['client'] == req_client and entry['server'] == req_server:
-                    client_server.append(f"{entry['client']}-{entry['server']}")
-                    x_axis_values.append(entry["x_axis"])
-                    y_axis_values.append(entry["y_axis"])
-                    value = entry["y_axis"]
-                    box_data[entry["x_axis"]].append(value if value is not None else 0)
-                    plot_title = f"link_loss_{link_loss}_{axis_names[0]}_{axis_names[1]}_stream_{entry['client']}_{entry['server']}"
-            else:
-                client_server.append(f"{entry['client']}-{entry['server']}")
-                x_axis_values.append(entry["x_axis"])
-                y_axis_values.append(entry["y_axis"])
-                value = entry["y_axis"]
-                box_data[entry["x_axis"]].append(value if value is not None else 0)
-                #box_data[f"{entry['client']}-{entry['server']}"].append(value if value is not None else 0)
-                plot_title = f"{link_loss=}_axis_{axis_names[0]}_{axis_names[1]}_stream_all"
-    
-        
-        plot_graph(
-            x_axis=x_axis_values,
-            y_axis=y_axis_values,
-            axis_labels = axis_names,
-            fontsize=12,
-            picture_size=(16, 9),
-            file_path=output_path,
-            type_graph = 1,
-            file_name=f"{plot_title}.png"
-        )
-        plot_boxplot(
-            boxplot_data=box_data,
-            axis_labels = axis_names,
-            fontsize=12,
-            picture_size=(16, 9),
-            file_path=output_path,
-            file_name=f"{plot_title}_boxplot.png"
-        )
+
+    units, unit_scales = axis_units(axis_names=axis_names)
+    x_axis_values = np.array(x_axis_values)
+    scaled_x_values = x_axis_values * unit_scales[0]
+    y_axis_values = np.array(y_axis_values)
+    scaled_y_values = y_axis_values * unit_scales[1]
+    axis_labels = []
+    for i, axis in enumerate(axis_names):
+        axis_labels.append(f"{axis} {units[i]}")
+    print(axis_labels)
+    plot_graph(
+        x_axis=scaled_x_values,
+        y_axis=scaled_y_values,
+        axis_labels = axis_labels,
+        fontsize=12,
+        picture_size=(16, 9),
+        file_path=output_path,
+        type_graph = 1,
+        file_name=f"{plot_title}.png"
+    )
+    plot_boxplot(
+        boxplot_data=box_data,
+        axis_labels = axis_labels,
+        fontsize=12,
+        picture_size=(16, 9),
+        file_path=output_path,
+        file_name=f"{plot_title}_boxplot.png"
+    )
