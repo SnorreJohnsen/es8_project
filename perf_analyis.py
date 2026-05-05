@@ -135,23 +135,16 @@ def nsperf_interval_set(file: Path) -> Tuple[Optional[dict], dict]:
 
     return intervals, data, end_time
 
-def percentile_refactor(percentile: float) -> str:
-    if not (0 <= percentile <= 100):
-        raise argparse.ArgumentTypeError("Percentile must be between 0 and 100")
-    
-    if percentile <= 1:
-        prc_percentile = percentile
-        percentile = percentile * 100
-        print(f"\nWrong Formatting {prc_percentile}, expect in range above 1 to 100, therefore set to {percentile}")
-
-    allowed = [0, 50, 95, 99]
-    closest = min(allowed, key=lambda x: abs(x - percentile))
-    if closest != percentile:
-        print(f"\nThe ONLY possible percentiles: {allowed} | {percentile} Therefore changed to {closest} \n")
-    if closest == 0:
-        return "mean_ns"
+def percentile_refactor(percentile: str) -> str:
+    allowed = ["50", "95", "99","mean","min","max"]
+    if percentile not in allowed:
+        print(f"The percentile chosen {percentile} is not within {allowed}")
+        exit()
     else:
-        return f"p{closest}_ns"
+        if percentile.isdigit():
+            return f"p{percentile}_ns"
+        else:
+            return f"{percentile}_ns"
 
 def find_nsperf_variable(data: dict, target: str) -> Optional[Tuple[str, str]]:
     if target in data:
@@ -223,9 +216,9 @@ def extract_variable_full(data: dict,
             print("Missing values in equation")
             return None
         value = calc_tuple_nsperf(key_1=value_1,key_2=value_2,sign=sign)
-        value += float(nsperf_variable[3])
+        value = float(nsperf_variable[3]) - value
         if value is not None:
-            return abs(round(value,2))
+            return round(value,2)
         else:
             return None
 
@@ -348,12 +341,13 @@ def plot_boxplot(boxplot_data: list,
                  file_name: str,
                  fontsize: int = 12,
                  picture_size: tuple = (16,9)):
-    sorted_items = sorted(box_data.items(), key=lambda x: float(x[0]))
-
-    labels = [k for k, _ in sorted_items]
-    values = [v for _, v in sorted_items]
-    # labels = list(boxplot_data.keys())
-    # values = list(boxplot_data.values())
+    if axis_labels[0] != "link_loss [-]":
+        sorted_items = sorted(boxplot_data.items(),key=lambda item: float(item[0].split("_")[0]))
+        labels = [k for k, _ in sorted_items]
+        values = [v for _, v in sorted_items]
+    else:
+        labels = box_data.keys()
+        values = box_data.values()
 
     fig, ax = plt.subplots(figsize=picture_size)
 
@@ -401,27 +395,40 @@ def axis_units(axis_names: list) -> tuple[list,list]:
 
     return units, unit_scales
 
-def bin_size():
-    pass
+def bin_splitting(values: list, n_bins: int = 10) -> list:
+    values = np.array(values)
+    sorted_vals = np.sort(values)
+    # Split by index (guarantees equal counts)
+    splits = np.array_split(sorted_vals, n_bins)
+    
+    return [s.tolist() for s in splits]
 
+def bin_naming(bins: list[list] ) -> list:
+    bin_names = []
+    for bin in bins:
+        min_val = min(bin)
+        max_val = max(bin)
+        bin_names.append(f"{min_val:.5f}_{max_val:.5f}")
+    return bin_names
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
     parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
     parser.add_argument('-o','--output',type=Path,help='The desired directory for saving PLOTS')
-    parser.add_argument('-g','--graph',type=json_path,help='The directory or file which is the entail nodes and links desription (Json Format)')
-    parser.add_argument('-p','--percentile',type=float,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
+    # parser.add_argument('-g','--graph',type=json_path,help='The directory or file which is the entail nodes and links desription (Json Format)')
+    parser.add_argument('-p','--percentile',type=str,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
     parser.add_argument('-x','--x_axis',type=str,required=True,help='Variable for X axis')
     parser.add_argument('-y','--y_axis',type=str,required=True,help='Variable for Y axis')
     parser.add_argument('-c','--client',type=str,help='If Desire only observe one specific Stream Set Client and Server')
     parser.add_argument('-s','--server',type=str,help='If Desire only observe one specific Stream Set Client and Server')
+    parser.add_argument('-f','--filter',action="store_true",help='Filter streams at time stamp: 0')
     args = parser.parse_args()
 
     input_path = args.input
     output_path = args.output or Path("./plots")
     req_client = args.client
     req_server = args.server
-
+    filter_0 = args.filter
     experiments = pairing_files(input=input_path)
     percentile = percentile_refactor(args.percentile)
 
@@ -429,7 +436,7 @@ if __name__ == "__main__":
 
     variable_map  = []
     variable_map .append({"name": "link_loss", "aliases": ["link_loss", "link loss"], "nsperf": "link_loss"})                     #Need to change to just what's in graph
-    variable_map .append({"name": "total_loss", "aliases": ["total_loss", "total loss"], "nsperf": ["received_bits", "/", "generated_bits","-1"]})
+    variable_map .append({"name": "total_loss", "aliases": ["total_loss", "total loss"], "nsperf": ["received_bits", "/", "generated_bits","1"]})
     variable_map .append({"name": "throughput", "aliases": ["throughput", "tp"], "nsperf": "received_bps"})
     variable_map .append({"name": "latency", "aliases": ["latency", "lat"], "nsperf": "host_local_latency_estimate_ns"})    #IDK if this is the right latency
     variable_map .append({"name": "jitter", "aliases": ["jitter", "jit"], "nsperf": "host_local_latency_jitter_abs_ns"})    #IDK if this is the right jitter
@@ -456,17 +463,17 @@ if __name__ == "__main__":
     path_width = max(len(str(f))for exp in experiments for f in exp["nsperf"]) + 2
 
 
-    title = " Files used for analysis "
-    print(title.center(WIDTH, "-"))
+    # title = " Files used for analysis "
+    # print(title.center(WIDTH, "-"))
 
     for exp in experiments:
         exp["nsperf"] = sorted(exp["nsperf"], key=nsperf_key)
         nsperf_files = exp["nsperf"]
         graph_file = exp["graphs"]
 
-        title = f" Link loss: {exp['name']} "
-        print()
-        print(title.center(WIDTH, "_"))
+        # title = f" Link loss: {exp['name']} "
+        # print()
+        # print(title.center(WIDTH, "_"))
 
         for f in nsperf_files:
             interval_step, json_file_data, end_time = nsperf_interval_set(f)
@@ -496,12 +503,8 @@ if __name__ == "__main__":
             # Just for structure
             stem = Path(f).stem  
             client, server, num = stem.split("_")
-            if client != prev_client and first_client is False:
-                    print("=" * WIDTH)
             interval_step, json_file_data, end_time = nsperf_interval_set(f)
             data,ids = sorting_data_nsperf(file_data=json_file_data,interval_step=interval_step,percentile=percentile,max_window=None)
-            prev_client = client
-            first_client = False
             """         This just for intermediate for seing what is saved    """
             # file_text = f" Extracted data from file \'{f}\' with ID {ids.get("flow_id")} "
             # print(file_text.center(WIDTH, "-"))
@@ -518,15 +521,33 @@ if __name__ == "__main__":
                 for axis_nsperf in axis_nsperfs:
                         axis_value = extract_variable_full(data=data,nsperf_variable=axis_nsperf)
                         axis_values.append(axis_value)
-                print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-
-                plot_data[link_loss].append({
-                                            "client": client,
-                                            "server": server,
-                                            "num": num,
-                                            "x_axis": axis_values[0],
-                                            "y_axis": axis_values[1]
-                                            })
+                if filter_0 is True and num == '0':
+                    continue
+                else:
+                    if req_client is not None and req_server is not None:
+                        if client == req_client and server == req_server:
+                            print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+                            plot_data[link_loss].append({
+                                                        "client": client,
+                                                        "server": server,
+                                                        "num": num,
+                                                        "x_axis": axis_values[0],
+                                                        "y_axis": axis_values[1]
+                                                        })
+                    else:
+                        print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+                        plot_data[link_loss].append({
+                                                    "client": client,
+                                                    "server": server,
+                                                    "num": num,
+                                                    "x_axis": axis_values[0],
+                                                    "y_axis": axis_values[1]
+                                                    })
+                        if client != prev_client and first_client is False:
+                            title = f" Client: {client} "
+                            print(title.center(WIDTH,"="))
+                        prev_client = client
+                        first_client = False
             else:
                 for w_key, w_data in data.items():
                     axis_values = []
@@ -546,8 +567,8 @@ if __name__ == "__main__":
     y_axis_values = []
     client_server = []
     files_not_used = []
+    box_data = defaultdict(list)
     for loss, runs in plot_data.items():
-        box_data = defaultdict(list)
         for entry in runs:
             # IF set to one specific stream only save data for this stream
             # else use every stream
@@ -557,20 +578,17 @@ if __name__ == "__main__":
                         client_server.append(f"{entry['client']}-{entry['server']}")
                         x_axis_values.append(entry["x_axis"])
                         y_axis_values.append(entry["y_axis"])
-                        value = entry["y_axis"]
                     else:
                         files_not_used.append(f"{entry['client']}-{entry['server']}_{entry["num"]}")
-                plot_title = f"link_loss_{link_loss}_{axis_names[0]}_{axis_names[1]}_stream_{entry['client']}_{entry['server']}"
+                plot_title = f"data_{percentile}_link_loss_{link_loss}_{axis_names[0]}_{axis_names[1]}_stream_{entry['client']}_{entry['server']}"
             else:
                 if entry["x_axis"] is not None and entry["y_axis"] is not None:
                     client_server.append(f"{entry['client']}-{entry['server']}")
                     x_axis_values.append(entry["x_axis"])
                     y_axis_values.append(entry["y_axis"])
-                    value = entry["y_axis"] 
-                    box_data[entry["x_axis"]].append(value)
                 else:
                     files_not_used.append(f"{entry['client']}_{entry['server']}_{entry['num']}")
-                plot_title = f"{link_loss=}_axis_{axis_names[0]}_{axis_names[1]}_stream_all"
+                plot_title = f"data_{percentile}_{link_loss=}_axis_{axis_names[0]}_{axis_names[1]}_stream_all"
     title = " Files NOT used | Because entail values of None"
     print(title.center(WIDTH, "_"))
     # finding file which is not use
@@ -596,7 +614,6 @@ if __name__ == "__main__":
     axis_labels = []
     for i, axis in enumerate(axis_names):
         axis_labels.append(f"{axis} {units[i]}")
-    print(axis_labels)
     plot_graph(
         x_axis=scaled_x_values,
         y_axis=scaled_y_values,
@@ -607,11 +624,29 @@ if __name__ == "__main__":
         type_graph = 1,
         file_name=f"{plot_title}.png"
     )
+    if axis_names[0] != "link_loss":
+        bin_values = bin_splitting(scaled_x_values)
+        bin_names = bin_naming(bin_values)
+
+        for x, y in zip(scaled_x_values, scaled_y_values):
+            for i, bin_list in enumerate(bin_values):
+                if x in bin_list:
+                    box_data[bin_names[i]].append(y)
+                    break
+
+    else:
+        # no bins, just group by value
+        for x, y in zip(x_axis_values, scaled_y_values):
+            box_data[x].append(y)
+
     plot_boxplot(
-        boxplot_data=box_data,
+        boxplot_data = box_data,
         axis_labels = axis_labels,
         fontsize=12,
         picture_size=(16, 9),
         file_path=output_path,
         file_name=f"{plot_title}_boxplot.png"
     )
+
+    if "total_loss" in axis_names or "link_loss":
+        print("\nPercentile Setting does not matter for parameters 'total_loss' or 'link_loss'")
