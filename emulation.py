@@ -710,28 +710,7 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
 
     return Sim(start_timestamp=t_start.timestamp(), duration=duration, sched_plan=sched_sorted, sched_real=sched_real)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('graph', 
-                        help='Graph of the full network mesh (json)')
-    parser.add_argument('-s', '--sim-sched', required=False, 
-                        help='Simulation schedule (json)')
-    parser.add_argument('-g', '--gen-sched', required=False, action="store_true",
-                        help='Generate schedule with iperf3 traffic')
-    parser.add_argument('--drop-model', type=float, required=False,
-                        help='Add dropout model schedule with given drop percentage per timestep to schedule.')
-    parser.add_argument('-d', '--duration', type=int, required=False, 
-                        help='Duration for simulation [s]')
-    parser.add_argument('-l', '--link-loss', type=str, required=False, 
-                        help='Set link loss fx "1%%". If not set the link loss from graph is used.')
-    parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', 
-                        help='Set verbosity.')
-    args = parser.parse_args()
-
-    global verbosity
-    verbosity = args.verbosity
-    globalTerminalGroup.setVerbosity(args.verbosity)
-
+def setup_output_dirs():
     # Setup output directories
     try:
         shutil.rmtree(pcap_dir)
@@ -744,6 +723,7 @@ def main():
     os.makedirs(exist_ok=False, name=iperf3_dir)
     os.makedirs(exist_ok=False, name=nsperf_dir)
 
+def load_graph(args, adapter_pos, verbosity):
     # Load mesh json
     if not os.path.isfile(args.graph):
         eprint(f'File not found: {args.graph}')
@@ -755,16 +735,13 @@ def main():
         print("graph")
         pprint(graph)
 
-    # Place device adapters
-    adapter_pos = [(765.0, 5000.0, 0.0), 
-                   (5510.0, 2260.0, 0.0),
-                   (15000.0, 7739.0, 0.0), 
-                   (24489.0, 7739.0, 0.0), 
-                   (29234.0, 5000.0, 0.0)]
     place_test_adapters(graph, adapter_pos)
     with open(graph_json_path, "w") as f:
         json.dump(graph, f)
 
+    return graph
+
+def apply_network(args, graph):
     # Create network name spaces with links from json graph
     tc_script = os.path.join(repo_root, "emulation_scripts", "tc.sh")
 
@@ -776,18 +753,25 @@ def main():
 
     mn_network.apply(graph, link_command=link_command)
 
+def filter_node_ids(verbosity):
     # Init batman-adv on all nodes and adapters
     rmap = get_remote_mapping([Remote()]) # running everything locally
     all_ids = rmap.keys()
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
     adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
 
+    if verbosity != "quiet":
+        print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
+
+    return drone_ids, adapter_ids, all_ids
+
+def start_node_tcpdumps(all_ids, pcap_dir):
     # Start tcpdump for each node
     for id in all_ids:
         start_tcpdump(id, f"br-{id}", "switch", pcap_dir)
     time.sleep(0.5)  # allow to launch tcpdumps
-    
 
+def build_sched(args, drone_ids, verbosity):
     # Load or generate schedule
     sched = None
     duration = None
@@ -841,16 +825,15 @@ def main():
     if duration is None: 
         raise ValueError("Cannot perform simulation if duration is not set with --duration or specified in the loaded schedule")
 
+    return sched, duration
 
-
-    if verbosity != "quiet":
-        print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
-
+def start_batadv_in_nodes(drone_ids, adapter_ids):
     for nid in drone_ids:
         start_batadv(nid, version5=True)
     for nid in adapter_ids:
         start_batadv(nid, version5=True)
 
+def setup_devices(adapter_ids):
     device_ids = []
     for adapter_id in adapter_ids:
         device_id = adapter_id.replace("a", "d")
@@ -858,9 +841,36 @@ def main():
         create_device(device_id, adapter_id)
     time.sleep(2)
 
+    return device_ids
+
+def start_device_tcpdumps(device_ids, pcap_dir):
     # Add devices and start tcpdump
     for device_id in device_ids:
         start_tcpdump(device_id, "veth0", f"ns-{device_id}", pcap_dir)
+
+def apply_throughput_override(graph, verbosity):
+    # Apply throughput override
+    batctl_set_neigh_throughputs(graph)
+    if verbosity != "quiet":
+        print("Wait for throughput override")
+    time.sleep(10) # wait for moving average in throughput override
+
+def setup_simulation_environment(args, adapter_pos, pcap_dir, verbosity):
+    graph = load_graph(args, adapter_pos, verbosity)
+
+    apply_network(args, graph)
+
+    drone_ids, adapter_ids, all_ids = filter_node_ids(verbosity)
+
+    start_node_tcpdumps(all_ids, pcap_dir)
+    
+    sched, duration = build_sched(args, drone_ids, verbosity)
+
+    start_batadv_in_nodes(drone_ids, adapter_ids)
+
+    device_ids = setup_devices(adapter_ids)
+
+    start_device_tcpdumps(device_ids, pcap_dir)
 
     start_iperf3_servers(device_ids)
     start_nsperf_servers(device_ids)
@@ -872,11 +882,43 @@ def main():
         print("Wait for batman-adv to be ready")
     time.sleep(10) # wait for batman to be ready
 
-    # Apply throughput override
-    batctl_set_neigh_throughputs(graph)
-    if verbosity != "quiet":
-        print("Wait for throughput override")
-    time.sleep(10) # wait for moving average in throughput override
+    apply_throughput_override(graph, verbosity)
+
+    return graph, sched, duration
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('graph', 
+                        help='Graph of the full network mesh (json)')
+    parser.add_argument('-s', '--sim-sched', required=False, 
+                        help='Simulation schedule (json)')
+    parser.add_argument('-g', '--gen-sched', required=False, action="store_true",
+                        help='Generate schedule with iperf3 traffic')
+    parser.add_argument('--drop-model', type=float, required=False,
+                        help='Add dropout model schedule with given drop percentage per timestep to schedule.')
+    parser.add_argument('-d', '--duration', type=int, required=False, 
+                        help='Duration for simulation [s]')
+    parser.add_argument('-l', '--link-loss', type=str, required=False, 
+                        help='Set link loss fx "1%%". If not set the link loss from graph is used.')
+    parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', 
+                        help='Set verbosity.')
+    args = parser.parse_args()
+
+    global verbosity
+    verbosity = args.verbosity
+    globalTerminalGroup.setVerbosity(args.verbosity)
+
+    setup_output_dirs()
+
+    # Place device adapters
+    adapter_pos = [(765.0, 5000.0, 0.0), 
+                   (5510.0, 2260.0, 0.0),
+                   (15000.0, 7739.0, 0.0), 
+                   (24489.0, 7739.0, 0.0), 
+                   (29234.0, 5000.0, 0.0)]
+    graph, sched, duration = setup_simulation_environment(
+            args, adapter_pos, pcap_dir, verbosity
+            )
 
     sim = run_sim_sched(graph=graph, sched=sched, duration=duration)
     with open(sim_sched_json_path, "wb") as f:
