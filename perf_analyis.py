@@ -443,22 +443,56 @@ def bin_naming(bins: list[list] ) -> list:
         bin_names.append(f"{min_val:.5f}_{max_val:.5f}")
     return bin_names
 
-def num_stream(start: int,
-               stop: int,
-               reference_stream_start: int) -> tuple[float,float]:
-    start_reference = start - reference_stream_start
-    stop_reference = stop - reference_stream_start
-    time_interval_ns = stop_reference - start_reference
+def convert_ns_to_s_list_numstreams(starts_ns: list[int],
+                    stops_ns: list[int]) -> tuple[int, list[float], list[float]]:
+    
+    if not starts_ns or not stops_ns:
+        return None, [], []
 
-    time_intreval_s = time_interval_ns * 1e-9
-    start_s = start_reference * 1e-9
+    # 🔥 reference = global minimum start
+    reference = min(starts_ns)
 
-    time_intreval_s = round(time_intreval_s,0)
-    start_s = round(start_s,0)
+    start_s_list = []
+    stop_s_list = []
 
-    stop_s = start_s + time_intreval_s
-    return start_s,stop_s
+    for start, stop in zip(starts_ns, stops_ns):
+        start_reference = start - reference
+        stop_reference = stop - reference
 
+        time_interval_ns = stop_reference - start_reference
+
+        time_interval_s = round(time_interval_ns * 1e-9, 0)
+        start_s = round(start_reference * 1e-9, 0)
+
+        stop_s = start_s + time_interval_s
+
+        start_s_list.append(start_s)
+        stop_s_list.append(stop_s)
+
+    return start_s_list, stop_s_list
+
+def add_active_stream_count(streams: list[dict]) -> list[dict]:
+    for i, s in enumerate(streams):
+        count = 1
+
+        for o in streams:
+
+            # ❌ skip self
+            if (
+                s["client"] == o["client"]
+                and s["server"] == o["server"]
+                and s["num"] == o["num"]
+            ):
+                continue
+
+            # overlap condition
+            if o["start_s"] <= s["stop_s"] and o["stop_s"] >= s["start_s"]:
+                count += 1
+
+        s["active_streams"] = count
+
+    return streams
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
     parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
@@ -494,7 +528,7 @@ if __name__ == "__main__":
     variable_map .append({"name": "throughput", "aliases": ["throughput", "tp"], "nsperf": "received_bps"})
     variable_map .append({"name": "latency", "aliases": ["latency", "lat"], "nsperf": "host_local_latency_estimate_ns"})    #IDK if this is the right latency
     variable_map .append({"name": "jitter", "aliases": ["jitter", "jit"], "nsperf": "host_local_latency_jitter_abs_ns"})    #IDK if this is the right jitter
-    variable_map .append({"name": "num_streams", "aliases": ["num_streams", "num streams"], "nsperf": ["send_start_ns", "recv_end_ns"]})
+    variable_map .append({"name": "num_streams", "aliases": ["num_streams", "num streams"], "nsperf": ["send_start_ns", "send_end_ns"]})
     variable_map .append({"name": "request_throughput", "aliases": ["request_throughput", "request throughput", "req_tp", "req tp"], "nsperf": "generated_bps"}) # NOT Sure if the right one
     variable_map .append({"name": "hops", "aliases": ["hops"], "nsperf": "IDK"})                                            # STILL NOT SURE IF POSSIBLE
     variable_map .append({"name": "mesh_size", "aliases": ["mesh_size", "mesh size"], "nsperf": "mesh_size"})                           #ALSO TAKE FROM GRAPH
@@ -596,23 +630,21 @@ if __name__ == "__main__":
                 for axis_nsperf in axis_nsperfs:
                         axis_value = extract_variable_full(data=data,nsperf_variable=axis_nsperf)
                         axis_values.append(axis_value)
-                if filter_0 is True and num == '0':
-                    continue
-                else:
-                    if client in req_client and server in req_server:
-                        if client != prev_client and first_client is False:
-                            title = f" Client: {client} "
-                            print(title.center(WIDTH,"="))
-                        print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-                        plot_data[link_loss].append({
-                                                    "client": client,
-                                                    "server": server,
-                                                    "num": num,
-                                                    "x_axis": axis_values[0],
-                                                    "y_axis": axis_values[1]
-                                                    })
-                        prev_client = client
-                        first_client = False
+            
+                plot_data[link_loss].append({
+                                            "client": client,
+                                            "server": server,
+                                            "num": num,
+                                            "x_axis": axis_values[0],
+                                            "y_axis": axis_values[1]
+                                            })
+                if client in req_client and server in req_server:
+                    if client != prev_client and first_client is False:
+                        title = f" Client: {client} "
+                        print(title.center(WIDTH,"="))
+                    print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+                    prev_client = client
+                    first_client = False
             else:
                 for w_key, w_data in data.items():
                     axis_values = []
@@ -628,11 +660,50 @@ if __name__ == "__main__":
 
                     print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
     
-    x_axis_values = []
-    y_axis_values = []
+    axis_values = []
     client_server = []
     files_not_used = []
     box_data = defaultdict(list)
+
+    num_stream_axis = None
+    if axis_names[0] == "num_streams":
+        num_stream_axis = "x_axis"
+    if axis_names[1] == "num_streams":
+        num_stream_axis = "y_axis"
+
+    if num_stream_axis is not None:
+        for loss, runs in plot_data.items():
+            starts_ns = []
+            stops_ns = []
+            streams = []
+            for entry in runs:
+                if entry[num_stream_axis] is not None:
+                    start_ns,stop_ns= entry[num_stream_axis]
+                    starts_ns.append(start_ns)
+                    stops_ns.append(stop_ns)
+                    streams.append({
+                        "entry": entry,
+                        "client": entry["client"],
+                        "server": entry["server"],
+                        "num": entry["num"],
+                        # Only temporarily
+                        "start_ns": start_ns,
+                        "stop_ns": stop_ns
+                    })
+            starts_s, stops_s = convert_ns_to_s_list_numstreams(starts_ns, stops_ns)
+            # FOR DEBUG
+            sorted_start_s = sorted(starts_s)
+            # print(sorted_start_s)
+            for i, s in enumerate(streams):
+                s.pop("start_ns")
+                s.pop("stop_ns")
+                s["start_s"] = starts_s[i]
+                s["stop_s"] = stops_s[i]
+            streams = add_active_stream_count(streams)
+            for s in streams:
+                entry = s["entry"]
+                entry[num_stream_axis] = s["active_streams"]
+
     for loss, runs in plot_data.items():
         for entry in runs:
             # IF set to one specific stream only save data for this stream
@@ -640,8 +711,9 @@ if __name__ == "__main__":
             if entry['client'] in req_client and entry['server'] in req_server:
                 if entry["x_axis"] is not None and entry["y_axis"] is not None:     # if they are none we dont want them
                     client_server.append(f"{entry['client']}-{entry['server']}")
-                    x_axis_values.append(entry["x_axis"])
-                    y_axis_values.append(entry["y_axis"])
+                    axis_values.append({"x_axis": entry["x_axis"],
+                                        "y_axis": entry["y_axis"]
+                                        })
                 else:
                     files_not_used.append(f"{entry['client']}-{entry['server']}_{entry["num"]}")
     title = " Files NOT used | Because entail values of None"
@@ -682,30 +754,17 @@ if __name__ == "__main__":
 
     scaled_values = []
     units, unit_scales = axis_units(axis_names=axis_names)
-    x_axis_values = np.array(x_axis_values)
-    scaled_x_values = x_axis_values * unit_scales[0]
-    y_axis_values = np.array(y_axis_values)
-    scaled_y_values = y_axis_values * unit_scales[1]
-    scaled_values.append(scaled_x_values)
-    scaled_values.append(scaled_y_values)
 
-    start_all_s = []
-    stop_all_s = []
-    for i, axis in enumerate(axis_names):
-        if axis == "num_streams":
-            for (start,stop) in scaled_values[i]:
-                start_all_s.append(start)
-                stop_all_s.append(stop)
-            reference = min(start_all_s)
-            start_all_s = []
-            stop_all_s = []
-            for (start,stop) in scaled_values[i]:
-                start_s, stop_s = num_stream(int(start),int(stop),(int(reference)))
-                start_all_s.append(start_s)
-                stop_all_s.append(stop_s)
+    axis_keys = ["x_axis", "y_axis"]
 
-    print(start_all_s)
-    print(stop_all_s)
+    scaled_values = []
+
+    for key, scale in zip(axis_keys, unit_scales):
+        values = np.array([entry[key] for entry in axis_values])
+        scaled_values.append(values * scale)
+
+    scaled_x_values, scaled_y_values = scaled_values
+
 
     axis_labels = []
     for i, axis in enumerate(axis_names):
