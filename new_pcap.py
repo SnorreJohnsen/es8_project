@@ -92,10 +92,10 @@ def run_tshark(pcap_file, output_txt):
         subprocess.run(cmd, stdout=f, check=True)
 
 def mp4_creation(output_dir: str,
-                 file_name: str
-                 ):
+                 file_name: str,
+                 input_pcap_name: str):
     
-    frame_files = sorted(glob.glob(f"{output_dir}/frame_*.png"))
+    frame_files = sorted(glob.glob(f"{output_dir}/{input_pcap_name}/frame_*.png"))
 
     if not frame_files:
         print("No frames found. Skipping video creation.")
@@ -106,18 +106,18 @@ def mp4_creation(output_dir: str,
             "ffmpeg",
             "-y",
             "-framerate", "0.5",
-            "-i", f"{output_dir}/frame_%04d.png",
+            "-i", f"{output_dir}/{input_pcap_name}/frame_%04d.png",
             "-vf", "scale=1920:1080:flags=lanczos",
             "-c:v", "libx264",
             "-preset", "veryslow",
             "-crf", "12",
             "-pix_fmt", "yuv420p",
-            f"{output_dir}/{file_name}.mp4"
+            f"{output_dir}/{input_pcap_name}/{file_name}.mp4"
         ]
 
         subprocess.run(ffmpeg_cmd, check=True)
 
-        print(f"Video saved at {output_dir}/{file_name}.mp4")
+        print(f"Video saved at {output_dir}/{input_pcap_name}/{file_name}.mp4")
 
 def html_to_png(html_file, output_png):
     assert os.path.exists(html_file), html_file
@@ -128,7 +128,7 @@ def html_to_png(html_file, output_png):
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument(f"--window-size={WIDTH},{HEIGHT}")
-    options.add_argument("--force-device-scale-factor=2")
+    options.add_argument("--force-device-scale-factor=4")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-software-rasterizer")
 
@@ -464,9 +464,11 @@ def all_link_throughput(*,
                             print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs(output_dir, exist_ok=True)
                         frame_idx += 1
-                        html_file = f"{output_dir}/graph_{input_pcap_name}/graph_{float(time):.2f}_{input_pcap_name}.html"
-                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
+                        base_folder = f'{output_dir}/{input_pcap_name}'
+                        html_file = f"{base_folder}/graph_{float(time):.2f}.html"
+                        png_file = f"{base_folder}/frame_{frame_idx:04d}.png"
                         Path(html_file).parent.mkdir(parents=True, exist_ok=True)
+                        Path(png_file).parent.mkdir(parents=True, exist_ok=True)
                         creation_of_pyvis(G=G,
                                           index=time,
                                           reference_data=addr_data,
@@ -620,9 +622,11 @@ def creation_of_edges_TCP(*,
                             print(f"Animation Time: {anime_prev} | Time is {time}")
                         os.makedirs(output_dir, exist_ok=True)
                         frame_idx += 1
-                        html_file = f"{output_dir}/graph_{input_pcap_name}/graph_{float(time):.2f}_{input_pcap_name}.html"
-                        png_file = f"{output_dir}/frame_{frame_idx:04d}.png"
+                        base_folder = f'{output_dir}/{input_pcap_name}'
+                        html_file = f"{base_folder}/graph_{float(time):.2f}.html"
+                        png_file = f"{base_folder}/frame_{frame_idx:04d}.png"
                         Path(html_file).parent.mkdir(parents=True, exist_ok=True)
+                        Path(png_file).parent.mkdir(parents=True, exist_ok=True)
                         print(f"TCP & UDP streams existing is:")
 
                         # sort after count amount
@@ -829,7 +833,7 @@ if __name__ == "__main__":
                                     output_dir=output_dir)
             
             if enable_gif is True or exist_gif is True:
-                mp4_creation(output_dir=output_dir, file_name='tcp_and_udp_streams')
+                mp4_creation(output_dir=output_dir, file_name='tcp_and_udp_streams', input_pcap_name=input_name)
 
         if method_type == 'throughput':
             F = all_link_throughput(G=G,
@@ -846,4 +850,4 @@ if __name__ == "__main__":
                                     states=states)
             
             if enable_gif is True or exist_gif is True:
-                mp4_creation(output_dir=output_dir, file_name='Throughput')
+                mp4_creation(output_dir=output_dir, file_name='Throughput', input_pcap_name=input_name)

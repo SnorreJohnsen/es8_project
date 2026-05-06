@@ -97,13 +97,18 @@ def setting_node_attributes(node_mac,
     color = "gray"
     if "a" in node_id:
         color = "red"
+        #label = f"MAC: {node_mac}\nADAPTER: {node_id}"
+        label = f"ADAPTER: {node_id}"   # only use this for figure
     elif "n" in node_id:
         color = "blue"
+        #label = f"MAC: {node_mac}\nNODE: {node_id}"
+        label = f"NODE: {node_id}"   # only use this for figure
     elif "d" in node_id:
         color = "green" if plot_type == "throughput" else "blue"
+        #label = f"MAC: {node_mac}\nDEVICE: {node_id}"
+        label = f"DEVICE: {node_id}"   # only use this for figure
 
-    # Setting label and shape for different states
-    label = f"MAC: {node_mac}\nNODE: {node_id}"
+    # Setting shape for different states
     shape = "dot"
     current_state = None
 
@@ -130,7 +135,7 @@ def setting_node_attributes(node_mac,
     
     return label, shape, color
 
-###############################################################################
+##############################################################################
 #_______________________________ HTML FUNCTIONS ______________________________#
 ###############################################################################
 
@@ -177,20 +182,20 @@ def accumulative_injection(color_bar_title: str,
             position: fixed;
             top: 20px;
             right: 30px;
-            width: 500px;  /* maybe reduce from 1540 */
-            padding: 12px;
+            width: 800px;  /* maybe reduce from 1540 */
+            padding: 24px;
             background: white;
-            border-radius: 8px;
+            border-radius: 18px;
             font-family: Arial;
-            font-size: 14px;
+            font-size: 28px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 9999;
         }
 
         #heatmap-bar {
-            height: 20px;
+            height: 30px;
             width: 100%;
-            border-radius: 5px;
+            border-radius: 10px;
             background: linear-gradient(
                 to right,
                 rgb(0,0,255),     /* blue */
@@ -205,7 +210,7 @@ def accumulative_injection(color_bar_title: str,
             display: flex;
             justify-content: space-between;
             margin-top: 5px;
-            font-size: 12px;
+            font-size: 24px;
         }
         </style>
 
@@ -225,13 +230,13 @@ def accumulative_injection(color_bar_title: str,
         <style>
         #packet-info {
             position: fixed;
-            top: 30px;
+            top: 20px;
             left: 30px;
             background: rgba(255, 255, 255, 0.9);
-            padding: 8px 12px;
-            border-radius: 6px;
+            padding: 16px 24px;
+            border-radius: 18px;
             font-family: Arial;
-            font-size: 13px;
+            font-size: 28px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.2);
             z-index: 9999;
         }
@@ -291,20 +296,20 @@ def window_injection(color_bar_title: str,
             position: fixed;
             top: 20px;
             right: 30px;
-            width: 500px;  /* maybe reduce from 1540 */
-            padding: 12px;
+            width: 800px;  /* maybe reduce from 1540 */
+            padding: 24px;
             background: white;
-            border-radius: 8px;
+            border-radius: 18px;
             font-family: Arial;
-            font-size: 14px;
+            font-size: 28px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 9999;
         }
 
         #heatmap-bar {
-            height: 20px;
+            height: 30px;
             width: 100%;
-            border-radius: 5px;
+            border-radius: 10px;
             background: linear-gradient(
                 to right,
                 rgb(0,0,255),     /* blue */
@@ -319,7 +324,7 @@ def window_injection(color_bar_title: str,
             display: flex;
             justify-content: space-between;
             margin-top: 5px;
-            font-size: 12px;
+            font-size: 24px;
         }
         </style>
 
@@ -339,13 +344,13 @@ def window_injection(color_bar_title: str,
         <style>
         #packet-info {
             position: fixed;
-            top: 30px;
+            top: 20px;
             left: 30px;
             background: rgba(255, 255, 255, 0.9);
-            padding: 8px 12px;
-            border-radius: 6px;
+            padding: 16px 24px;
+            border-radius: 18px;
             font-family: Arial;
-            font-size: 13px;
+            font-size: 28px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.2);
             z-index: 9999;
         }
@@ -389,7 +394,7 @@ def creation_of_pyvis(G,
     plot_type = plot_type.strip().lower()
     print(f"Creating Pyvis HTML at time: {time}")
     # Create PyVis network
-    net = Network(height="100vh", width="100vw", directed=True, bgcolor="grey", font_color="black")
+    net = Network(height="100vh", width="100vw", directed=True, bgcolor="white", font_color="black")
     # Optional: better physics (important for mesh graphs)
     net.barnes_hut()
 
@@ -446,8 +451,8 @@ def creation_of_pyvis(G,
             label=label,
             size=10,
             color=color,
-            x=x / 10,
-            y=y / 10,
+            x=x/20,
+            y=y/20,
             physics=False,
             shape=shape
         )
@@ -551,7 +556,7 @@ def creation_of_pyvis(G,
             title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {data.get('weight')}",        
             # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
             color= color,               
-            width=1 + np.log1p(value)  # optional smoother scaling
+            width=10 + np.log1p(value)  # optional smoother scaling
         )
         elif plot_type == "throughput":
             dt = max(data.get('last_time') - data.get('first_time'), precision_number)
