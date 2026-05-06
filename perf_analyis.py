@@ -194,6 +194,16 @@ def extract_variable_full(data: dict,
         else:
             return None
     # NSPERF IS A TUPLE
+    if isinstance(nsperf_variable, list) and len(nsperf_variable) == 2:
+        _,value_1 = find_nsperf_variable(data=data,target=nsperf_variable[0])
+        _,value_2 = find_nsperf_variable(data=data,target=nsperf_variable[1])
+
+        if value_1 is None or value_2 is None:
+            print("Missing values in equation")
+            return None
+        else:
+            return value_1,value_2
+
     if isinstance(nsperf_variable, list) and len(nsperf_variable) == 3:
         _,value_1 = find_nsperf_variable(data=data,target=nsperf_variable[0])
         sign = nsperf_variable[1]
@@ -433,6 +443,22 @@ def bin_naming(bins: list[list] ) -> list:
         bin_names.append(f"{min_val:.5f}_{max_val:.5f}")
     return bin_names
 
+def num_stream(start: int,
+               stop: int,
+               reference_stream_start: int) -> tuple[float,float]:
+    start_reference = start - reference_stream_start
+    stop_reference = stop - reference_stream_start
+    time_interval_ns = stop_reference - start_reference
+
+    time_intreval_s = time_interval_ns * 1e-9
+    start_s = start_reference * 1e-9
+
+    time_intreval_s = round(time_intreval_s,0)
+    start_s = round(start_s,0)
+
+    stop_s = start_s + time_intreval_s
+    return start_s,stop_s
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
     parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
@@ -468,7 +494,7 @@ if __name__ == "__main__":
     variable_map .append({"name": "throughput", "aliases": ["throughput", "tp"], "nsperf": "received_bps"})
     variable_map .append({"name": "latency", "aliases": ["latency", "lat"], "nsperf": "host_local_latency_estimate_ns"})    #IDK if this is the right latency
     variable_map .append({"name": "jitter", "aliases": ["jitter", "jit"], "nsperf": "host_local_latency_jitter_abs_ns"})    #IDK if this is the right jitter
-    variable_map .append({"name": "num_streams", "aliases": ["num_streams", "num streams"], "nsperf": "IDK"})
+    variable_map .append({"name": "num_streams", "aliases": ["num_streams", "num streams"], "nsperf": ["send_start_ns", "recv_end_ns"]})
     variable_map .append({"name": "request_throughput", "aliases": ["request_throughput", "request throughput", "req_tp", "req tp"], "nsperf": "generated_bps"}) # NOT Sure if the right one
     variable_map .append({"name": "hops", "aliases": ["hops"], "nsperf": "IDK"})                                            # STILL NOT SURE IF POSSIBLE
     variable_map .append({"name": "mesh_size", "aliases": ["mesh_size", "mesh size"], "nsperf": "mesh_size"})                           #ALSO TAKE FROM GRAPH
@@ -601,6 +627,7 @@ if __name__ == "__main__":
                         axis_values.append(axis_value)
 
                     print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+    
     x_axis_values = []
     y_axis_values = []
     client_server = []
@@ -653,11 +680,33 @@ if __name__ == "__main__":
             percentile_str= percentile.split("_")[0]
             plot_title = f"Stream {stream} | Mesh Size: {mesh_size} | Percentile: '{percentile_str}'"
 
+    scaled_values = []
     units, unit_scales = axis_units(axis_names=axis_names)
     x_axis_values = np.array(x_axis_values)
     scaled_x_values = x_axis_values * unit_scales[0]
     y_axis_values = np.array(y_axis_values)
     scaled_y_values = y_axis_values * unit_scales[1]
+    scaled_values.append(scaled_x_values)
+    scaled_values.append(scaled_y_values)
+
+    start_all_s = []
+    stop_all_s = []
+    for i, axis in enumerate(axis_names):
+        if axis == "num_streams":
+            for (start,stop) in scaled_values[i]:
+                start_all_s.append(start)
+                stop_all_s.append(stop)
+            reference = min(start_all_s)
+            start_all_s = []
+            stop_all_s = []
+            for (start,stop) in scaled_values[i]:
+                start_s, stop_s = num_stream(int(start),int(stop),(int(reference)))
+                start_all_s.append(start_s)
+                stop_all_s.append(stop_s)
+
+    print(start_all_s)
+    print(stop_all_s)
+
     axis_labels = []
     for i, axis in enumerate(axis_names):
         axis_labels.append(f"{axis} {units[i]}")
