@@ -574,6 +574,9 @@ if __name__ == "__main__":
                     continue
                 else:
                     if client in req_client and server in req_server:
+                        if client != prev_client and first_client is False:
+                            title = f" Client: {client} "
+                            print(title.center(WIDTH,"="))
                         print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
                         plot_data[link_loss].append({
                                                     "client": client,
@@ -582,9 +585,6 @@ if __name__ == "__main__":
                                                     "x_axis": axis_values[0],
                                                     "y_axis": axis_values[1]
                                                     })
-                        if client != prev_client and first_client is False:
-                            title = f" Client: {client} "
-                            print(title.center(WIDTH,"="))
                         prev_client = client
                         first_client = False
             else:
