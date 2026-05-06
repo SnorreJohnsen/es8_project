@@ -486,7 +486,7 @@ def add_active_stream_count(streams: list[dict]) -> list[dict]:
                 continue
 
             # overlap condition
-            if o["start_s"] <= s["stop_s"] and o["stop_s"] >= s["start_s"]:
+            if o["start_s"] <= s["stop_s"] and o["stop_s"] > s["start_s"]:
                 count += 1
 
         s["active_streams"] = count
