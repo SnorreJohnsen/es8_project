@@ -3,50 +3,60 @@
 import argparse
 import json
 import os
+import re
 import shutil
 from typing import Any
 
 
-def stub_adapter_positions() -> list[tuple[float, float, float]]:
-    return [
-        (765.0, 5000.0, 0.0),
-        (5510.0, 2260.0, 0.0),
-        (15000.0, 7739.0, 0.0),
-        (24489.0, 7739.0, 0.0),
-        (29234.0, 5000.0, 0.0),
+def natural_adapter_key(adapter: str) -> tuple[int, str]:
+    match = re.fullmatch(r"a([0-9]+)", adapter)
+    if match is None:
+        raise ValueError(f"Adapter name must look like a0, got {adapter!r}")
+    return (int(match.group(1)), adapter)
+
+
+def adapter_ids(graph: dict[str, Any]) -> list[str]:
+    adapters = [
+        str(node["id"])
+        for node in graph.get("nodes", [])
+        if re.fullmatch(r"a[0-9]+", str(node["id"]))
     ]
+    if not adapters:
+        raise ValueError("Graph contains no adapter nodes matching a<number>")
+    return sorted(adapters, key=natural_adapter_key)
 
 
-def device_names(adapter_count: int) -> list[str]:
-    return [f"d{i}" for i in range(adapter_count)]
+def device_name(adapter: str) -> str:
+    natural_adapter_key(adapter)
+    return f"d{adapter[1:]}"
 
 
-def adapter_index(adapter_name: str) -> int:
-    if not adapter_name.startswith("a"):
-        raise ValueError(f"Adapter name must look like a0, got {adapter_name!r}")
-    try:
-        return int(adapter_name[1:])
-    except ValueError as exc:
-        raise ValueError(f"Adapter name must look like a0, got {adapter_name!r}") from exc
+def device_names(adapters: list[str]) -> list[str]:
+    return [device_name(adapter) for adapter in adapters]
 
 
-def coord(node: dict[str, Any]) -> tuple[float, float, float]:
-    return (float(node["x"]), float(node["y"]), float(node.get("z", 0.0)))
+def access_node_name(graph: dict[str, Any], access_adapter: str) -> str:
+    natural_adapter_key(access_adapter)
+    node_ids = {str(node["id"]) for node in graph.get("nodes", [])}
+    if access_adapter not in node_ids:
+        raise ValueError(f"Access adapter {access_adapter!r} is not present in graph nodes")
 
+    drone_neighbors: set[str] = set()
+    for link in graph.get("links", []):
+        source = str(link.get("source"))
+        target = str(link.get("target"))
+        if source == access_adapter and target.startswith("n"):
+            drone_neighbors.add(target)
+        elif target == access_adapter and source.startswith("n"):
+            drone_neighbors.add(source)
 
-def dist_sq(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
-    return sum((x - y) ** 2 for x, y in zip(a, b))
+    if not drone_neighbors:
+        raise ValueError(f"No n* access node link found for adapter {access_adapter!r}")
+    if len(drone_neighbors) > 1:
+        neighbors = ", ".join(sorted(drone_neighbors))
+        raise ValueError(f"Expected exactly one n* access node for {access_adapter!r}, found: {neighbors}")
 
-
-def closest_node_name(graph: dict[str, Any], pos: tuple[float, float, float]) -> str:
-    nodes = graph.get("nodes", [])
-    if not nodes:
-        raise ValueError("Graph has no nodes")
-
-    drone_nodes = [node for node in nodes if str(node["id"]).startswith("n")]
-    candidates = drone_nodes or nodes
-    closest = min(candidates, key=lambda node: dist_sq(pos, coord(node)))
-    return str(closest["id"])
+    return next(iter(drone_neighbors))
 
 
 def schedule(
@@ -111,15 +121,9 @@ def main() -> None:
     with open(args.graph, encoding="utf-8") as f:
         graph = json.load(f)
 
-    adapter_positions = stub_adapter_positions()
-    access_adapter_idx = adapter_index(args.access_adapter)
-    try:
-        access_adapter_pos = adapter_positions[access_adapter_idx]
-    except IndexError as exc:
-        raise ValueError(f"No stub position for adapter {args.access_adapter!r}") from exc
-
-    access_node = closest_node_name(graph, access_adapter_pos)
-    default_devices = device_names(len(adapter_positions))
+    adapters = adapter_ids(graph)
+    access_node = access_node_name(graph, args.access_adapter)
+    default_devices = device_names(adapters)
     clients = args.clients or default_devices
     servers = args.servers or default_devices
 
@@ -153,8 +157,11 @@ def main() -> None:
             write_schedule(os.path.join(args.outdir, f"{stream_name(client, server)}.json"), sim)
             count += 1
 
-    print(f"Generated {count} schedule(s); {args.access_adapter} closest node is {access_node}")
+    print(f"Generated {count} schedule(s); {args.access_adapter} access node is {access_node}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (FileNotFoundError, ValueError) as exc:
+        raise SystemExit(f"error: {exc}")
