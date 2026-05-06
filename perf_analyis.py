@@ -280,7 +280,17 @@ def is_number(s: str) -> bool:
 
 def pairing_files(input: Path) -> list:
     experiments = []
-    if input.is_dir():
+
+    if input.is_dir() and is_number(input.name):
+        nsperf_files = get_json_files(input / "nsperf" / "streams")
+        graph_file = (input / "graph.json")
+        experiments.append({
+                "name": input.name,
+                "nsperf": nsperf_files,
+                "graphs": graph_file
+        })
+        return experiments
+    elif input.is_dir():
         dirs = [d for d in input.iterdir() if d.is_dir() and is_number(d.name)]
         
         for d in dirs:
@@ -306,6 +316,7 @@ def plot_graph(x_axis: list,
                axis_labels,
                file_path: Path,
                file_name: str,
+               titlename: str,
                fontsize: int = 12,
                picture_size: tuple = (16,9),
                type_graph: int = 1):
@@ -319,6 +330,7 @@ def plot_graph(x_axis: list,
         print("Choose type avaible for plotting")
         exit()
 
+    ax.set_title(titlename,fontsize=fontsize*2)
     ax.set_xlabel(axis_labels[0],fontsize=fontsize)
     ax.set_ylabel(axis_labels[1],fontsize=fontsize)
     ax.tick_params(axis='both', labelsize=fontsize)
@@ -339,9 +351,10 @@ def plot_boxplot(boxplot_data: list,
                  axis_labels,
                  file_path: Path,
                  file_name: str,
+                 titlename: str,
                  fontsize: int = 12,
                  picture_size: tuple = (16,9)):
-    if axis_labels[0] != "link_loss [-]":
+    if axis_labels[0] != "link_loss [%]":
         sorted_items = sorted(boxplot_data.items(),key=lambda item: float(item[0].split("_")[0]))
         labels = [k for k, _ in sorted_items]
         values = [v for _, v in sorted_items]
@@ -352,7 +365,7 @@ def plot_boxplot(boxplot_data: list,
     fig, ax = plt.subplots(figsize=picture_size)
 
     ax.boxplot(values, tick_labels=labels)
-
+    ax.set_title(titlename,fontsize=fontsize*2)
     ax.set_xlabel(axis_labels[0],fontsize=fontsize)
     ax.set_ylabel(axis_labels[1],fontsize=fontsize)
     ax.grid(True)
@@ -369,7 +382,8 @@ def plot_boxplot(boxplot_data: list,
 
 def axis_units(axis_names: list) -> tuple[list,list]:
 
-    unitless = ["link_loss","total_loss","num_streams","hops","mesh_size"]
+    procent = ["link_loss","total_loss"]
+    unitless = ["num_streams","hops","mesh_size"]
     unit_mb = ["throughput","request_throughput"]
     unit_time = ["latency","jitter"]
 
@@ -386,6 +400,12 @@ def axis_units(axis_names: list) -> tuple[list,list]:
         elif name in unit_time:
             unit = "[ms]"
             unitscale = 1e-6 #maybe change ot milli if to high numbers
+        elif name in procent:
+            unit = "[%]"
+            if name == procent[0]:
+                unitscale = 1
+            elif name == procent[1]:
+                unitscale = 100
         else:
             unit = "[-]"
             unitscale = 1
@@ -396,6 +416,8 @@ def axis_units(axis_names: list) -> tuple[list,list]:
     return units, unit_scales
 
 def bin_splitting(values: list, n_bins: int = 10) -> list:
+    if len(values) < n_bins:
+        n_bins = len(values)
     values = np.array(values)
     sorted_vals = np.sort(values)
     # Split by index (guarantees equal counts)
@@ -428,6 +450,12 @@ if __name__ == "__main__":
     output_path = args.output or Path("./plots")
     req_client = args.client
     req_server = args.server
+    if req_client is not None:
+        req_client = req_client.strip().lower()
+        req_client = req_client.split(",")
+    if req_server is not None:
+        req_server = req_server.strip().lower()
+        req_server = req_server.split(",")
     filter_0 = args.filter
     experiments = pairing_files(input=input_path)
     percentile = percentile_refactor(args.percentile)
@@ -525,6 +553,14 @@ if __name__ == "__main__":
             #     print(w_key)      # e.g. "window_0"
             #     print(w_data)     # the inner dict
             grid,nodes, graph_link_loss = extract_graph(graph_file)
+            full_grid = grid.copy()
+            for item in grid:
+                if "a" in item:
+                    full_grid.append(item.replace("a", "d"))
+            if req_client is None:
+                req_client = full_grid
+            if req_server is None:
+                req_server = full_grid
             link_loss = float(exp["name"]) if is_number(exp["name"]) else graph_link_loss
             mesh_size = len(nodes)
             if interval_step is None:
@@ -537,17 +573,7 @@ if __name__ == "__main__":
                 if filter_0 is True and num == '0':
                     continue
                 else:
-                    if req_client is not None and req_server is not None:
-                        if client == req_client and server == req_server:
-                            print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-                            plot_data[link_loss].append({
-                                                        "client": client,
-                                                        "server": server,
-                                                        "num": num,
-                                                        "x_axis": axis_values[0],
-                                                        "y_axis": axis_values[1]
-                                                        })
-                    else:
+                    if client in req_client and server in req_server:
                         print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
                         plot_data[link_loss].append({
                                                     "client": client,
@@ -575,7 +601,6 @@ if __name__ == "__main__":
                         axis_values.append(axis_value)
 
                     print(f"Window {str(w_idx).ljust(PLOT_SPACING)} | Start: {str(start).ljust(WINDOW_START_END_SPACING)} End {str(end).ljust(WINDOW_START_END_SPACING)} [s] | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
-    
     x_axis_values = []
     y_axis_values = []
     client_server = []
@@ -585,23 +610,13 @@ if __name__ == "__main__":
         for entry in runs:
             # IF set to one specific stream only save data for this stream
             # else use every stream
-            if req_client is not None and req_server is not None:
-                if entry['client'] == req_client and entry['server'] == req_server:
-                    if entry["x_axis"] is not None and entry["y_axis"] is not None:     # if they are none we dont want them
-                        client_server.append(f"{entry['client']}-{entry['server']}")
-                        x_axis_values.append(entry["x_axis"])
-                        y_axis_values.append(entry["y_axis"])
-                    else:
-                        files_not_used.append(f"{entry['client']}-{entry['server']}_{entry["num"]}")
-                plot_title = f"data_{percentile}_link_loss_{link_loss}_{axis_names[0]}_{axis_names[1]}_stream_{entry['client']}_{entry['server']}"
-            else:
-                if entry["x_axis"] is not None and entry["y_axis"] is not None:
+            if entry['client'] in req_client and entry['server'] in req_server:
+                if entry["x_axis"] is not None and entry["y_axis"] is not None:     # if they are none we dont want them
                     client_server.append(f"{entry['client']}-{entry['server']}")
                     x_axis_values.append(entry["x_axis"])
                     y_axis_values.append(entry["y_axis"])
                 else:
-                    files_not_used.append(f"{entry['client']}_{entry['server']}_{entry['num']}")
-                plot_title = f"data_{percentile}_{link_loss=}_axis_{axis_names[0]}_{axis_names[1]}_stream_all"
+                    files_not_used.append(f"{entry['client']}-{entry['server']}_{entry["num"]}")
     title = " Files NOT used | Because entail values of None"
     print(title.center(WIDTH, "_"))
     # finding file which is not use
@@ -610,14 +625,33 @@ if __name__ == "__main__":
             if file_id in str(path):
                 print(path)
 
-    if req_client is not None and req_server is not None:
-        stream = f"STREAM | Client: {req_client} | Server: {req_server}"
+    if full_grid == req_client and full_grid == req_server:
+        stream = "All"
+        stream_file_name = "all"
+    elif full_grid == req_server:
+        stream = f"Client: {req_client}"
+        stream_file_name = f"c_{req_client}"
+    elif full_grid == req_client:
+        stream = f"Server: {req_server}"
+        stream_file_name = f"s_{req_server}"
     else:
-        stream = "ALL STREAMS USED"
+        stream = f"Client: {req_client} | Server: {req_server}"
+        stream_file_name = f"c_{req_client}_s_{req_server}"
     title = f" Creating Plots | {stream} "
-
+    plot_file_name = f"data_{percentile}_axis_{axis_names[0]}_{axis_names[1]}_{stream_file_name}"
     print(title.center(WIDTH, "_"))
 
+    percentile_matrixs = []
+    for item in variable_map:
+        nsperf = item.get("nsperf")
+        if "host_local" in nsperf:
+            name_item = item.get("name")
+            percentile_matrixs.append(name_item)
+    plot_title = f"{stream} | Mesh Size: {mesh_size}"
+    for name in axis_names:
+        if name in percentile_matrixs:
+            percentile_str= percentile.split("_")[0]
+            plot_title = f"Stream {stream} | Mesh Size: {mesh_size} | Percentile: '{percentile_str}'"
 
     units, unit_scales = axis_units(axis_names=axis_names)
     x_axis_values = np.array(x_axis_values)
@@ -634,8 +668,9 @@ if __name__ == "__main__":
         fontsize=12,
         picture_size=(16, 9),
         file_path=output_path,
+        titlename = f" DATA points for {plot_title}",
         type_graph = 1,
-        file_name=f"{plot_title}.png"
+        file_name=f"{plot_file_name}.png"
     )
     if axis_names[0] != "link_loss":
         bin_values = bin_splitting(scaled_x_values)
@@ -655,10 +690,11 @@ if __name__ == "__main__":
     plot_boxplot(
         boxplot_data = box_data,
         axis_labels = axis_labels,
+        titlename = f" BOXPLOT FOR {plot_title}",
         fontsize=12,
         picture_size=(16, 9),
         file_path=output_path,
-        file_name=f"{plot_title}_boxplot.png"
+        file_name=f"{plot_file_name}_boxplot.png"
     )
 
     if "total_loss" in axis_names or "link_loss":
