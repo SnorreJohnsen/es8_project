@@ -794,7 +794,7 @@ if __name__ == "__main__":
 
     else:
         # no bins, just group by value
-        for x, y in zip(x_axis_values, scaled_y_values):
+        for x, y in zip(scaled_x_values, scaled_y_values):
             box_data[x].append(y)
 
     plot_boxplot(
