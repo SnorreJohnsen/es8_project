@@ -692,14 +692,16 @@ if __name__ == "__main__":
                     })
             starts_s, stops_s = convert_ns_to_s_list_numstreams(starts_ns, stops_ns)
             # FOR DEBUG
-            sorted_start_s = sorted(starts_s)
-            # print(sorted_start_s)
             for i, s in enumerate(streams):
                 s.pop("start_ns")
                 s.pop("stop_ns")
                 s["start_s"] = starts_s[i]
                 s["stop_s"] = stops_s[i]
             streams = add_active_stream_count(streams)
+            """ DEBUGGING """
+            # sorted_stream = sorted(streams, key=lambda s: s["start_s"])
+            # for s in sorted_stream:
+            #     print(f"link_loss {loss}: {s['client']} -> {s['server']} | start: {s['start_s']}")
             for s in streams:
                 entry = s["entry"]
                 entry[num_stream_axis] = s["active_streams"]
