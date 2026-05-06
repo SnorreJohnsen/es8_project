@@ -8,7 +8,6 @@ import subprocess
 import signal
 import time
 import shutil
-import math
 import re
 import errno
 import random
@@ -18,7 +17,6 @@ from copy import copy
 from pydantic import BaseModel
 from pydantic_core import from_json, to_json
 
-from mesh_design_lib import data_rate_given_dist_comm
 from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
 
 sim_root = "/home/aau/meshsim/"
@@ -379,31 +377,6 @@ def start_nsperf_servers(node_names: list[str]):
 def stop_all_nsperf_servers():
     sigint_all(nsperf_servers)
 
-def find_closest_node(this: dict, others: list[dict]):
-    """
-    Finds closest node in a list of nodes.
-    """
-    min_dist_sq = None
-    closest = None
-    for other in others:
-        dx = other["x"] - this["x"]
-        dy = other["y"] - this["y"]
-        dz = other["z"] - this["z"]
-        dist_sq = dx**2 + dy**2 + dz**2
-
-        if min_dist_sq is None:
-            min_dist_sq = dist_sq
-            closest = other
-        else:
-            if dist_sq < min_dist_sq:
-                min_dist_sq = dist_sq
-                closest = other
-
-    if closest is None or min_dist_sq is None:
-        raise ValueError("Malformed graph (nodes cannot be empty)")
-
-    return closest, min_dist_sq
-
 def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     """
     Creates device(d) and corresponding namespace with static ipv4 address and connects it to the adapter(a) namespace.
@@ -449,32 +422,6 @@ def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     exec(tid, remote, f'ip netns exec "{nsname}" ip addr add "{device_ip_addr}/{subnet_bits}" dev "{upname}"')
     exec(tid, remote, f'ip netns exec "{nsname}" ip link set dev "{upname}" up mtu {mtu}')
     exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{downname}" up mtu {mtu}') 
-
-def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]]):
-    """
-    Place adapter at device coordiantes to connect a device to drone(node). 
-    Adapter is connected to the closest drone(node).    
-    """
-    devs = []
-    for i, (x, y, z) in enumerate(dev_coords):
-        dev = {
-            "id": f"a{i}",
-            "x": round(x, 2),
-            "y": round(y, 2),
-            "z": round(z, 2),
-        }
-        devs.append(dev)
-        closest_drone, dist_sq = find_closest_node(dev, graph["nodes"])
-        link = {
-            "source": dev["id"],
-            "target": closest_drone["id"],
-            "phyrate_mbps": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
-            "loss_percent": 10,
-        }
-
-        graph["links"].append(link)
-
-    graph["nodes"].extend(devs)
 
 def start_batadv(node_name: str, version5: bool = True, tid = None):
     if version5:
@@ -723,7 +670,7 @@ def setup_output_dirs():
     os.makedirs(exist_ok=False, name=iperf3_dir)
     os.makedirs(exist_ok=False, name=nsperf_dir)
 
-def load_graph(args, adapter_pos, verbosity):
+def load_graph(args, verbosity):
     # Load mesh json
     if not os.path.isfile(args.graph):
         eprint(f'File not found: {args.graph}')
@@ -735,7 +682,6 @@ def load_graph(args, adapter_pos, verbosity):
         print("graph")
         pprint(graph)
 
-    place_test_adapters(graph, adapter_pos)
     with open(graph_json_path, "w") as f:
         json.dump(graph, f)
 
@@ -855,8 +801,8 @@ def apply_throughput_override(graph, verbosity):
         print("Wait for throughput override")
     time.sleep(10) # wait for moving average in throughput override
 
-def setup_simulation_environment(args, adapter_pos, pcap_dir, verbosity):
-    graph = load_graph(args, adapter_pos, verbosity)
+def setup_simulation_environment(args, pcap_dir, verbosity):
+    graph = load_graph(args, verbosity)
 
     apply_network(args, graph)
 
@@ -910,14 +856,8 @@ def main():
 
     setup_output_dirs()
 
-    # Place device adapters
-    adapter_pos = [(765.0, 5000.0, 0.0), 
-                   (5510.0, 2260.0, 0.0),
-                   (15000.0, 7739.0, 0.0), 
-                   (24489.0, 7739.0, 0.0), 
-                   (29234.0, 5000.0, 0.0)]
     graph, sched, duration = setup_simulation_environment(
-            args, adapter_pos, pcap_dir, verbosity
+            args, pcap_dir, verbosity
             )
 
     sim = run_sim_sched(graph=graph, sched=sched, duration=duration)
