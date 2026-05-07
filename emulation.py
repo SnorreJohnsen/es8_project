@@ -210,7 +210,11 @@ def start_tcpdump(node_name: str, ifname: str, ns_name: str, out_dir: str):
     ----------
     node_name :
         Name of node in network graph.
-    out_dir :
+    ifname : str
+        interface name
+    ns_name : str
+        name of the namespace tcpdump is started in
+    out_dir : str
         Output directory for pcap files
     """
 
@@ -328,6 +332,24 @@ def run_nsperf_client(server_name: str,
                       timestamp: float,
                       duration: str, 
                       bitrate: str):
+    """
+    Start nsperf client in a device namespace
+
+    Parameters
+    ----------
+    server_name : str
+        name of server device
+    client_name : str
+        name of client device
+    out_dir : str
+        path to directory for nsperf output
+    timestamp : float
+        timestamp used for file name and flow id
+    duration : str
+        duration of nsperf traffic stream e.g. "10s"
+    bitrate : str
+        desired traffic bitrate e.g. "2M" or "100K"
+    """
     # extract ip and port from server device
     server_port = NSPERF_PORT
     server_ipv4, subnet_bits = ipv4_addr(server_name)
@@ -354,6 +376,16 @@ def run_nsperf_client(server_name: str,
                     close_fds=True)
 
 def run_nsperf_server(server_name: str, out_dir: str):
+    """
+    Start nsperf server in a device namespace
+
+    Parameters
+    ----------
+    server_name : str
+        name of server device
+    out_dir : str
+        path to directory for nsperf output
+    """
     server_port = NSPERF_PORT
     server_ipv4, subnet_bits = ipv4_addr(server_name)
 
@@ -384,6 +416,13 @@ def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     
     Anatomy: namespace:interface 
     d{j}:veth0 -> a{j}:lan0 -> a{j}:br-lan -> a{j}:bat0
+
+    Parameters
+    ----------
+    name : str
+        device name e.g. "d0"
+    adapter_name : str
+        name of adapter e.g. "a0"
     """
     nsname = f"ns-{name}"
     nsname_adapter = f"ns-{adapter_name}"
@@ -424,6 +463,18 @@ def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{downname}" up mtu {mtu}') 
 
 def start_batadv(node_name: str, version5: bool = True, tid = None):
+    """
+    Start batman-adv inside a node namespace
+
+    Parameters
+    ----------
+    node_name : str
+        name of node e.g. "n0"
+    version5 : bool, default=True
+        whether to start batman_v
+    tid : default=None
+        thread id
+    """
     if version5:
         start_script = os.path.join(repo_root, "emulation_scripts", "start_batadv_v.sh")
     else:
@@ -436,6 +487,15 @@ def start_batadv(node_name: str, version5: bool = True, tid = None):
 def battp_set_link_throughput(n1: str, n2: str, tp: float):
     """
     use battpctl to set link throughput in both directions between two nodes.
+
+    Parameters
+    ----------
+    n1 : str
+        node name of the first node
+    n2 : str
+        node name of second node
+    tp : float
+        throughput limit
     """
     tid = get_thread_id()
     remote = None
@@ -451,15 +511,31 @@ def battp_set_link_throughput(n1: str, n2: str, tp: float):
 
 def batctl_set_neigh_throughputs(graph: dict):
     """
-    set throughput limit in both direction to all neighbour nodes in a graph.
-    """
+    Set throughput limit in both directions to all neighbour nodes
 
+    Parameters
+    ----------
+    graph : dict
+        network graph configuration
+    """
     for link in graph["links"]:
         battp_set_link_throughput(n1=link["source"], n2=link["target"], tp=float(link["phyrate_mbps"]))
 
 def get_node_addrs(node_id: str, cmd: str):
     """
-    get node addresses from command.
+    Get node addresses from command output inside a node namespace.
+
+    Parameters
+    ----------
+    node_id : str
+        id of node e.g. "n0"
+    cmd : str
+        shell command used to get interface address information
+
+    Returns
+    -------
+    result : dict[str, str]
+        mapping of interface names to addresses
     """
     tid = get_thread_id()
     remote = None
@@ -473,7 +549,14 @@ def get_node_addrs(node_id: str, cmd: str):
 
 def get_all_addrs(graph: dict, extra_ids: list[str]):
     """
-    Get all mac, ipv4, ipv6 for a node and output in a json file.
+    Get all mac, ipv4, ipv6 for all graph and extra nodes and output in a json file.
+
+    Parameters
+    ----------
+    graph : dict
+        network graph configuration
+    extra_ids : list[str]
+        extra node ids to get addresses from
     """
     addrs_json = {}
 
@@ -492,9 +575,15 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
 
 def set_node_down(node_name: str):
     """
-    move uplink to trash namespace and remove bat0 to simulate node down
-    
+    Removes a node from the network
+
+    move uplink to trash namespace and remove bat0 to simulate node down.
     assumes namespace for node is already created
+
+    Parameters
+    ----------
+    node_name : str
+        name of node e.g. n0
     """
     tid = get_thread_id()
     remote = None
@@ -507,9 +596,17 @@ def set_node_down(node_name: str):
 
 def set_node_up(node_name: str, graph: dict):
     """
-    move uplink from trash to ns-node_name and add bat0 to simulate node up
-    
+    Restore a node to the network
+
+    move uplink from trash to ns-node_name and add bat0 to simulate node up.
     assumes node was previously pulled down with `set_node_down()`
+
+    Parameters
+    ----------
+    node_name : str
+        name of node e.g. n0
+    graph : dict
+        network graph configuration
     """
     tid = get_thread_id()
     remote = None
@@ -524,13 +621,23 @@ def set_node_up(node_name: str, graph: dict):
 
 def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams) -> list[SchedEntry]:
     """
-    nodes: list of node names
-    t_start_step: linear step size for offsetting drones by different start time [s]
-    t_sim_end: end time for simulation [s]
-    params: dropout model parameters
+    Generate dropout schedule
 
-    returns: list[tuple[float, str, State]]
-    dropout update schedule entries for nodes with [time, drone name, new state]
+    Parameters
+    ----------
+    nodes : list[str]
+        list of node names
+    t_start_step : float
+        linear step size for offsetting drones by different start time [s]
+    t_sim_end : float
+        simulaiton end time [s]
+    params : DropoutParams
+        dropout model parameters
+
+    Returns 
+    -------
+    events : list[SchedEntry]
+        dropout update schedule entries for nodes
     """
     sims = MultipleDroneSim(
             names = nodes,
@@ -550,6 +657,11 @@ def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, p
 def stub_iperf_sched():
     """
     create manual iperf schedule entries at specific time
+
+    Returns
+    -------
+    events : list[SchedEntry]
+        iperf3 schedule events
     """
     # sched: list[tuple[float, IperfEvent]] = []
     events: list[SchedEntry] = []
@@ -575,7 +687,16 @@ def stub_iperf_sched():
 
 def do_event(e: SchedEvent, graph: dict, simtime: float):
     """
-    performs either iperf or dropout event from given graph and schedule event type
+    Performs schedule event from given graph and schedule event type
+
+    Parameters
+    ----------
+    e : SchedEvent
+        schedule event to execute (iperf3, nsperf or dropout event)
+    graph : dict
+        network graph configuration
+    simtime : float
+        current simulation time
     """
     if verbosity != "quiet":
         print(f"Event {e} run at {datetime.now()}")
@@ -609,7 +730,21 @@ def do_event(e: SchedEvent, graph: dict, simtime: float):
 
 def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
     """
-    runs simulation schedule from given graph of nodes and schedule list in a set duration.
+    Runs simulation schedule from given graph of nodes and schedule list in a set duration.
+
+    Parameters
+    ----------
+    graph : dict
+        loaded network graph
+    sched : list[SchedEntry]
+        simulation schedule
+    duration : float
+        simulation duration
+
+    Returns
+    -------
+    Sim : Sim
+        simulation plan
     """
     t_start = datetime.now()
     t_end = t_start + timedelta(seconds=duration)
@@ -658,7 +793,11 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
     return Sim(start_timestamp=t_start.timestamp(), duration=duration, sched_plan=sched_sorted, sched_real=sched_real)
 
 def setup_output_dirs():
-    # Setup output directories
+    """
+    Setup of output directories. 
+
+    Existing directories are removed before new ones are created.
+    """
     try:
         shutil.rmtree(pcap_dir)
         shutil.rmtree(iperf3_dir)
@@ -671,7 +810,22 @@ def setup_output_dirs():
     os.makedirs(exist_ok=False, name=nsperf_dir)
 
 def load_graph(args, verbosity):
-    # Load mesh json
+    """
+    Load a graph of nodes from a json file
+
+    Parameters
+    ----------
+    args
+        command line arguments
+
+    verbosity
+        verbosity level
+
+    Returns
+    -------
+    graph : dict
+        loaded graph data
+    """
     if not os.path.isfile(args.graph):
         eprint(f'File not found: {args.graph}')
         exit(1)
@@ -688,6 +842,16 @@ def load_graph(args, verbosity):
     return graph
 
 def apply_network(args, graph):
+    """
+    Apply network emulation rules to a loaded graph
+
+    Parameters
+    ----------
+    args
+        command line arguments
+    graph : dict
+        network graph configuration
+    """
     # Create network name spaces with links from json graph
     tc_script = os.path.join(repo_root, "emulation_scripts", "tc.sh")
 
@@ -699,8 +863,24 @@ def apply_network(args, graph):
 
     mn_network.apply(graph, link_command=link_command)
 
-def filter_node_ids(verbosity):
-    # Init batman-adv on all nodes and adapters
+def get_node_ids(verbosity):
+    """
+    Extract drone and adapter node ids from the remote mapping.
+
+    Parameters
+    ----------
+    verbosity
+        verbosity level
+
+    Returns
+    -------
+    drone_ids : list[str]
+        ids of drone nodes
+    adapter_ids : list[str]
+        ids of adapter nodes
+    all_ids : list[str]
+        all node ids
+    """
     rmap = get_remote_mapping([Remote()]) # running everything locally
     all_ids = rmap.keys()
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
@@ -712,12 +892,43 @@ def filter_node_ids(verbosity):
     return drone_ids, adapter_ids, all_ids
 
 def start_node_tcpdumps(all_ids, pcap_dir):
+    """
+    Start tcpdump processes for all nodes.
+
+    Captures traffic on each nodes bridge interface in the switch namespace.
+
+    Parameters
+    ----------
+    all_ids : list[str]
+        list of all node ids
+    pcap_dir : str
+        path to directory where pcap files are dumped
+    """
     # Start tcpdump for each node
     for id in all_ids:
         start_tcpdump(id, f"br-{id}", "switch", pcap_dir)
     time.sleep(0.5)  # allow to launch tcpdumps
 
 def build_sched(args, drone_ids, verbosity):
+    """
+    Builds simulation schedule from file or generator
+
+    Parameters
+    ----------
+    args
+        command line arguments
+    drone_ids : list[str] 
+        ids of drone nodes
+    verbosity
+        verbosity level
+
+    Returns
+    -------
+    sched : list[SchedEntry]
+        simulation schedule
+    duration : float
+        simulation duration
+    """
     # Load or generate schedule
     sched = None
     duration = None
@@ -774,12 +985,39 @@ def build_sched(args, drone_ids, verbosity):
     return sched, duration
 
 def start_batadv_in_nodes(drone_ids, adapter_ids):
+    """
+    Start batman-adv in all drone and adapter nodes
+
+    version 5 is always enabled for all nodes
+
+    Parameters
+    ----------
+    drone_ids : list[str]
+        ids of drone nodes
+    adapter_ids : list[str]
+        ids of adapter nodes
+    """
     for nid in drone_ids:
         start_batadv(nid, version5=True)
     for nid in adapter_ids:
         start_batadv(nid, version5=True)
 
 def setup_devices(adapter_ids):
+    """
+    Setup devices for each adapter.
+
+    Creates a device (for example "a0" to "d0") for each adapter.
+
+    Parameters
+    ----------
+    adapter_ids : list[str]
+        ids of adapter nodes
+
+    Returns
+    -------
+    device_ids
+        ids of device nodes
+    """
     device_ids = []
     for adapter_id in adapter_ids:
         device_id = adapter_id.replace("a", "d")
@@ -790,23 +1028,62 @@ def setup_devices(adapter_ids):
     return device_ids
 
 def start_device_tcpdumps(device_ids, pcap_dir):
-    # Add devices and start tcpdump
+    """
+    Start tcpdump process on all veth0 interface in each device namespaces
+
+    Parameters
+    ----------
+    device_ids : list[str]
+        ids of device nodes
+    pcap_dir : str
+        path to directory where pcap files are dumped
+    """
     for device_id in device_ids:
         start_tcpdump(device_id, "veth0", f"ns-{device_id}", pcap_dir)
 
 def apply_throughput_override(graph, verbosity):
-    # Apply throughput override
+    """
+    Apply batman-adv throughput overrides to neighbour nodes
+
+    Parameters
+    ----------
+    graph : dict
+        network graph configuration
+    verbosity
+        verbosity level
+    """
     batctl_set_neigh_throughputs(graph)
     if verbosity != "quiet":
         print("Wait for throughput override")
     time.sleep(10) # wait for moving average in throughput override
 
 def setup_simulation_environment(args, pcap_dir, verbosity):
+    """
+    Setup simulation environment and monitoring
+
+    Parameters
+    ----------
+    args
+        command line arguments
+    pcap_dir : str
+        path to directory where pcap files are dumped
+    verbosity
+        verbosity level
+
+    Returns
+    -------
+    graph : dict
+        loaded network graph
+    sched : list[SchedEntry]
+        simulation schedule
+    duration : float
+        simulation duration
+    """
     graph = load_graph(args, verbosity)
 
     apply_network(args, graph)
 
-    drone_ids, adapter_ids, all_ids = filter_node_ids(verbosity)
+    drone_ids, adapter_ids, all_ids = get_node_ids(verbosity)
 
     start_node_tcpdumps(all_ids, pcap_dir)
     

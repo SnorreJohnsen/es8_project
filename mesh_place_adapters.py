@@ -10,6 +10,20 @@ from mesh_design_lib import data_rate_given_dist_comm
 def find_closest_node(this: dict, others: list[dict]):
     """
     Finds closest node in a list of nodes.
+
+    Parameters
+    ----------
+    this : dict
+        node to compare against
+    others : list[dict]
+        list of candidate nodes
+
+    Returns
+    -------
+    closest : dict
+        closest node
+    min_dist_sq : float
+        squared distance to the closest node
     """
     min_dist_sq = None
     closest = None
@@ -32,11 +46,19 @@ def find_closest_node(this: dict, others: list[dict]):
 
     return closest, min_dist_sq
 
-
 def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]]):
     """
-    Place adapter at device coordiantes to connect a device to drone(node). 
+    Place adapter at device coordinates to connect a device to drone(node). 
     Adapter is connected to the closest drone(node).    
+
+    this function modifies ''graph'' in place by extending with adapters
+
+    Parameters
+    ----------
+    graph : dict
+        graph with nodes to connect adapters to 
+    dev_coords : list[tuple[float, float, float]]
+        list of device coordinates to place the adapters at
     """
     devs = []
     for i, (x, y, z) in enumerate(dev_coords):
@@ -60,6 +82,19 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
     graph["nodes"].extend(devs)
 
 def parse_adapter_pos(adapter_coords: str) -> list[tuple[float, float, float]]:
+    """
+    Parse the adapter positions from commandline argument
+
+    Parameters
+    ----------
+    adapter_coords : str
+        adapter coordinates which is semicolon separated coordinate tuples of the form ''"(1.0,1.0,1.0);(2.0,3.0,0.0)"''
+
+    Returns
+    -------
+    coords : list[tuple[float, float, float]]
+        coordinates of adapters
+    """
     coords = []
     for item in adapter_coords.split(";"):
         x, y, z = item.strip("() ").split(",")
