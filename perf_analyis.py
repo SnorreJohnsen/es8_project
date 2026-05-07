@@ -717,7 +717,7 @@ if __name__ == "__main__":
                                         "y_axis": entry["y_axis"]
                                         })
                 else:
-                    files_not_used.append(f"{entry['client']}-{entry['server']}_{entry["num"]}")
+                    files_not_used.append(f"{entry['client']}_{entry['server']}_{entry["num"]}")
     title = " Files NOT used | Because entail values of None"
     print(title.center(WIDTH, "_"))
     # finding file which is not use
@@ -807,7 +807,10 @@ if __name__ == "__main__":
         file_name=f"{plot_file_name}_boxplot.png"
     )
 
-    if "total_loss" in axis_names or "link_loss":
-        print("\nPercentile Setting does not matter for parameters 'total_loss' or 'link_loss'")
-    if graph_same is False:
-        print("\nWARNING: Graphs used don't have same structure")
+    percentile_not = ["total_loss","link_loss","throughput","request_throughput","num_streams","mesh_size"]
+
+    for name in percentile_not:
+        if name in axis_names:
+            print(f"\nPercentile Setting does not matter for parameters '{name}'")
+        if graph_same is False:
+            print("\nWARNING: Graphs used don't have same structure")
