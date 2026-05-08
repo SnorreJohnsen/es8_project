@@ -302,20 +302,18 @@ def pairing_files(input: Path) -> list:
         return experiments
     elif input.is_dir():
         dirs = [d for d in input.iterdir() if d.is_dir() and is_number(d.name)]
-        
+
         for d in dirs:
             nsperf_files = get_json_files(d / "nsperf" / "streams")
-            graph_file = (d / "graph.json")
+            graph_file = next(d.rglob("graph.json"), None)
 
             experiments.append({
                 "name": d.name,
                 "nsperf": nsperf_files,
                 "graphs": graph_file
             })
+
         return experiments
-    else:
-        print(f"expected different formatting of directory")
-        exit()
 
 ######################################################
 ##### PLOT ###########################
@@ -530,7 +528,7 @@ if __name__ == "__main__":
     variable_map .append({"name": "jitter", "aliases": ["jitter", "jit"], "nsperf": "host_local_latency_jitter_abs_ns"})    #IDK if this is the right jitter
     variable_map .append({"name": "num_streams", "aliases": ["num_streams", "num streams"], "nsperf": ["send_start_ns", "send_end_ns"]})
     variable_map .append({"name": "request_throughput", "aliases": ["request_throughput", "request throughput", "req_tp", "req tp"], "nsperf": "generated_bps"}) # NOT Sure if the right one
-    variable_map .append({"name": "hops", "aliases": ["hops"], "nsperf": "IDK"})                                            # STILL NOT SURE IF POSSIBLE
+    # variable_map .append({"name": "hops", "aliases": ["hops"], "nsperf": "IDK"})                                            # STILL NOT SURE IF POSSIBLE
     variable_map .append({"name": "mesh_size", "aliases": ["mesh_size", "mesh size"], "nsperf": "mesh_size"})                           #ALSO TAKE FROM GRAPH
 
     # sanity check if that varaible for axis are avaliable
@@ -545,11 +543,19 @@ if __name__ == "__main__":
         name, nsperf = results
         axis_names.append(name)
         axis_nsperfs.append(nsperf)
+    
+    all_nsperfs = {}
+
+    for variable in variable_map:
+        name = variable["name"]
+        nsperf = variable["nsperf"]
+
+        plot_variables_allowed(data_variable=name,variable_map=variable_map)
+        all_nsperfs[name] = nsperf
         
     print(f"{percentile=}")
 
     path_width = max(len(str(f))for exp in experiments for f in exp["nsperf"]) + 2
-
 
     # title = " Files used for analysis "
     # print(title.center(WIDTH, "-"))
@@ -625,18 +631,21 @@ if __name__ == "__main__":
             mesh_size = len(nodes)
             if interval_step is None:
                 axis_values = []
+                all_nsperf_values = {}
                 data["mesh_size"] = mesh_size
                 data["link_loss"] = link_loss
-                for axis_nsperf in axis_nsperfs:
-                        axis_value = extract_variable_full(data=data,nsperf_variable=axis_nsperf)
-                        axis_values.append(axis_value)
-            
+                for variable in variable_map:
+                        nsperf = variable["nsperf"]
+                        name = variable["name"]
+                        nsperf_value = extract_variable_full(data=data,nsperf_variable=nsperf)
+                        all_nsperf_values[name] = nsperf_value
+                        if nsperf in axis_nsperfs:
+                            axis_values.append(nsperf_value)
                 plot_data[link_loss].append({
                                             "client": client,
                                             "server": server,
                                             "num": num,
-                                            "x_axis": axis_values[0],
-                                            "y_axis": axis_values[1]
+                                            **all_nsperf_values
                                             })
                 if client in req_client and server in req_server:
                     if client != prev_client and first_client is False:
@@ -665,56 +674,52 @@ if __name__ == "__main__":
     files_not_used = []
     box_data = defaultdict(list)
 
-    num_stream_axis = None
-    if axis_names[0] == "num_streams":
-        num_stream_axis = "x_axis"
-    if axis_names[1] == "num_streams":
-        num_stream_axis = "y_axis"
-
-    if num_stream_axis is not None:
-        for loss, runs in plot_data.items():
-            starts_ns = []
-            stops_ns = []
-            streams = []
-            for entry in runs:
-                if entry[num_stream_axis] is not None:
-                    start_ns,stop_ns= entry[num_stream_axis]
-                    starts_ns.append(start_ns)
-                    stops_ns.append(stop_ns)
-                    streams.append({
-                        "entry": entry,
-                        "client": entry["client"],
-                        "server": entry["server"],
-                        "num": entry["num"],
-                        # Only temporarily
-                        "start_ns": start_ns,
-                        "stop_ns": stop_ns
-                    })
-            starts_s, stops_s = convert_ns_to_s_list_numstreams(starts_ns, stops_ns)
-            # FOR DEBUG
-            for i, s in enumerate(streams):
-                s.pop("start_ns")
-                s.pop("stop_ns")
-                s["start_s"] = starts_s[i]
-                s["stop_s"] = stops_s[i]
-            streams = add_active_stream_count(streams)
-            """ DEBUGGING """
-            # sorted_stream = sorted(streams, key=lambda s: s["start_s"])
-            # for s in sorted_stream:
-            #     print(f"link_loss {loss}: {s['client']} -> {s['server']} | start: {s['start_s']}")
-            for s in streams:
-                entry = s["entry"]
-                entry[num_stream_axis] = s["active_streams"]
+    # first run til to extract the amount of num_streams there is during a stream
+    for loss, runs in plot_data.items():
+        starts_ns = []
+        stops_ns = []
+        streams = []
+        for entry in runs:
+            if entry["num_streams"] is not None:
+                start_ns,stop_ns= entry["num_streams"]
+                starts_ns.append(start_ns)
+                stops_ns.append(stop_ns)
+                streams.append({
+                    "entry": entry,
+                    "client": entry["client"],
+                    "server": entry["server"],
+                    "num": entry["num"],
+                    # Only temporarily
+                    "start_ns": start_ns,
+                    "stop_ns": stop_ns
+                })
+        starts_s, stops_s = convert_ns_to_s_list_numstreams(starts_ns, stops_ns)
+        # FOR DEBUG
+        for i, s in enumerate(streams):
+            s.pop("start_ns")
+            s.pop("stop_ns")
+            s["start_s"] = starts_s[i]
+            s["stop_s"] = stops_s[i]
+        streams = add_active_stream_count(streams)
+        """ DEBUGGING """
+        # sorted_stream = sorted(streams, key=lambda s: s["start_s"])
+        # for s in sorted_stream:
+        #     print(f"link_loss {loss}: {s['client']} -> {s['server']} | start: {s['start_s']}")
+        for s in streams:
+            entry = s["entry"]
+            entry["num_streams"] = s["active_streams"]
 
     for loss, runs in plot_data.items():
         for entry in runs:
             # IF set to one specific stream only save data for this stream
             # else use every stream
             if entry['client'] in req_client and entry['server'] in req_server:
-                if entry["x_axis"] is not None and entry["y_axis"] is not None:     # if they are none we dont want them
+                x_value = entry[axis_names[0]]
+                y_value = entry[axis_names[1]]
+                if x_value is not None and y_value is not None:                      # if they are none we dont want them
                     client_server.append(f"{entry['client']}-{entry['server']}")
-                    axis_values.append({"x_axis": entry["x_axis"],
-                                        "y_axis": entry["y_axis"]
+                    axis_values.append({"x_axis": x_value,
+                                        "y_axis": y_value
                                         })
                 else:
                     files_not_used.append(f"{entry['client']}_{entry['server']}_{entry["num"]}")
