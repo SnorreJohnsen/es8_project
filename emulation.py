@@ -17,7 +17,7 @@ from copy import copy
 from pydantic import BaseModel
 from pydantic_core import from_json, to_json
 
-from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
+from drop_model import DropoutEvent, DropoutParams, DropoutUpDownOnlyParams, MultipleDroneSim, SimpleDroneSim, State
 
 sim_root = "/home/aau/meshsim/"
 repo_root = os.path.join(sim_root, "repo")
@@ -630,7 +630,7 @@ def set_node_up(node_name: str, graph: dict):
     for link in links:
         battp_set_link_throughput(link["source"], link["target"], float(link["phyrate_mbps"]))
 
-def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams) -> list[SchedEntry]:
+def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams|DropoutUpDownOnlyParams) -> list[SchedEntry]:
     """
     Generate dropout schedule
 
@@ -650,11 +650,19 @@ def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, p
     events : list[SchedEntry]
         dropout update schedule entries for nodes
     """
-    sims = MultipleDroneSim(
-            names = nodes,
-            t_start_step = t_start_step,
-            params = params, 
-            )
+    if isinstance(params, DropoutParams):
+        sims = MultipleDroneSim(
+                names = nodes,
+                t_start_step = t_start_step,
+                params = params, 
+                )
+    elif isinstance(params, DropoutUpDownOnlyParams):
+        sims = SimpleDroneSim(
+                names = nodes,
+                params = params, 
+                )
+    else:
+        raise ValueError("Invalid params type")
 
     sims.stepuntil(t_sim_end)
     events = []
@@ -875,14 +883,14 @@ def apply_network(args, graph):
 
     mn_network.apply(graph, link_command=link_command)
 
-def get_node_ids(verbosity):
+def get_node_ids(graph: dict):
     """
     Extract drone and adapter node ids from the remote mapping.
 
     Parameters
     ----------
-    verbosity
-        verbosity level
+    graph
+        graph
 
     Returns
     -------
@@ -893,8 +901,7 @@ def get_node_ids(verbosity):
     all_ids : list[str]
         all node ids
     """
-    rmap = get_remote_mapping([Remote()]) # running everything locally
-    all_ids = rmap.keys()
+    all_ids = map(lambda x: x["id"], graph["nodes"])
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
     adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
 
@@ -921,7 +928,7 @@ def start_node_tcpdumps(all_ids, pcap_dir):
         start_tcpdump(id, f"br-{id}", "switch", pcap_dir)
     time.sleep(0.5)  # allow to launch tcpdumps
 
-def build_sched(args, drone_ids, verbosity):
+def build_sched(args, drone_ids):
     """
     Builds simulation schedule from file or generator
 
@@ -931,8 +938,6 @@ def build_sched(args, drone_ids, verbosity):
         command line arguments
     drone_ids : list[str] 
         ids of drone nodes
-    verbosity
-        verbosity level
 
     Returns
     -------
@@ -943,7 +948,7 @@ def build_sched(args, drone_ids, verbosity):
     """
     # Load or generate schedule
     sched = None
-    duration = None
+    duration = args.duration
 
     # load sched
     if args.sim_sched:
@@ -954,15 +959,15 @@ def build_sched(args, drone_ids, verbosity):
             with open(args.sim_sched, "r") as f:
                 sim_obj = Sim.model_validate(from_json(f.read()))
             sched = sim_obj.sched_plan
-            duration = args.duration or sim_obj.duration
+            if sim_obj.duration:
+                duration = sim_obj.duration
         except:
             raise ValueError(f"Invalid sim schedule file {args.sim_sched}")
 
     # generate sched
     if args.gen_sched:
-        if not args.duration:
+        if not duration:
             raise ValueError("Cannot generate schedule without arg --duration")
-        duration = args.duration
         if verbosity != "quiet":
             print("Generating simulation schedule")
 
@@ -970,8 +975,6 @@ def build_sched(args, drone_ids, verbosity):
 
     # add drop model to sched if argument is set
     if args.drop_model:
-        if sched is None: 
-            raise ValueError("Adding drop model to schedule requires existing schedule")
         # set Dropout model parameters and generate schedule
         dropout_params = DropoutParams(
                         failure_probability = args.drop_model,
@@ -984,16 +987,39 @@ def build_sched(args, drone_ids, verbosity):
                 )
         dropout_sched = gen_dropout_sched(nodes=drone_ids,
                           t_start_step=50,
-                          t_sim_end=args.duration,
+                          t_sim_end=duration,
                           params=dropout_params)
+        if sched is None:
+            sched = dropout_sched
+        else:
+            sched = dropout_sched + sched
 
-        sched = dropout_sched + sched
+    if args.updown_drop_params:
+        if args.drop_model:
+            raise ValueError("Cannot use --updown-drop-params with --drop-model")
+        try:
+            dropout_params = DropoutUpDownOnlyParams.model_validate_json(args.updown_drop_params)
+        except Exception as e:
+            raise ValueError("Could not load updown drop params", e)
+
+        if verbosity == "verbose":
+            print(f"Generating simple (UP/DOWN only) dropout schedule with params: {dropout_params}")
+        dropout_sched = gen_dropout_sched(nodes=drone_ids,
+                          t_start_step=0, # unused
+                          t_sim_end=duration,
+                          params=dropout_params)
+        if sched is None:
+            sched = dropout_sched
+        else:
+            sched = dropout_sched + sched
 
     if sched is None:
         raise ValueError("Cannot perform simulation without a schedule")
     if duration is None: 
         raise ValueError("Cannot perform simulation if duration is not set with --duration or specified in the loaded schedule")
 
+    if verbosity == "verbose":
+        print(f"simulation duration: {duration}")
     return sched, duration
 
 def start_batadv_in_nodes(drone_ids, adapter_ids):
@@ -1095,11 +1121,11 @@ def setup_simulation_environment(args, pcap_dir, verbosity):
 
     apply_network(args, graph)
 
-    drone_ids, adapter_ids, all_ids = get_node_ids(verbosity)
+    drone_ids, adapter_ids, all_ids = get_node_ids(graph)
 
     start_node_tcpdumps(all_ids, pcap_dir)
     
-    sched, duration = build_sched(args, drone_ids, verbosity)
+    sched, duration = build_sched(args, drone_ids)
 
     start_batadv_in_nodes(drone_ids, adapter_ids)
 
@@ -1129,6 +1155,8 @@ def main():
                         help='Simulation schedule (json)')
     parser.add_argument('-g', '--gen-sched', required=False, action="store_true",
                         help='Generate schedule with iperf3 traffic')
+    parser.add_argument('--updown-drop-params', type=str, required=False,
+                        help='Add simple (UP/DOWN only) dropout model params.')
     parser.add_argument('--drop-model', type=float, required=False,
                         help='Add dropout model schedule with given drop percentage per timestep to schedule.')
     parser.add_argument('-d', '--duration', type=int, required=False, 
