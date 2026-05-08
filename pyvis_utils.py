@@ -70,10 +70,16 @@ def heatmap_color(norm):
     else:
         return f"rgb(255,{int(255 * (1 - (norm - 0.75)*4))},0)"  # yellow → red
 
-def normalize(w,min_w,max_w):
+def normalize(w, min_w, max_w):
+
     if max_w == min_w:
         return 0.5
-    return (w - min_w) / (max_w - min_w)
+
+    x = (w - min_w) / (max_w - min_w)
+    x = max(0.0, min(1.0, x))
+    x = x ** 0.6
+
+    return float(x)
 
 def format_unit(value):
     units = ["", "K", "M", "G", "T"]
@@ -93,24 +99,25 @@ def setting_node_attributes(node_mac,
                             time: float,
                             plot_type: str):
     
+    # Setting shape for different states
+    shape = "dot"
+    current_state = None
+
     # Node coloring
     color = "gray"
     if "a" in node_id:
         color = "red"
-        #label = f"MAC: {node_mac}\nADAPTER: {node_id}"
-        label = f"ADAPTER: {node_id}"   # only use this for figure
+        label = f"MAC: {node_mac}\nADAPTER: {node_id}"
+        #label = f"ADAPTER: {node_id}"   # only use this for figure
+        shape = 'triangle'
     elif "n" in node_id:
         color = "blue"
-        #label = f"MAC: {node_mac}\nNODE: {node_id}"
-        label = f"NODE: {node_id}"   # only use this for figure
+        label = f"MAC: {node_mac}\nNODE: {node_id}"
+        #label = f"NODE: {node_id}"   # only use this for figure
     elif "d" in node_id:
         color = "green" if plot_type == "throughput" else "blue"
-        #label = f"MAC: {node_mac}\nDEVICE: {node_id}"
-        label = f"DEVICE: {node_id}"   # only use this for figure
-
-    # Setting shape for different states
-    shape = "dot"
-    current_state = None
+        label = f"MAC: {node_mac}\nDEVICE: {node_id}"
+        #label = f"DEVICE: {node_id}"   # only use this for figure
 
     if node_id in node_states:
 
@@ -140,18 +147,27 @@ def setting_node_attributes(node_mac,
 ###############################################################################
 
 def accumulative_injection(color_bar_title: str,
-                           color_bar_data: list,
+                           color_bar_data_links: list,
+                           color_bar_data_nodes: list,
                            current_pkt,
                            total_pkts,
                            time,
                            total_time):
-    arr = np.array(color_bar_data)
+# For links
+    arr_links = np.array(color_bar_data_links)
+    min_links = np.min(arr_links)
+    q1_links = np.percentile(arr_links, 25)
+    median_links = np.percentile(arr_links, 50)
+    q3_links = np.percentile(arr_links, 75)
+    max_links = np.max(arr_links)
 
-    min_v = np.min(arr)
-    q1 = np.percentile(arr, 25)
-    median = np.percentile(arr, 50)
-    q3 = np.percentile(arr, 75)
-    max_v = np.max(arr)
+    # For nodes
+    arr_nodes = np.array(color_bar_data_nodes)
+    min_nodes = np.min(arr_nodes)
+    q1_nodes = np.percentile(arr_nodes, 25)
+    median_nodes = np.percentile(arr_nodes, 50)
+    q3_nodes = np.percentile(arr_nodes, 75)
+    max_nodes = np.max(arr_nodes)
 
     injection = """
         <script type="text/javascript">
@@ -176,13 +192,12 @@ def accumulative_injection(color_bar_title: str,
             }
         });
         </script>
-
         <style>
         #heatmap-legend {
             position: fixed;
             top: 20px;
             right: 30px;
-            width: 800px;  /* maybe reduce from 1540 */
+            width: 800px;
             padding: 24px;
             background: white;
             border-radius: 18px;
@@ -191,43 +206,46 @@ def accumulative_injection(color_bar_title: str,
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 9999;
         }
-
+        #heatmap-container {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+        #heatmap-main {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 90px;
+            flex: 1;
+        }
         #heatmap-bar {
             height: 30px;
             width: 100%;
             border-radius: 10px;
             background: linear-gradient(
                 to right,
-                rgb(0,0,255),     /* blue */
-                rgb(0,255,255),   /* cyan */
-                rgb(0,255,0),     /* green */
-                rgb(255,255,0),   /* yellow */
-                rgb(255,0,0)      /* red */
+                rgb(0,0,255),
+                rgb(0,255,255),
+                rgb(0,255,0),
+                rgb(255,255,0),
+                rgb(255,0,0)
             );
         }
-
+        #heatmap-labels-top,
         #heatmap-labels {
             display: flex;
             justify-content: space-between;
-            margin-top: 5px;
             font-size: 24px;
         }
-        </style>
-
-        <div id="heatmap-legend">
-            <b>""" + f'{color_bar_title}' + """</b>
-            <div id="heatmap-bar"></div>
-            <div id="heatmap-labels">
-                <span>""" + f"{format_unit(min_v)}" + """</span>
-                <span>""" + f"{format_unit(q1)}" + """</span>
-                <span>""" + f"{format_unit(median)}" + """</span>
-                <span>""" + f"{format_unit(q3)}" + """</span>
-                <span>""" + f"{format_unit(max_v)}" + """</span>
-
-            </div>
-        </div>
-
-        <style>
+        #heatmap-side-text {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 90px;
+            font-size: 24px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
         #packet-info {
             position: fixed;
             top: 20px;
@@ -240,7 +258,36 @@ def accumulative_injection(color_bar_title: str,
             box-shadow: 0 2px 6px rgba(0,0,0,0.2);
             z-index: 9999;
         }
+
         </style>
+        <div id="heatmap-legend">
+            <b>""" + f'{color_bar_title}' + """</b>
+            <div id="heatmap-container">
+                <div id="heatmap-side-text">
+                    <div>node</div>
+                    <div>link</div>
+                </div>
+                <div id="heatmap-main">
+                    <div id="heatmap-labels-top">
+                        <span>""" + f"{format_unit(min_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(q1_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(median_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(q3_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(max_nodes)}" + """</span>
+                    </div>
+
+                    <div id="heatmap-bar"></div>
+
+                    <div id="heatmap-labels">
+                        <span>""" + f"{format_unit(min_links)}" + """</span>
+                        <span>""" + f"{format_unit(q1_links)}" + """</span>
+                        <span>""" + f"{format_unit(median_links)}" + """</span>
+                        <span>""" + f"{format_unit(q3_links)}" + """</span>
+                        <span>""" + f"{format_unit(max_links)}" + """</span>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <div id="packet-info">
             <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
@@ -250,22 +297,30 @@ def accumulative_injection(color_bar_title: str,
     return injection
 
 def window_injection(color_bar_title: str,
-                     color_bar_data: list,
+                     color_bar_data_links: list,
+                     color_bar_data_nodes: list,
                      current_pkt: int,
                      total_pkts: int,
                      time: float,
                      total_time: float,
                      time_prev: float,
                      packet_prev: int):
-    
-    
-    arr = np.array(color_bar_data)
 
-    min_v = np.min(arr)
-    q1 = np.percentile(arr, 25)
-    median = np.percentile(arr, 50)
-    q3 = np.percentile(arr, 75)
-    max_v = np.max(arr)
+    # For links
+    arr_links = np.array(color_bar_data_links)
+    min_links = np.min(arr_links)
+    q1_links = np.percentile(arr_links, 25)
+    median_links = np.percentile(arr_links, 50)
+    q3_links = np.percentile(arr_links, 75)
+    max_links = np.max(arr_links)
+
+    # For nodes
+    arr_nodes = np.array(color_bar_data_nodes)
+    min_nodes = np.min(arr_nodes)
+    q1_nodes = np.percentile(arr_nodes, 25)
+    median_nodes = np.percentile(arr_nodes, 50)
+    q3_nodes = np.percentile(arr_nodes, 75)
+    max_nodes = np.max(arr_nodes)
 
     injection = """
         <script type="text/javascript">
@@ -290,13 +345,12 @@ def window_injection(color_bar_title: str,
             }
         });
         </script>
-
         <style>
         #heatmap-legend {
             position: fixed;
             top: 20px;
             right: 30px;
-            width: 800px;  /* maybe reduce from 1540 */
+            width: 800px;
             padding: 24px;
             background: white;
             border-radius: 18px;
@@ -305,43 +359,46 @@ def window_injection(color_bar_title: str,
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             z-index: 9999;
         }
-
+        #heatmap-container {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+        #heatmap-main {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 90px;
+            flex: 1;
+        }
         #heatmap-bar {
             height: 30px;
             width: 100%;
             border-radius: 10px;
             background: linear-gradient(
                 to right,
-                rgb(0,0,255),     /* blue */
-                rgb(0,255,255),   /* cyan */
-                rgb(0,255,0),     /* green */
-                rgb(255,255,0),   /* yellow */
-                rgb(255,0,0)      /* red */
+                rgb(0,0,255),
+                rgb(0,255,255),
+                rgb(0,255,0),
+                rgb(255,255,0),
+                rgb(255,0,0)
             );
         }
-
+        #heatmap-labels-top,
         #heatmap-labels {
             display: flex;
             justify-content: space-between;
-            margin-top: 5px;
             font-size: 24px;
         }
-        </style>
-
-        <div id="heatmap-legend">
-            <b>""" + f'{color_bar_title}' + """</b>
-            <div id="heatmap-bar"></div>
-            <div id="heatmap-labels">
-                <span>""" + f"{format_unit(min_v)}" + """</span>
-                <span>""" + f"{format_unit(q1)}" + """</span>
-                <span>""" + f"{format_unit(median)}" + """</span>
-                <span>""" + f"{format_unit(q3)}" + """</span>
-                <span>""" + f"{format_unit(max_v)}" + """</span>
-
-            </div>
-        </div>
-
-        <style>
+        #heatmap-side-text {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 90px;
+            font-size: 24px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
         #packet-info {
             position: fixed;
             top: 20px;
@@ -354,19 +411,137 @@ def window_injection(color_bar_title: str,
             box-shadow: 0 2px 6px rgba(0,0,0,0.2);
             z-index: 9999;
         }
+
         </style>
+        <div id="heatmap-legend">
+            <b>""" + f'{color_bar_title}' + """</b>
+            <div id="heatmap-container">
+                <div id="heatmap-side-text">
+                    <div>node</div>
+                    <div>link</div>
+                </div>
+                <div id="heatmap-main">
+                    <div id="heatmap-labels-top">
+                        <span>""" + f"{format_unit(min_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(q1_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(median_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(q3_nodes)}" + """</span>
+                        <span>""" + f"{format_unit(max_nodes)}" + """</span>
+                    </div>
+
+                    <div id="heatmap-bar"></div>
+
+                    <div id="heatmap-labels">
+                        <span>""" + f"{format_unit(min_links)}" + """</span>
+                        <span>""" + f"{format_unit(q1_links)}" + """</span>
+                        <span>""" + f"{format_unit(median_links)}" + """</span>
+                        <span>""" + f"{format_unit(q3_links)}" + """</span>
+                        <span>""" + f"{format_unit(max_links)}" + """</span>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <div id="packet-info">
-            <div>Packet interval <b>""" + f"{packet_prev}" + """ - """ + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
-            <div>Time of interval <b>""" + f"{time_prev:.2f}" + """ - """ + f"{time:.2f}"  + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
-            <div>UP/DOWN  snapshot at <b>""" + f"{time:.2f}" """</b></div>
+            <div> Packet interval <b>""" + f"{packet_prev}" + """ - """ + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts </div>
+            <div> Time of interval <b>""" + f"{time_prev:.2f}" + """ - """ + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+            <div> UP/DOWN snapshot at <b>""" + f"{time:.2f}" + """</b> </div>
         </div>
         """
+
     return injection
 
 ###############################################################################
 #___________________________ VISUALIZATION FUNCTIONS _________________________#
 ###############################################################################
+
+# def compute_graph_metrics(G,
+#                           plot_type: str,
+#                           precision_number=1e-7):
+#     link_values = []
+#     node_tx = {}
+
+#     for src, dst, data in G.edges(data=True):
+
+#         if plot_type in ["tcp", "udp"]:
+#             v = data.get("weight", 1)
+
+#         elif plot_type == "throughput":
+#             dt = max(data.get("last_time") - data.get("first_time"), precision_number)
+#             bits = data.get("bits", 0)
+#             v = bits / dt
+
+#         link_values.append(v)                   # All link traffic
+#         node_tx[src] = node_tx.get(src, 0) + v  # outgoing node traffic
+
+#     node_values = list(node_tx.values())
+
+#     return link_values, node_values, node_tx
+
+# def add_nodes(net,
+#               G,
+#               node_macs,
+#               node_tx,
+#               min_nodes,
+#               max_nodes,
+#               reference_data,
+#               pos_lookup,
+#               node_states,
+#               last_rendered_time,
+#               time,
+#               plot_type):
+        
+#     for node in node_macs:
+
+#         node_info = find_mac_path(reference_data, node)
+
+#         # node_info = /n4/mac/uplink@if15  (example)
+#         if node_info:
+#             parts = node_info.split("/")
+#             node_id = parts[1]
+#             addr_type = parts[2]
+#             addr_type_type = parts[3]
+#             # expected adapter and node ids in the json lookup
+
+#             if node_id in pos_lookup and "uplink" in addr_type_type:
+#                 x = pos_lookup[node_id]["x"]
+#                 y = pos_lookup[node_id]["y"]
+#             elif "d" in node_id:
+#                 x = 30000 + np.random.random() * 1000
+#                 y = 15000 + np.random.random() * 1000
+#             else:
+#                 x = -10000 + np.random.random() * 1000
+#                 y = 15000 + np.random.random() * 1000
+#         else:
+#             # expect to be 33:33:00:00:00:02 which is to do with 0x08...
+#             node_id = "unknown"
+#             addr_type = "unknown"
+#             addr_type_type = "unknown"
+#             x = 30000
+#             y = 15000
+
+#         label, shape, color = setting_node_attributes(node_mac=node,
+#                                                       node_id=node_id,
+#                                                       node_states=node_states,
+#                                                       last_rendered_time=last_rendered_time,
+#                                                       time=time,
+#                                                       plot_type=plot_type)
+        
+#         node_value = node_value_lookup.get(node, 0)
+#         norm = normalize(w=node_value,min_w=min_nodes,max_w=max_nodes)
+#         color = heatmap_color(norm=norm)
+#         if node not in G.nodes():
+#             color = 'black'
+#         net.add_node(
+#             node,
+#             label=label,
+#             size=10,
+#             color=color,
+#             x=x/20,
+#             y=y/20,
+#             physics=False,
+#             shape=shape
+#         )
 
 def creation_of_pyvis(G,
                       index: str,
@@ -395,20 +570,44 @@ def creation_of_pyvis(G,
     print(f"Creating Pyvis HTML at time: {time}")
     # Create PyVis network
     net = Network(height="100vh", width="100vw", directed=True, bgcolor="white", font_color="black")
-    # Optional: better physics (important for mesh graphs)
-    net.barnes_hut()
+    net.barnes_hut() # Optional: better physics (important for mesh graphs)
 
     # Load layout data (graph.json)
     with open(json_nodes,"r") as f:
         node_link_data = json.load(f)
     nodes_pos_data = node_link_data.get("nodes", [])
     pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
+    print(pos_lookup)
     nodes = []     # Add nodes + edges
 
     # 1. Add nodes that exist in G (only include nodes and adapters that have links)
     uplink_macs = extract_uplink_macs(reference_data)
     used_macs = set(extract_used_macs_from_graph(G))
     node_macs = used_macs.union(uplink_macs)
+
+    # Add nodes and edges with styling
+    link_values = []
+    node_tx = {}
+
+    for src, dst, data in G.edges(data=True):
+        if plot_type == 'tcp':
+            v = data.get('weight', 1)
+        elif plot_type == 'udp':
+            v = data.get('weight', 1)
+        elif plot_type == 'throughput':
+            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
+            bits = data.get("bits", 0)
+            v = bits / dt
+        link_values.append(v)
+        node_tx[src] = node_tx.get(src, 0) + v # outgoing transmission from a node
+        print(f'src: {src} | transmits: {node_tx[src]}')
+    node_values = list(node_tx.values())
+
+    min_links = min(link_values)
+    max_links = max(link_values)
+    min_nodes = min(node_values) if node_values else 0
+    max_nodes = max(node_values) if node_values else 0
+    node_value_lookup = node_tx
 
     for node in node_macs:
 
@@ -445,7 +644,12 @@ def creation_of_pyvis(G,
                                                       last_rendered_time=last_rendered_time,
                                                       time=time,
                                                       plot_type=plot_type)
-
+        
+        node_value = node_value_lookup.get(node, 0)
+        norm = normalize(w=node_value,min_w=min_nodes,max_w=max_nodes)
+        color = heatmap_color(norm=norm)
+        if node not in G.nodes():
+            color = 'black'
         net.add_node(
             node,
             label=label,
@@ -486,6 +690,7 @@ def creation_of_pyvis(G,
             mac,
             label=f"MAC: {mac}\nNODE: {node_id}\nADDR TYPE: {addr_type} {addr_type_type}"
         )
+
         if mac in G.nodes():
             print(f"{node_id} -> {mac}")
         else:
@@ -502,22 +707,6 @@ def creation_of_pyvis(G,
                 physics=False,
                 shape=shape
             )
-
-    # Add edges with styling
-    values = []
-    for _, _, data in G.edges(data=True):
-        if plot_type == 'tcp':
-            v = data.get('weight', 1)
-        elif plot_type == 'udp':
-            v = data.get('weight', 1)
-        elif plot_type == 'throughput':
-            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
-            bits = data.get("bits", 0)
-            v = bits / dt
-        values.append(v)
-
-    min_v = min(values)
-    max_v = max(values)
     
     for src, dst, data in G.edges(data=True):
         #  check if reverse edge exists
@@ -534,7 +723,7 @@ def creation_of_pyvis(G,
 
         if plot_type == 'tcp':
             value = data.get('weight',1)
-            norm = normalize(w=value,min_w=min_v,max_w=max_v)
+            norm = normalize(w=value,min_w=min_links,max_w=max_links)
             color = heatmap_color(norm=norm)
             net.add_edge(
             src,
@@ -547,7 +736,7 @@ def creation_of_pyvis(G,
         )
         elif plot_type == 'udp':
             value = data.get('weight',1)
-            norm = normalize(w=value,min_w=min_v,max_w=max_v)
+            norm = normalize(w=value,min_w=min_links,max_w=max_links)
             color = heatmap_color(norm=norm)
             net.add_edge(
             src,
@@ -556,13 +745,13 @@ def creation_of_pyvis(G,
             title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {data.get('weight')}",        
             # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
             color= color,               
-            width=10 + np.log1p(value)  # optional smoother scaling
+            width=1 + np.log1p(value)  # optional smoother scaling
         )
         elif plot_type == "throughput":
             dt = max(data.get('last_time') - data.get('first_time'), precision_number)
             bits = data.get("bits", 0)
             value = bits / dt
-            norm = normalize(w=value,min_w=min_v,max_w=max_v)
+            norm = normalize(w=value,min_w=min_links,max_w=max_links)
             color = heatmap_color(norm=norm)
 
             net.add_edge(
@@ -583,23 +772,13 @@ def creation_of_pyvis(G,
     # Save and open
     # Save HTML (DO NOT use show)
     net.write_html(output_file)
-    values = []
-    for _, _, data in G.edges(data=True):
-        if plot_type == 'tcp':
-            v = data.get('weight', 1)
-        elif plot_type == 'udp':
-            v = data.get('weight', 1)
-        elif plot_type == 'throughput':
-            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
-            bits = data.get("bits", 0)
-            v = bits / dt
-        values.append(v)
-    
-    color_bar_data = values
+
+    color_bar_data_links = link_values
+    color_bar_data_nodes = node_values
     if plot_type == 'tcp':
-        color_bar_title = 'TCP packets transmitted on link'
+        color_bar_title = 'TCP packets transmitted on'
     elif plot_type == 'udp':
-        color_bar_title = 'UDP packets transmitted on link'
+        color_bar_title = 'UDP packets transmitted on'
     elif plot_type == 'throughput':
         color_bar_title = 'Throughput [bits/s] on link'
     
@@ -610,7 +789,8 @@ def creation_of_pyvis(G,
         # Insert injection
         if flag_interval == True:
             injection = window_injection(color_bar_title=color_bar_title,
-                                         color_bar_data = color_bar_data,
+                                         color_bar_data_links=color_bar_data_links,
+                                         color_bar_data_nodes=color_bar_data_nodes,
                                          current_pkt=current_pkt,
                                          total_pkts=total_pkts,
                                          time=time,
@@ -619,7 +799,8 @@ def creation_of_pyvis(G,
                                          packet_prev=packet_prev)
         else:
             injection = accumulative_injection(color_bar_title=color_bar_title,
-                                               color_bar_data = color_bar_data,
+                                               color_bar_data_links=color_bar_data_links,
+                                               color_bar_data_nodes=color_bar_data_nodes,
                                                current_pkt=current_pkt,
                                                total_pkts=total_pkts,time=time,
                                                total_time=total_time)
