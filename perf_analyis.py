@@ -210,7 +210,6 @@ def extract_variable_full(data: dict,
         _,value_2 = find_nsperf_variable(data=data,target=nsperf_variable[2])
 
         if value_1 is None or value_2 is None or sign is None:
-            print("Missing values in equation")
             return None
         value = calc_tuple_nsperf(key_1=value_1,key_2=value_2,sign=sign)
         if value is not None:
@@ -222,6 +221,8 @@ def extract_variable_full(data: dict,
         sign = nsperf_variable[1]
         _,value_2 = find_nsperf_variable(data=data,target=nsperf_variable[2])
 
+        if value_1 == 0:
+            return None
         if value_1 is None or value_2 is None or sign is None:
             print("Missing values in equation")
             return None
@@ -272,8 +273,11 @@ def extract_graph(file: Path) -> dict:
 
 def nsperf_key(p: Path):
     stem = Path(p).stem  
+    parts = stem.split("_")
 
-    client, server, num = stem.split("_")
+    client = parts[0]
+    server = parts[1]
+    num = parts[2]
 
     client_id = int(re.findall(r"\d+", client)[0])
     server_id = int(re.findall(r"\d+", server)[0])
@@ -288,32 +292,93 @@ def is_number(s: str) -> bool:
     except ValueError:
         return False
 
+def find_experiment_root(path: Path) -> Path:
+    """
+    Stops at iter_X OR numeric/magnitude folder
+    but does NOT go above iter level
+    """
+
+    for parent in path.parents:
+
+        name = parent.name.lower()
+
+        # stop at iter folders (IMPORTANT)
+        if name.startswith("iter_"):
+            return parent
+
+        # stop at experiment numeric root
+        if is_number(name):
+            return parent
+
+        # stop at magnitude root
+        if name.endswith(("k", "m")):
+            return parent
+
+    return path.parent
+
 def pairing_files(input: Path) -> list:
     experiments = []
 
-    if input.is_dir() and is_number(input.name):
-        nsperf_files = get_json_files(input / "nsperf" / "streams")
-        graph_file = (input / "graph.json")
+    for stream_dir in input.rglob("nsperf/streams"):
+
+        experiment_root = stream_dir.parents[2]  # <- THIS IS iter_X folder
+        experiment_naming = stream_dir.parents[1]  # <- THIS IS iter_X folder
+
+        nsperf_files = get_json_files(stream_dir)
+        graph_file = next(experiment_root.rglob("graph.json"), None)
+
         experiments.append({
-                "name": input.name,
-                "nsperf": nsperf_files,
-                "graphs": graph_file
+            "name": str(experiment_naming),   
+            "nsperf": nsperf_files,
+            "graphs": graph_file
         })
-        return experiments
-    elif input.is_dir():
-        dirs = [d for d in input.iterdir() if d.is_dir() and is_number(d.name)]
 
-        for d in dirs:
-            nsperf_files = get_json_files(d / "nsperf" / "streams")
-            graph_file = next(d.rglob("graph.json"), None)
+    return experiments
 
-            experiments.append({
-                "name": d.name,
-                "nsperf": nsperf_files,
-                "graphs": graph_file
-            })
+def experiment_sort_key(name: str):
+    parts = Path(name).parts
 
-        return experiments
+    bitrate = 0
+    loss = 0
+    it = 0
+
+    for p in parts:
+        p_low = p.lower()
+
+        if p_low.startswith("iter_"):
+            it = int(p_low.split("_")[1])
+
+        elif p_low.endswith("k"):
+            bitrate = float(p_low[:-1]) * 1_000
+
+        elif p_low.endswith("m"):
+            bitrate = float(p_low[:-1]) * 1_000_000
+
+        elif re.fullmatch(r"\d+", p_low):
+            loss = int(p_low)
+
+    return (bitrate, loss, it)
+
+def experiment_name(name: str):
+    parts = Path(name).parts
+
+    bitrate = None
+    loss = None
+    it = None
+
+    for p in parts:
+        p_low = p.lower()
+
+        if p_low.startswith("iter_"):
+            it = p_low
+
+        elif p_low.endswith("k") or p_low.endswith("m"):
+            bitrate = p_low
+
+        elif re.fullmatch(r"\d+(\.\d+)?", p_low):
+            loss = p_low
+
+    return "_".join([x for x in [bitrate, loss, it] if x])
 
 ######################################################
 ##### PLOT ###########################
@@ -362,13 +427,14 @@ def plot_boxplot(boxplot_data: list,
                  titlename: str,
                  fontsize: int = 12,
                  picture_size: tuple = (16,9)):
-    if axis_labels[0] != "link_loss [%]":
+    if axis_labels[0] not in ("link_loss [%]","num_streams [-]") :
         sorted_items = sorted(boxplot_data.items(),key=lambda item: float(item[0].split("_")[0]))
         labels = [k for k, _ in sorted_items]
         values = [v for _, v in sorted_items]
     else:
-        labels = box_data.keys()
-        values = box_data.values()
+        sorted_items = sorted(box_data.items(), key=lambda k: float(k[0]))
+        labels = [k for k, _ in sorted_items]
+        values = [v for _, v in sorted_items]
 
     fig, ax = plt.subplots(figsize=picture_size)
 
@@ -474,13 +540,8 @@ def add_active_stream_count(streams: list[dict]) -> list[dict]:
         count = 1
 
         for o in streams:
-
-            # ❌ skip self
-            if (
-                s["client"] == o["client"]
-                and s["server"] == o["server"]
-                and s["num"] == o["num"]
-            ):
+            # skip exact same object only
+            if s is o:
                 continue
 
             # overlap condition
@@ -518,7 +579,8 @@ if __name__ == "__main__":
     experiments = pairing_files(input=input_path)
     percentile = percentile_refactor(args.percentile)
 
-    experiments = sorted(experiments, key=lambda e: float(e["name"]))
+
+    experiments = sorted(experiments, key=lambda e: experiment_sort_key(e["name"]))
 
     variable_map  = []
     variable_map .append({"name": "link_loss", "aliases": ["link_loss", "link loss"], "nsperf": "link_loss"})                     #Need to change to just what's in graph
@@ -552,10 +614,16 @@ if __name__ == "__main__":
 
         plot_variables_allowed(data_variable=name,variable_map=variable_map)
         all_nsperfs[name] = nsperf
-        
+    
+    # for changing name 
+    for exp in experiments:
+        print(exp["name"])
+        exp["name"] = experiment_name(exp["name"])
+        print(exp["name"])
+
     print(f"{percentile=}")
 
-    path_width = max(len(str(f))for exp in experiments for f in exp["nsperf"]) + 2
+    path_width = max(len(f.name)for exp in experiments for f in exp["nsperf"]) + 2
 
     # title = " Files used for analysis "
     # print(title.center(WIDTH, "-"))
@@ -565,21 +633,22 @@ if __name__ == "__main__":
     #     nsperf_files = exp["nsperf"]
     #     graph_file = exp["graphs"]
 
-    #     # title = f" Link loss: {exp['name']} "
-    #     # print()
-    #     # print(title.center(WIDTH, "_"))
+    #     title = f" Link loss: {exp['name']} "
+    #     print()
+    #     print(title.center(WIDTH, "_"))
 
     #     for f in nsperf_files:
     #         interval_step, json_file_data, end_time = nsperf_interval_set(f)
 
     #         end_str = "" if end_time is None else str(end_time)
 
-    #         # print(
-    #         #     f"{str(f).ljust(path_width)} | "
-    #         #     f"interval: {str(interval_step).ljust(PLOT_SPACING)} | "
-    #         #     f"End time {end_str.ljust(PLOT_SPACING)} | "
-    #         #     f"Graph: {str(graph_file).ljust(path_width)}"
-    #         # )
+    #         print(
+    #             f"{str(f).ljust(path_width)} | "
+    #             f"interval: {str(interval_step).ljust(PLOT_SPACING)} | "
+    #             f"End time {end_str.ljust(PLOT_SPACING)} | "
+    #             f"Graph: {str(graph_file).ljust(path_width)}"
+    #             f"Name: {exp["name"]}"
+    #         )
 
     graph_reference_path = experiments[0]["graphs"]
 
@@ -609,7 +678,12 @@ if __name__ == "__main__":
         for f in nsperf_files:
             # Just for structure
             stem = Path(f).stem  
-            client, server, num = stem.split("_")
+            parts = stem.split("_")
+
+            client = parts[0]
+            server = parts[1]
+            num = parts[2]
+
             interval_step, json_file_data, end_time = nsperf_interval_set(f)
             data,ids = sorting_data_nsperf(file_data=json_file_data,interval_step=interval_step,percentile=percentile,max_window=None)
             """         This just for intermediate for seing what is saved    """
@@ -627,7 +701,12 @@ if __name__ == "__main__":
                 req_client = full_grid
             if req_server is None:
                 req_server = full_grid
-            link_loss = float(exp["name"]) if is_number(exp["name"]) else graph_link_loss
+            #overwritting of linkloss
+            link_loss = graph_link_loss
+            for split in exp["name"].split("_"):
+                if is_number(split):
+                    link_loss = float(split)
+                    break
             mesh_size = len(nodes)
             if interval_step is None:
                 axis_values = []
@@ -638,10 +717,19 @@ if __name__ == "__main__":
                         nsperf = variable["nsperf"]
                         name = variable["name"]
                         nsperf_value = extract_variable_full(data=data,nsperf_variable=nsperf)
+                        #overwritting of requested throughput on streams
+                        if name == "request_throughput":
+                            for split in exp["name"].split("_"):
+                                if split.lower().endswith("k"):
+                                    nsperf_value = float(split[:-1]) * 1_000
+                                    break
+                                elif split.lower().endswith("m"):
+                                    nsperf_value = float(split[:-1]) * 1_000_000
+                                    break
                         all_nsperf_values[name] = nsperf_value
                         if nsperf in axis_nsperfs:
                             axis_values.append(nsperf_value)
-                plot_data[link_loss].append({
+                plot_data[exp["name"]].append({
                                             "client": client,
                                             "server": server,
                                             "num": num,
@@ -651,7 +739,7 @@ if __name__ == "__main__":
                     if client != prev_client and first_client is False:
                         title = f" Client: {client} "
                         print(title.center(WIDTH,"="))
-                    print(f"File {str(f).ljust(path_width)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
+                    print(f"File {f.name.ljust(path_width)} | Name = {str(exp["name"]).ljust(PLOT_SPACING)} | X value = {str(axis_values[0]).ljust(PLOT_SPACING)} | Y value = {str(axis_values[1]).ljust(PLOT_SPACING)}")
                     prev_client = client
                     first_client = False
             else:
@@ -708,7 +796,10 @@ if __name__ == "__main__":
         for s in streams:
             entry = s["entry"]
             entry["num_streams"] = s["active_streams"]
-
+            if "iter_03" in loss and int(s['num']) == 210:
+                print("hello")
+            #if s["active_streams"] in (7,9,14):
+                print(f"link_loss {loss}: {s['client']} -> {s['server']} Num: {s['num']} | start: {s['start_s']} stop: {s['stop_s']} | streams: {s['active_streams']}")
     for loss, runs in plot_data.items():
         for entry in runs:
             # IF set to one specific stream only save data for this stream
@@ -787,7 +878,7 @@ if __name__ == "__main__":
         type_graph = 1,
         file_name=f"{plot_file_name}.png"
     )
-    if axis_names[0] != "link_loss":
+    if axis_names[0] not in ("link_loss", "num_streams"):
         bin_values = bin_splitting(scaled_x_values)
         bin_names = bin_naming(bin_values)
 
@@ -801,7 +892,6 @@ if __name__ == "__main__":
         # no bins, just group by value
         for x, y in zip(scaled_x_values, scaled_y_values):
             box_data[x].append(y)
-
     plot_boxplot(
         boxplot_data = box_data,
         axis_labels = axis_labels,
@@ -812,10 +902,8 @@ if __name__ == "__main__":
         file_name=f"{plot_file_name}_boxplot.png"
     )
 
-    percentile_not = ["total_loss","link_loss","throughput","request_throughput","num_streams","mesh_size"]
-
-    for name in percentile_not:
+    for name in percentile_matrixs:
         if name in axis_names:
-            print(f"\nPercentile Setting does not matter for parameters '{name}'")
+            print(f"\nPercentile Setting does matter for parameters '{name}'")
         if graph_same is False:
             print("\nWARNING: Graphs used don't have same structure")
