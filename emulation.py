@@ -326,12 +326,17 @@ def start_iperf3_servers(node_names: list[str]):
                 continue
             run_iperf3_server(server, client)
 
+def safe_filename_part(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-")
+
+
 def run_nsperf_client(server_name: str,
                       client_name: str,
                       out_dir: str, 
                       timestamp: float,
                       duration: str, 
-                      bitrate: str):
+                      bitrate: str,
+                      flow_label: str = ""):
     """
     Start nsperf client in a device namespace
 
@@ -349,15 +354,21 @@ def run_nsperf_client(server_name: str,
         duration of nsperf traffic stream e.g. "10s"
     bitrate : str
         desired traffic bitrate e.g. "2M" or "100K"
+    flow_label : str
+        optional flow label for the nsperf stream
     """
     # extract ip and port from server device
     server_port = NSPERF_PORT
     server_ipv4, subnet_bits = ipv4_addr(server_name)
 
-    nsperf_path = os.path.join(out_dir, f"{server_name}_{client_name}_{timestamp:.0f}.send.csv")
+    flow_name = f"{server_name}_{client_name}_{timestamp:.0f}"
+    safe_flow_label = safe_filename_part(flow_label)
+    if safe_flow_label:
+        flow_name = f"{flow_name}_{safe_flow_label}"
+    nsperf_path = os.path.join(out_dir, f"{flow_name}.send.csv")
 
     run_id = "run-" + datetime.now().isoformat(timespec="seconds").replace("+00:00", "Z")
-    flow_id = f"{server_name}_{client_name}_{timestamp:.0f}"
+    flow_id = flow_name
 
     client_cmd = ["ip", "netns", "exec", f"ns-{client_name}", 
                   "nsperf", "client", "--dst", server_ipv4, "--port", str(server_port), 
@@ -719,6 +730,7 @@ def do_event(e: SchedEvent, graph: dict, simtime: float):
                 timestamp=simtime,
                 duration=e.duration,
                 bitrate=e.bitrate,
+                flow_label=e.nsperf_header,
                 )
     elif isinstance(e, DropoutEvent):
         if e.state != State.UP:
