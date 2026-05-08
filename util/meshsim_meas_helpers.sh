@@ -20,18 +20,19 @@ msh_run_emulation() {
 	network_script="$6"
 	verbosity="${7:-verbose}"
 	python_exe="${8:-python3}"
+	shift 8
 
 	msh_cleanup "$network_script" "$python_exe"
 	modprobe batman_adv
 
 	if [ -n "$link_loss" ]; then
-		if "$python_exe" "$emulation_script" --sim-sched "$sched" --link-loss "$link_loss" --verbosity "$verbosity" "$graph" >"$logfile" 2>&1; then
+		if "$python_exe" "$emulation_script" --sim-sched "$sched" --link-loss "$link_loss" --verbosity "$verbosity" "$@" "$graph" >"$logfile" 2>&1; then
 			status=0
 		else
 			status=$?
 		fi
 	else
-		if "$python_exe" "$emulation_script" --sim-sched "$sched" --verbosity "$verbosity" "$graph" >"$logfile" 2>&1; then
+		if "$python_exe" "$emulation_script" --sim-sched "$sched" --verbosity "$verbosity" "$@" "$graph" >"$logfile" 2>&1; then
 			status=0
 		else
 			status=$?
@@ -173,6 +174,21 @@ msh_progress_start() {
 		"$bitrate_idx" "$bitrate_count" "$bitrate" \
 		"$iteration" "$iterations" \
 		"$elapsed" "$eta"
+}
+
+msh_progress_start_context() {
+	script_start_epoch="$1"
+	completed="$2"
+	simulation_idx="$3"
+	total_simulations="$4"
+	context="$5"
+
+	now_epoch=$(date +%s)
+	elapsed=$(msh_format_duration "$((now_epoch - script_start_epoch))")
+	eta=$(msh_progress_eta "$script_start_epoch" "$completed" "$total_simulations")
+
+	printf "[progress] starting simulation %s/%s | %s | elapsed %s | %s\n" \
+		"$simulation_idx" "$total_simulations" "$context" "$elapsed" "$eta"
 }
 
 msh_progress_done() {
