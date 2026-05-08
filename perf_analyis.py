@@ -796,10 +796,9 @@ if __name__ == "__main__":
         for s in streams:
             entry = s["entry"]
             entry["num_streams"] = s["active_streams"]
-            if "iter_03" in loss and int(s['num']) == 210:
-                print("hello")
+            # if "iter_03" in loss and int(s['num']) == 210:
             #if s["active_streams"] in (7,9,14):
-                print(f"link_loss {loss}: {s['client']} -> {s['server']} Num: {s['num']} | start: {s['start_s']} stop: {s['stop_s']} | streams: {s['active_streams']}")
+                # print(f"link_loss {loss}: {s['client']} -> {s['server']} Num: {s['num']} | start: {s['start_s']} stop: {s['stop_s']} | streams: {s['active_streams']}")
     for loss, runs in plot_data.items():
         for entry in runs:
             # IF set to one specific stream only save data for this stream
