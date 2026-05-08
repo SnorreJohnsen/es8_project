@@ -4,3 +4,6 @@
 [submodule "batman-patch"]
 	path = batman-patch
 	url = git@github.com:mhtoribio/batman-patch
+[submodule "nsperf"]
+	path = nsperf
+	url = git@github.com:mhtoribio/nsperf

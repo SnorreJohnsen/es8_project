@@ -1,7 +1,5 @@
-from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum
 from typing import Callable
-from functools import total_ordering
 import random
 from pydantic import BaseModel
 
@@ -24,6 +22,11 @@ class DropoutParams(BaseModel):
     fly_down_time: float
     desired_fly_time: float
     recharging_time: float
+
+class DropoutUpDownOnlyParams(BaseModel):
+    failure_probability: float
+    replacement_delay: float
+    time_step: float
 
 class DropoutModel:
     # Model parameters
@@ -95,6 +98,64 @@ class DropoutModel:
     def get(self):
         return self._sched
 
+class DropoutUpDownOnlyModel:
+    # Model parameters
+    name: str
+    params: DropoutUpDownOnlyParams
+
+    # Model outputs
+    _sched: list[tuple[float, DropoutEvent]] # updates only
+
+    # Model internals
+    _state: State = State.UP
+    _time_state_enter: float = 0
+    _sim_time: float = 0
+    _replacement_delay: float = 0
+
+    def __init__(self, name: str, params: DropoutUpDownOnlyParams, init_time: float = 0) -> None:
+        self.name = name
+        self.params = params
+        self._sim_time = init_time
+        self._time_state_enter = init_time
+        self._sched = []
+
+    def change_state(self, new_state):
+        self._sched.append((self._sim_time, DropoutEvent(name=self.name, state=new_state)))
+
+        self._state = new_state
+        self._time_state_enter = self._sim_time
+
+        if self._state == State.DOWN:
+            self._replacement_delay = self.params.replacement_delay
+
+    def step_state_machine(self, time_in_state):
+        if self._state == State.UP:
+            sample = random.random()
+            if sample < self.params.failure_probability:
+                self.change_state(State.DOWN)
+        elif self._state == State.DOWN:
+            if time_in_state >= self._replacement_delay:
+                self.change_state(State.UP)
+        else:
+            raise ValueError(f"Simple Dropout Model reached invalid state {self._state}")
+
+    def step(self):
+        self._sim_time += self.params.time_step
+        time_in_state = self._sim_time - self._time_state_enter
+
+        self.step_state_machine(time_in_state)
+
+    def stepn(self, n: int):
+        for _ in range(n):
+            self.step()
+
+    def stepuntil(self, t: float):
+        while self._sim_time < t:
+            self.step()
+
+    def get(self):
+        return self._sched
+
 class MultipleDroneSim:
     sims: list[DropoutModel]
 
@@ -148,6 +209,50 @@ class MultipleDroneSim:
             result.extend(m.get())
         return result
 
+class SimpleDroneSim: # UP/DOWN (fail-only) simulation over multiple drones
+    sims: list[DropoutUpDownOnlyModel]
+
+    def __init__(self, 
+                 params: DropoutUpDownOnlyParams,
+                 n: int | None = None, 
+                 names: list[str] | None = None
+                 ):
+        if n:
+            if names:
+                assert len(names) == n
+            else:
+                names = [f"dropout_sim{i}" for i in range(n)]
+        else:
+            assert names is not None
+            n = len(names)
+
+        sims = []
+        for name in names:
+            m = DropoutUpDownOnlyModel(
+                    name = name,
+                    params = params,
+                    )
+            sims.append(m)
+
+        self.sims = sims
+
+    def step(self):
+        for m in self.sims:
+            m.step()
+
+    def stepn(self, n: int):
+        for _ in range(n):
+            self.step()
+
+    def stepuntil(self, t: float):
+        for m in self.sims:
+            m.stepuntil(t)
+
+    def get(self):
+        result = []
+        for m in self.sims:
+            result.extend(m.get())
+        return result
 #######################
 ##### Simple test #####
 #######################
@@ -171,6 +276,19 @@ def main():
     sims.stepuntil(2000)
     from pprint import pprint
     pprint(sims.get())
+
+    params = DropoutUpDownOnlyParams(
+            failure_probability=0.05,
+            replacement_delay=30,
+            time_step=10,
+            )
+    sim = SimpleDroneSim(
+            names = [f"n{i}" for i in range(5)],
+            params = params, 
+            )
+    sim.stepuntil(500)
+    print("======= Simple UP/DOWN only ========")
+    pprint(sim.get())
 
 if __name__ == "__main__":
     # do a lil' smoke test if we run this as main

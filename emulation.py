@@ -8,7 +8,6 @@ import subprocess
 import signal
 import time
 import shutil
-import math
 import re
 import errno
 import random
@@ -18,8 +17,7 @@ from copy import copy
 from pydantic import BaseModel
 from pydantic_core import from_json, to_json
 
-from mesh_design_lib import data_rate_given_dist_comm
-from drop_model import DropoutEvent, DropoutParams, MultipleDroneSim, State
+from drop_model import DropoutEvent, DropoutParams, DropoutUpDownOnlyParams, MultipleDroneSim, SimpleDroneSim, State
 
 sim_root = "/home/aau/meshsim/"
 repo_root = os.path.join(sim_root, "repo")
@@ -104,10 +102,12 @@ if not ok:
 # List of processes for termination end of script
 tcpdump_procs = []
 iperf3_servers = []
+nsperf_servers = []
 
 # Directory paths for outputs
 output_root = os.path.join(sim_root, "output", "emulation")
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
+nsperf_dir = os.path.join(output_root, "nsperf", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
 node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
 graph_json_path = os.path.join(output_root, "graph.json")
@@ -115,21 +115,30 @@ sim_sched_json_path = os.path.join(output_root, "sim_sched.json")
 
 # Global variables
 IPERF3_REF_PORT = 60000 # start port for iperf3
+NSPERF_PORT = 50000
 
 # Simulation schedule types
 class IperfEvent(BaseModel):
+    iperf_header: str
     client_name: str
     server_name: str
     bitrate: str # 4M or 3K for example
     udp: bool
     duration: int
 
-SchedEventType = DropoutEvent | IperfEvent # cooked that this is called *Type and the others aren't. maybe none of them are called that...
+class NsperfEvent(BaseModel):
+    nsperf_header: str
+    client_name: str
+    server_name: str
+    bitrate: str # 4M or 3K for example
+    duration: str # 5s
+
+SchedEvent = DropoutEvent | IperfEvent | NsperfEvent
 
 @total_ordering
 class SchedEntry(BaseModel):
     time: float
-    event: SchedEventType
+    event: SchedEvent
 
     def __le__(self, other):
         return self.time <= other.time
@@ -201,7 +210,11 @@ def start_tcpdump(node_name: str, ifname: str, ns_name: str, out_dir: str):
     ----------
     node_name :
         Name of node in network graph.
-    out_dir :
+    ifname : str
+        interface name
+    ns_name : str
+        name of the namespace tcpdump is started in
+    out_dir : str
         Output directory for pcap files
     """
 
@@ -275,14 +288,14 @@ def run_iperf3_client(server_name: str,
     udp: flag for choosing UDP test (default TCP)
     bitrate: max bitrate stream try to achieve (default=none)
     """
-    # extract ip and port from server device
+    # extract ip and port from client device
     client_num = int(client_name.strip("d"))
     server_port = IPERF3_REF_PORT + client_num
 
     server_num = int(server_name.strip("d"))
     server_ip = f"10.200.100.{server_num+10}"
 
-    iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}_{timestamp:.1f}.json")
+    iperf3_path = os.path.join(out_dir, f"{server_name}_{client_name}_{timestamp:.0f}.json")
     iperf3_args = ["-c", server_ip, "-p", server_port, "-t", duration, "--json"]
     if udp:
         iperf3_args.append("-u")
@@ -313,30 +326,99 @@ def start_iperf3_servers(node_names: list[str]):
                 continue
             run_iperf3_server(server, client)
 
-def find_closest_node(this: dict, others: list[dict]):
+def safe_filename_part(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-")
+
+
+def run_nsperf_client(server_name: str,
+                      client_name: str,
+                      out_dir: str, 
+                      timestamp: float,
+                      duration: str, 
+                      bitrate: str,
+                      flow_label: str = ""):
     """
-    Finds closest node in a list of nodes.
+    Start nsperf client in a device namespace
+
+    Parameters
+    ----------
+    server_name : str
+        name of server device
+    client_name : str
+        name of client device
+    out_dir : str
+        path to directory for nsperf output
+    timestamp : float
+        timestamp used for file name and flow id
+    duration : str
+        duration of nsperf traffic stream e.g. "10s"
+    bitrate : str
+        desired traffic bitrate e.g. "2M" or "100K"
+    flow_label : str
+        optional flow label for the nsperf stream
     """
-    min_dist_sq = None
-    closest = None
-    for other in others:
-        dx = other["x"] - this["x"]
-        dy = other["y"] - this["y"]
-        dz = other["z"] - this["z"]
-        dist_sq = dx**2 + dy**2 + dz**2
+    # extract ip and port from server device
+    server_port = NSPERF_PORT
+    server_ipv4, subnet_bits = ipv4_addr(server_name)
 
-        if min_dist_sq is None:
-            min_dist_sq = dist_sq
-            closest = other
-        else:
-            if dist_sq < min_dist_sq:
-                min_dist_sq = dist_sq
-                closest = other
+    flow_name = f"{server_name}_{client_name}_{timestamp:.0f}"
+    safe_flow_label = safe_filename_part(flow_label)
+    if safe_flow_label:
+        flow_name = f"{flow_name}_{safe_flow_label}"
+    nsperf_path = os.path.join(out_dir, f"{flow_name}.send.csv")
 
-    if closest is None or min_dist_sq is None:
-        raise ValueError("Malformed graph (nodes cannot be empty)")
+    run_id = "run-" + datetime.now().isoformat(timespec="seconds").replace("+00:00", "Z")
+    flow_id = flow_name
 
-    return closest, min_dist_sq
+    client_cmd = ["ip", "netns", "exec", f"ns-{client_name}", 
+                  "nsperf", "client", "--dst", server_ipv4, "--port", str(server_port), 
+                  "--bitrate", bitrate, "--duration", duration, 
+                  "--run-id", run_id, "--flow-id", flow_id, "--out", nsperf_path]
+
+    if verbosity == "verbose":
+        print(f"run_nsperf_client({server_name=}, {client_name=}, {out_dir=})")
+        print(" ".join(client_cmd))
+
+    subprocess.Popen(client_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    start_new_session=True,
+                    close_fds=True)
+
+def run_nsperf_server(server_name: str, out_dir: str):
+    """
+    Start nsperf server in a device namespace
+
+    Parameters
+    ----------
+    server_name : str
+        name of server device
+    out_dir : str
+        path to directory for nsperf output
+    """
+    server_port = NSPERF_PORT
+    server_ipv4, subnet_bits = ipv4_addr(server_name)
+
+    nsperf_path =  os.path.join(out_dir, f"{server_name}.recv.csv")
+    server_cmd = ["ip", "netns", "exec", f"ns-{server_name}", 
+                  "nsperf", "server", "--bind", server_ipv4, "--port", str(server_port), "--out", nsperf_path]
+    server_proc = subprocess.Popen(server_cmd,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+
+    nsperf_servers.append(server_proc)
+
+    if verbosity == "verbose":
+        print(f"run_nsperf_server({server_name=})")
+        print(" ".join(server_cmd))
+
+def start_nsperf_servers(node_names: list[str]):
+    for server in node_names:
+            run_nsperf_server(server, nsperf_dir)
+
+def stop_all_nsperf_servers():
+    sigint_all(nsperf_servers)
 
 def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     """
@@ -345,6 +427,13 @@ def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     
     Anatomy: namespace:interface 
     d{j}:veth0 -> a{j}:lan0 -> a{j}:br-lan -> a{j}:bat0
+
+    Parameters
+    ----------
+    name : str
+        device name e.g. "d0"
+    adapter_name : str
+        name of adapter e.g. "a0"
     """
     nsname = f"ns-{name}"
     nsname_adapter = f"ns-{adapter_name}"
@@ -384,33 +473,19 @@ def create_device(name: str, adapter_name: str, create_timeout: float = 10):
     exec(tid, remote, f'ip netns exec "{nsname}" ip link set dev "{upname}" up mtu {mtu}')
     exec(tid, remote, f'ip netns exec "{nsname_adapter}" ip link set dev "{downname}" up mtu {mtu}') 
 
-def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]]):
-    """
-    Place adapter at device coordiantes to connect a device to drone(node). 
-    Adapter is connected to the closest drone(node).    
-    """
-    devs = []
-    for i, (x, y, z) in enumerate(dev_coords):
-        dev = {
-            "id": f"a{i}",
-            "x": round(x, 2),
-            "y": round(y, 2),
-            "z": round(z, 2),
-        }
-        devs.append(dev)
-        closest_drone, dist_sq = find_closest_node(dev, graph["nodes"])
-        link = {
-            "source": dev["id"],
-            "target": closest_drone["id"],
-            "phyrate_mbps": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
-            "loss_percent": 10,
-        }
-
-        graph["links"].append(link)
-
-    graph["nodes"].extend(devs)
-
 def start_batadv(node_name: str, version5: bool = True, tid = None):
+    """
+    Start batman-adv inside a node namespace
+
+    Parameters
+    ----------
+    node_name : str
+        name of node e.g. "n0"
+    version5 : bool, default=True
+        whether to start batman_v
+    tid : default=None
+        thread id
+    """
     if version5:
         start_script = os.path.join(repo_root, "emulation_scripts", "start_batadv_v.sh")
     else:
@@ -423,6 +498,15 @@ def start_batadv(node_name: str, version5: bool = True, tid = None):
 def battp_set_link_throughput(n1: str, n2: str, tp: float):
     """
     use battpctl to set link throughput in both directions between two nodes.
+
+    Parameters
+    ----------
+    n1 : str
+        node name of the first node
+    n2 : str
+        node name of second node
+    tp : float
+        throughput limit
     """
     tid = get_thread_id()
     remote = None
@@ -438,15 +522,31 @@ def battp_set_link_throughput(n1: str, n2: str, tp: float):
 
 def batctl_set_neigh_throughputs(graph: dict):
     """
-    set throughput limit in both direction to all neighbour nodes in a graph.
-    """
+    Set throughput limit in both directions to all neighbour nodes
 
+    Parameters
+    ----------
+    graph : dict
+        network graph configuration
+    """
     for link in graph["links"]:
         battp_set_link_throughput(n1=link["source"], n2=link["target"], tp=float(link["phyrate_mbps"]))
 
 def get_node_addrs(node_id: str, cmd: str):
     """
-    get node addresses from command.
+    Get node addresses from command output inside a node namespace.
+
+    Parameters
+    ----------
+    node_id : str
+        id of node e.g. "n0"
+    cmd : str
+        shell command used to get interface address information
+
+    Returns
+    -------
+    result : dict[str, str]
+        mapping of interface names to addresses
     """
     tid = get_thread_id()
     remote = None
@@ -460,7 +560,14 @@ def get_node_addrs(node_id: str, cmd: str):
 
 def get_all_addrs(graph: dict, extra_ids: list[str]):
     """
-    Get all mac, ipv4, ipv6 for a node and output in a json file.
+    Get all mac, ipv4, ipv6 for all graph and extra nodes and output in a json file.
+
+    Parameters
+    ----------
+    graph : dict
+        network graph configuration
+    extra_ids : list[str]
+        extra node ids to get addresses from
     """
     addrs_json = {}
 
@@ -479,9 +586,15 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
 
 def set_node_down(node_name: str):
     """
-    move uplink to trash namespace and remove bat0 to simulate node down
-    
+    Removes a node from the network
+
+    move uplink to trash namespace and remove bat0 to simulate node down.
     assumes namespace for node is already created
+
+    Parameters
+    ----------
+    node_name : str
+        name of node e.g. n0
     """
     tid = get_thread_id()
     remote = None
@@ -494,9 +607,17 @@ def set_node_down(node_name: str):
 
 def set_node_up(node_name: str, graph: dict):
     """
-    move uplink from trash to ns-node_name and add bat0 to simulate node up
-    
+    Restore a node to the network
+
+    move uplink from trash to ns-node_name and add bat0 to simulate node up.
     assumes node was previously pulled down with `set_node_down()`
+
+    Parameters
+    ----------
+    node_name : str
+        name of node e.g. n0
+    graph : dict
+        network graph configuration
     """
     tid = get_thread_id()
     remote = None
@@ -509,21 +630,39 @@ def set_node_up(node_name: str, graph: dict):
     for link in links:
         battp_set_link_throughput(link["source"], link["target"], float(link["phyrate_mbps"]))
 
-def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams) -> list[SchedEntry]:
+def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams|DropoutUpDownOnlyParams) -> list[SchedEntry]:
     """
-    nodes: list of node names
-    t_start_step: linear step size for offsetting drones by different start time [s]
-    t_sim_end: end time for simulation [s]
-    params: dropout model parameters
+    Generate dropout schedule
 
-    returns: list[tuple[float, str, State]]
-    dropout update schedule entries for nodes with [time, drone name, new state]
+    Parameters
+    ----------
+    nodes : list[str]
+        list of node names
+    t_start_step : float
+        linear step size for offsetting drones by different start time [s]
+    t_sim_end : float
+        simulaiton end time [s]
+    params : DropoutParams
+        dropout model parameters
+
+    Returns 
+    -------
+    events : list[SchedEntry]
+        dropout update schedule entries for nodes
     """
-    sims = MultipleDroneSim(
-            names = nodes,
-            t_start_step = t_start_step,
-            params = params, 
-            )
+    if isinstance(params, DropoutParams):
+        sims = MultipleDroneSim(
+                names = nodes,
+                t_start_step = t_start_step,
+                params = params, 
+                )
+    elif isinstance(params, DropoutUpDownOnlyParams):
+        sims = SimpleDroneSim(
+                names = nodes,
+                params = params, 
+                )
+    else:
+        raise ValueError("Invalid params type")
 
     sims.stepuntil(t_sim_end)
     events = []
@@ -537,6 +676,11 @@ def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, p
 def stub_iperf_sched():
     """
     create manual iperf schedule entries at specific time
+
+    Returns
+    -------
+    events : list[SchedEntry]
+        iperf3 schedule events
     """
     # sched: list[tuple[float, IperfEvent]] = []
     events: list[SchedEntry] = []
@@ -560,21 +704,41 @@ def stub_iperf_sched():
 
     return events
 
-def do_event(e: SchedEventType, graph: dict, simtime: float):
+def do_event(e: SchedEvent, graph: dict, simtime: float):
     """
-    performs either iperf or dropout event from given graph and schedule event type
+    Performs schedule event from given graph and schedule event type
+
+    Parameters
+    ----------
+    e : SchedEvent
+        schedule event to execute (iperf3, nsperf or dropout event)
+    graph : dict
+        network graph configuration
+    simtime : float
+        current simulation time
     """
     if verbosity != "quiet":
         print(f"Event {e} run at {datetime.now()}")
     if isinstance(e, IperfEvent):
+        e_: IperfEvent = e # just to make pyright happy :(
         run_iperf3_client(
                 server_name=e.server_name,
                 client_name=e.client_name,
                 out_dir=iperf3_dir,
                 timestamp=simtime,
-                duration=e.duration,
+                duration=e_.duration,
                 udp=e.udp,
                 bitrate=e.bitrate,
+                )
+    elif isinstance(e, NsperfEvent):
+        run_nsperf_client(
+                server_name=e.server_name,
+                client_name=e.client_name,
+                out_dir=nsperf_dir,
+                timestamp=simtime,
+                duration=e.duration,
+                bitrate=e.bitrate,
+                flow_label=e.nsperf_header,
                 )
     elif isinstance(e, DropoutEvent):
         if e.state != State.UP:
@@ -586,7 +750,21 @@ def do_event(e: SchedEventType, graph: dict, simtime: float):
 
 def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
     """
-    runs simulation schedule from given graph of nodes and schedule list in a set duration.
+    Runs simulation schedule from given graph of nodes and schedule list in a set duration.
+
+    Parameters
+    ----------
+    graph : dict
+        loaded network graph
+    sched : list[SchedEntry]
+        simulation schedule
+    duration : float
+        simulation duration
+
+    Returns
+    -------
+    Sim : Sim
+        simulation plan
     """
     t_start = datetime.now()
     t_end = t_start + timedelta(seconds=duration)
@@ -634,30 +812,40 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
 
     return Sim(start_timestamp=t_start.timestamp(), duration=duration, sched_plan=sched_sorted, sched_real=sched_real)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('graph', help='Graph of the full network mesh (json)')
-    parser.add_argument('-s', '--sim-sched', required=False, help='Simulation schedule (json)')
-    parser.add_argument('-d', '--duration', type=int, required=False, help='Duration for simulation [s]')
-    parser.add_argument('-l', '--link-loss', type=str, required=False, help='Set link loss fx "1%". If not set the link loss from graph is used.')
-    parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', help='Set verbosity.')
-    args = parser.parse_args()
+def setup_output_dirs():
+    """
+    Setup of output directories. 
 
-    global verbosity
-    verbosity = args.verbosity
-    globalTerminalGroup.setVerbosity(args.verbosity)
-
-    # Setup output directories
+    Existing directories are removed before new ones are created.
+    """
     try:
         shutil.rmtree(pcap_dir)
         shutil.rmtree(iperf3_dir)
+        shutil.rmtree(nsperf_dir)
     except FileNotFoundError as e:
         pass
 
     os.makedirs(exist_ok=False, name=pcap_dir)
     os.makedirs(exist_ok=False, name=iperf3_dir)
+    os.makedirs(exist_ok=False, name=nsperf_dir)
 
-    # Load mesh json
+def load_graph(args, verbosity):
+    """
+    Load a graph of nodes from a json file
+
+    Parameters
+    ----------
+    args
+        command line arguments
+
+    verbosity
+        verbosity level
+
+    Returns
+    -------
+    graph : dict
+        loaded graph data
+    """
     if not os.path.isfile(args.graph):
         eprint(f'File not found: {args.graph}')
         exit(1)
@@ -668,16 +856,22 @@ def main():
         print("graph")
         pprint(graph)
 
-    # Place device adapters
-    adapter_pos = [(765.0, 5000.0, 0.0), 
-                   (5510.0, 2260.0, 0.0),
-                   (15000.0, 7739.0, 0.0), 
-                   (24489.0, 7739.0, 0.0), 
-                   (29234.0, 5000.0, 0.0)]
-    place_test_adapters(graph, adapter_pos)
     with open(graph_json_path, "w") as f:
         json.dump(graph, f)
 
+    return graph
+
+def apply_network(args, graph):
+    """
+    Apply network emulation rules to a loaded graph
+
+    Parameters
+    ----------
+    args
+        command line arguments
+    graph : dict
+        network graph configuration
+    """
     # Create network name spaces with links from json graph
     tc_script = os.path.join(repo_root, "emulation_scripts", "tc.sh")
 
@@ -689,18 +883,74 @@ def main():
 
     mn_network.apply(graph, link_command=link_command)
 
-    # Init batman-adv on all nodes and adapters
-    rmap = get_remote_mapping([Remote()]) # running everything locally
-    all_ids = rmap.keys()
+def get_node_ids(graph: dict):
+    """
+    Extract drone and adapter node ids from the remote mapping.
+
+    Parameters
+    ----------
+    graph
+        graph
+
+    Returns
+    -------
+    drone_ids : list[str]
+        ids of drone nodes
+    adapter_ids : list[str]
+        ids of adapter nodes
+    all_ids : list[str]
+        all node ids
+    """
+    all_ids = map(lambda x: x["id"], graph["nodes"])
     drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
     adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
 
+    if verbosity != "quiet":
+        print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
+
+    return drone_ids, adapter_ids, all_ids
+
+def start_node_tcpdumps(all_ids, pcap_dir):
+    """
+    Start tcpdump processes for all nodes.
+
+    Captures traffic on each nodes bridge interface in the switch namespace.
+
+    Parameters
+    ----------
+    all_ids : list[str]
+        list of all node ids
+    pcap_dir : str
+        path to directory where pcap files are dumped
+    """
     # Start tcpdump for each node
     for id in all_ids:
         start_tcpdump(id, f"br-{id}", "switch", pcap_dir)
     time.sleep(0.5)  # allow to launch tcpdumps
-    
+
+def build_sched(args, drone_ids):
+    """
+    Builds simulation schedule from file or generator
+
+    Parameters
+    ----------
+    args
+        command line arguments
+    drone_ids : list[str] 
+        ids of drone nodes
+
+    Returns
+    -------
+    sched : list[SchedEntry]
+        simulation schedule
+    duration : float
+        simulation duration
+    """
     # Load or generate schedule
+    sched = None
+    duration = args.duration
+
+    # load sched
     if args.sim_sched:
         if verbosity != "quiet":
             print(f"Loading simulation schedule from file {args.sim_sched}")
@@ -709,18 +959,25 @@ def main():
             with open(args.sim_sched, "r") as f:
                 sim_obj = Sim.model_validate(from_json(f.read()))
             sched = sim_obj.sched_plan
-            duration = sim_obj.duration
+            if sim_obj.duration:
+                duration = sim_obj.duration
         except:
             raise ValueError(f"Invalid sim schedule file {args.sim_sched}")
-    else:
-        if not args.duration:
+
+    # generate sched
+    if args.gen_sched:
+        if not duration:
             raise ValueError("Cannot generate schedule without arg --duration")
-        duration = args.duration
         if verbosity != "quiet":
             print("Generating simulation schedule")
+
+        sched = stub_iperf_sched()
+
+    # add drop model to sched if argument is set
+    if args.drop_model:
         # set Dropout model parameters and generate schedule
         dropout_params = DropoutParams(
-                        failure_probability = 0.001,
+                        failure_probability = args.drop_model,
                         replacement_distribution_sampler = lambda : 100*random.random()+50,
                         time_step = 10,
                         fly_up_time = 30,
@@ -730,20 +987,75 @@ def main():
                 )
         dropout_sched = gen_dropout_sched(nodes=drone_ids,
                           t_start_step=50,
-                          t_sim_end=1000,
+                          t_sim_end=duration,
                           params=dropout_params)
+        if sched is None:
+            sched = dropout_sched
+        else:
+            sched = dropout_sched + sched
 
-        iperf_sched = stub_iperf_sched()
-        sched = dropout_sched + iperf_sched
+    if args.updown_drop_params:
+        if args.drop_model:
+            raise ValueError("Cannot use --updown-drop-params with --drop-model")
+        try:
+            dropout_params = DropoutUpDownOnlyParams.model_validate_json(args.updown_drop_params)
+        except Exception as e:
+            raise ValueError("Could not load updown drop params", e)
 
-    if verbosity != "quiet":
-        print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
+        if verbosity == "verbose":
+            print(f"Generating simple (UP/DOWN only) dropout schedule with params: {dropout_params}")
+        dropout_sched = gen_dropout_sched(nodes=drone_ids,
+                          t_start_step=0, # unused
+                          t_sim_end=duration,
+                          params=dropout_params)
+        if sched is None:
+            sched = dropout_sched
+        else:
+            sched = dropout_sched + sched
 
+    if sched is None:
+        raise ValueError("Cannot perform simulation without a schedule")
+    if duration is None: 
+        raise ValueError("Cannot perform simulation if duration is not set with --duration or specified in the loaded schedule")
+
+    if verbosity == "verbose":
+        print(f"simulation duration: {duration}")
+    return sched, duration
+
+def start_batadv_in_nodes(drone_ids, adapter_ids):
+    """
+    Start batman-adv in all drone and adapter nodes
+
+    version 5 is always enabled for all nodes
+
+    Parameters
+    ----------
+    drone_ids : list[str]
+        ids of drone nodes
+    adapter_ids : list[str]
+        ids of adapter nodes
+    """
     for nid in drone_ids:
         start_batadv(nid, version5=True)
     for nid in adapter_ids:
         start_batadv(nid, version5=True)
 
+def setup_devices(adapter_ids):
+    """
+    Setup devices for each adapter.
+
+    Creates a device (for example "a0" to "d0") for each adapter.
+
+    Parameters
+    ----------
+    adapter_ids : list[str]
+        ids of adapter nodes
+
+    Returns
+    -------
+    device_ids
+        ids of device nodes
+    """
     device_ids = []
     for adapter_id in adapter_ids:
         device_id = adapter_id.replace("a", "d")
@@ -751,11 +1063,78 @@ def main():
         create_device(device_id, adapter_id)
     time.sleep(2)
 
-    # Add devices and start tcpdump
+    return device_ids
+
+def start_device_tcpdumps(device_ids, pcap_dir):
+    """
+    Start tcpdump process on all veth0 interface in each device namespaces
+
+    Parameters
+    ----------
+    device_ids : list[str]
+        ids of device nodes
+    pcap_dir : str
+        path to directory where pcap files are dumped
+    """
     for device_id in device_ids:
         start_tcpdump(device_id, "veth0", f"ns-{device_id}", pcap_dir)
 
+def apply_throughput_override(graph, verbosity):
+    """
+    Apply batman-adv throughput overrides to neighbour nodes
+
+    Parameters
+    ----------
+    graph : dict
+        network graph configuration
+    verbosity
+        verbosity level
+    """
+    batctl_set_neigh_throughputs(graph)
+    if verbosity != "quiet":
+        print("Wait for throughput override")
+    time.sleep(10) # wait for moving average in throughput override
+
+def setup_simulation_environment(args, pcap_dir, verbosity):
+    """
+    Setup simulation environment and monitoring
+
+    Parameters
+    ----------
+    args
+        command line arguments
+    pcap_dir : str
+        path to directory where pcap files are dumped
+    verbosity
+        verbosity level
+
+    Returns
+    -------
+    graph : dict
+        loaded network graph
+    sched : list[SchedEntry]
+        simulation schedule
+    duration : float
+        simulation duration
+    """
+    graph = load_graph(args, verbosity)
+
+    apply_network(args, graph)
+
+    drone_ids, adapter_ids, all_ids = get_node_ids(graph)
+
+    start_node_tcpdumps(all_ids, pcap_dir)
+    
+    sched, duration = build_sched(args, drone_ids)
+
+    start_batadv_in_nodes(drone_ids, adapter_ids)
+
+    device_ids = setup_devices(adapter_ids)
+
+    start_device_tcpdumps(device_ids, pcap_dir)
+
     start_iperf3_servers(device_ids)
+    start_nsperf_servers(device_ids)
 
     # Make json files for IP addrs and MAC addrs overview
     get_all_addrs(graph, device_ids)
@@ -764,11 +1143,39 @@ def main():
         print("Wait for batman-adv to be ready")
     time.sleep(10) # wait for batman to be ready
 
-    # Apply throughput override
-    batctl_set_neigh_throughputs(graph)
-    if verbosity != "quiet":
-        print("Wait for throughput override")
-    time.sleep(10) # wait for moving average in throughput override
+    apply_throughput_override(graph, verbosity)
+
+    return graph, sched, duration
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('graph', 
+                        help='Graph of the full network mesh (json)')
+    parser.add_argument('-s', '--sim-sched', required=False, 
+                        help='Simulation schedule (json)')
+    parser.add_argument('-g', '--gen-sched', required=False, action="store_true",
+                        help='Generate schedule with iperf3 traffic')
+    parser.add_argument('--updown-drop-params', type=str, required=False,
+                        help='Add simple (UP/DOWN only) dropout model params.')
+    parser.add_argument('--drop-model', type=float, required=False,
+                        help='Add dropout model schedule with given drop percentage per timestep to schedule.')
+    parser.add_argument('-d', '--duration', type=int, required=False, 
+                        help='Duration for simulation [s]')
+    parser.add_argument('-l', '--link-loss', type=str, required=False, 
+                        help='Set link loss fx "1%%". If not set the link loss from graph is used.')
+    parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', 
+                        help='Set verbosity.')
+    args = parser.parse_args()
+
+    global verbosity
+    verbosity = args.verbosity
+    globalTerminalGroup.setVerbosity(args.verbosity)
+
+    setup_output_dirs()
+
+    graph, sched, duration = setup_simulation_environment(
+            args, pcap_dir, verbosity
+            )
 
     sim = run_sim_sched(graph=graph, sched=sched, duration=duration)
     with open(sim_sched_json_path, "wb") as f:
@@ -777,8 +1184,12 @@ def main():
     # input("Press Enter to end emulation")
 
     stop_all_iperf3_servers()
+    stop_all_nsperf_servers()
     stop_all_tcpdump()
     stop_all_terminals()
+
+    if verbosity != "quiet":
+        print("Simulation done!")
 
 if __name__ == "__main__":
     main()

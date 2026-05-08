@@ -7,3 +7,4 @@ iperf3/
 emulation_output/
 .venv/
 .env
+.codex
