@@ -1123,7 +1123,11 @@ def setup_simulation_environment(args, pcap_dir, verbosity):
 
     drone_ids, adapter_ids, all_ids = get_node_ids(graph)
 
-    start_node_tcpdumps(all_ids, pcap_dir)
+    if args.pcap:
+        start_node_tcpdumps(all_ids, pcap_dir)
+    else: 
+        if verbosity != "quiet":
+            print("pcap on devices not enabled")
     
     sched, duration = build_sched(args, drone_ids)
 
@@ -1131,7 +1135,11 @@ def setup_simulation_environment(args, pcap_dir, verbosity):
 
     device_ids = setup_devices(adapter_ids)
 
-    start_device_tcpdumps(device_ids, pcap_dir)
+    if args.pcap:
+        start_device_tcpdumps(device_ids, pcap_dir)
+    else: 
+        if verbosity != "quiet":
+            print("pcap on devices not enabled")
 
     start_iperf3_servers(device_ids)
     start_nsperf_servers(device_ids)
@@ -1163,6 +1171,8 @@ def main():
                         help='Duration for simulation [s]')
     parser.add_argument('-l', '--link-loss', type=str, required=False, 
                         help='Set link loss fx "1%%". If not set the link loss from graph is used.')
+    parser.add_argument('--pcap', required=False, action="store_true",
+                        help='Enable pcap analysis by starting tcpdump in all nodes.')
     parser.add_argument('-v', '--verbosity', choices=['verbose', 'normal', 'quiet'], default='normal', 
                         help='Set verbosity.')
     args = parser.parse_args()
@@ -1185,7 +1195,8 @@ def main():
 
     stop_all_iperf3_servers()
     stop_all_nsperf_servers()
-    stop_all_tcpdump()
+    if args.pcap:
+        stop_all_tcpdump()
     stop_all_terminals()
 
     if verbosity != "quiet":
