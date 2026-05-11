@@ -551,7 +551,64 @@ def add_active_stream_count(streams: list[dict]) -> list[dict]:
         s["active_streams"] = count
 
     return streams
-    
+
+
+def plot_naming(axis_names: list[str],
+                percentile_matrixs: list[str],
+                percentile: str,
+                file_name: str,
+                stream_file_name: str) -> str:
+    percentile_str = ""
+
+    for name in axis_names:
+        if name in percentile_matrixs:
+            percentile_str += f"percentile_{percentile}_"
+    axis_part = "_".join(axis_names)
+
+    plot_file_name = f"{file_name}_{percentile_str}axis_{axis_part}_{stream_file_name}"
+
+    return plot_file_name
+
+def plot_titling(
+    stream: str,
+    axis_names: list[str],
+    percentile_matrixs: list[str],
+    percentile: str,
+    mesh_size: int
+) -> str:
+
+    title_parts = [stream, f"Mesh Size: {mesh_size}"]
+
+    # Check manually if any axis is in percentile_matrixs
+    has_percentile = False
+    for name in axis_names:
+        if name in percentile_matrixs:
+            has_percentile = True
+            break
+
+    if has_percentile:
+        percentile_str = percentile.split("_")[0]
+        title_parts.append(f"Percentile: {percentile_str}")
+
+    return " | ".join(title_parts)
+
+
+def resolve_stream(req_client, req_server, full_grid):
+    if full_grid == req_client and full_grid == req_server:
+        stream = "All"
+        stream_file = "all"
+    elif full_grid == req_server:
+        stream = f"Client: {req_client}"
+        stream_file = f"c_{req_client}"
+    elif full_grid == req_client:
+        stream = f"Server: {req_server}"
+        stream_file = f"s_{req_server}"
+    else:
+        stream = f"Client: {req_client} | Server: {req_server}"
+        stream_file = f"c_{req_client}_s_{req_server}"
+
+    return stream, stream_file
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
     parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
@@ -821,20 +878,8 @@ if __name__ == "__main__":
             if file_id in str(path):
                 print(path)
 
-    if full_grid == req_client and full_grid == req_server:
-        stream = "All"
-        stream_file_name = "all"
-    elif full_grid == req_server:
-        stream = f"Client: {req_client}"
-        stream_file_name = f"c_{req_client}"
-    elif full_grid == req_client:
-        stream = f"Server: {req_server}"
-        stream_file_name = f"s_{req_server}"
-    else:
-        stream = f"Client: {req_client} | Server: {req_server}"
-        stream_file_name = f"c_{req_client}_s_{req_server}"
+    stream, stream_file_name = resolve_stream(req_client, req_server, full_grid)
     title = f" Creating Plots | {stream} "
-    plot_file_name = f"data_{percentile}_axis_{axis_names[0]}_{axis_names[1]}_{stream_file_name}"
     print(title.center(WIDTH, "_"))
 
     percentile_matrixs = []
@@ -843,11 +888,7 @@ if __name__ == "__main__":
         if "host_local" in nsperf:
             name_item = item.get("name")
             percentile_matrixs.append(name_item)
-    plot_title = f"{stream} | Mesh Size: {mesh_size}"
-    for name in axis_names:
-        if name in percentile_matrixs:
-            percentile_str= percentile.split("_")[0]
-            plot_title = f"Stream {stream} | Mesh Size: {mesh_size} | Percentile: '{percentile_str}'"
+    base_name = Path(input_path).name  # or .stem
 
     scaled_values = []
     units, unit_scales = axis_units(axis_names=axis_names)
@@ -866,6 +907,18 @@ if __name__ == "__main__":
     axis_labels = []
     for i, axis in enumerate(axis_names):
         axis_labels.append(f"{axis} {units[i]}")
+    axis_labels_naming = [label.replace(" ", "_") for label in axis_labels]
+    plot_file_name = plot_naming(axis_names=axis_labels_naming,
+                                 percentile_matrixs=percentile_matrixs,
+                                 percentile=percentile,
+                                 file_name=base_name,
+                                 stream_file_name=stream_file_name)
+    plot_title = plot_titling(stream=stream,
+                              axis_names=axis_labels_naming,
+                              percentile_matrixs=percentile_matrixs,
+                              percentile=percentile,
+                              mesh_size=mesh_size)
+
     plot_graph(
         x_axis=scaled_x_values,
         y_axis=scaled_y_values,
