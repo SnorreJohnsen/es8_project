@@ -6,6 +6,8 @@ import re
 import matplotlib.pyplot as plt
 from collections import defaultdict
 import numpy as np
+import seaborn as sns
+import pandas as pd
 
 WIDTH = 150
 PLOT_SPACING = 10
@@ -390,24 +392,84 @@ def plot_graph(x_axis: list,
                file_path: Path,
                file_name: str,
                titlename: str,
+               sub_title: str,
                fontsize: int = 12,
                picture_size: tuple = (16,9),
-               type_graph: int = 1):
+               hue = None):
 
     fig, ax = plt.subplots(figsize=picture_size)
-    if type_graph == 1:
-        ax.plot(x_axis, y_axis, 'o')
-    elif type_graph == 2:
-        ax.plot(x_axis, y_axis, marker='o')
-    else:
-        print("Choose type avaible for plotting")
-        exit()
 
-    ax.set_title(titlename,fontsize=fontsize*2)
+    if hue is not None:
+        sns.scatterplot(
+            x=x_axis,
+            y=y_axis,
+            hue=hue,
+            ax=ax,
+            palette=["#4C72B0", "#DC1D33","#16A944"],
+            alpha=0.6
+        )
+    else:
+        sns.scatterplot(
+            x=x_axis,
+            y=y_axis,
+            ax=ax,
+            color="#4C72B0"
+        )
+
+    fig.suptitle(titlename, fontsize=fontsize*2, y=0.98)
+    ax.set_title(sub_title, fontsize=fontsize*1.5, pad=10)
     ax.set_xlabel(axis_labels[0],fontsize=fontsize)
     ax.set_ylabel(axis_labels[1],fontsize=fontsize)
     ax.tick_params(axis='both', labelsize=fontsize)
 
+    ax.grid(True)
+
+    plt.tight_layout()
+
+    output_file = file_path / file_name
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(output_file)
+    plt.close(fig)
+
+def plot_boxplot(
+    df: pd.DataFrame,
+    axis_labels,
+    file_path: Path,
+    file_name: str,
+    titlename: str,
+    sub_title: str,
+    fontsize: int = 12,
+    picture_size: tuple = (16,9),
+    ):
+
+    fig, ax = plt.subplots(figsize=picture_size)
+
+    if "hue" in df.columns and df["hue"].notna().any():
+
+        sns.boxplot(
+            data=df,
+            x="x",
+            y="y",
+            hue="hue",
+            ax=ax,
+            palette=["#4C72B0", "#DC1D33","#16A944"]
+        )
+
+    else:
+
+        sns.boxplot(
+            data=df,
+            x="x",
+            y="y",
+            ax=ax,
+            color="#4C72B0"
+        )
+    fig.suptitle(titlename, fontsize=fontsize*2, y=0.98)
+    ax.set_title(sub_title, fontsize=fontsize*1.5, pad=10)
+    ax.set_xlabel(axis_labels[0],fontsize=fontsize)
+    ax.set_ylabel(axis_labels[1],fontsize=fontsize)
     ax.grid(True)
 
     plt.tight_layout()
@@ -420,38 +482,78 @@ def plot_graph(x_axis: list,
     plt.savefig(output_file)
     plt.close(fig)
 
-def plot_boxplot(boxplot_data: list,
-                 axis_labels,
-                 file_path: Path,
-                 file_name: str,
-                 titlename: str,
-                 fontsize: int = 12,
-                 picture_size: tuple = (16,9)):
-    if axis_labels[0] not in ("link_loss [%]","num_streams [-]") :
-        sorted_items = sorted(boxplot_data.items(),key=lambda item: float(item[0].split("_")[0]))
-        labels = [k for k, _ in sorted_items]
-        values = [v for _, v in sorted_items]
-    else:
-        sorted_items = sorted(box_data.items(), key=lambda k: float(k[0]))
-        labels = [k for k, _ in sorted_items]
-        values = [v for _, v in sorted_items]
+def plot_violin(
+    violin_df: pd.DataFrame,
+    axis_labels,
+    file_path: Path,
+    file_name: str,
+    titlename: str,
+    sub_title: str,
+    fontsize: int = 12,
+    picture_size: tuple = (16,9),
+):
 
     fig, ax = plt.subplots(figsize=picture_size)
 
-    ax.boxplot(values, tick_labels=labels)
-    ax.set_title(titlename,fontsize=fontsize*2)
-    ax.set_xlabel(axis_labels[0],fontsize=fontsize)
-    ax.set_ylabel(axis_labels[1],fontsize=fontsize)
-    ax.grid(True)
+    has_hue = (
+        "hue" in violin_df.columns
+        and violin_df["hue"].notna().any()
+    )
+
+    if has_hue:
+
+        split = violin_df["hue"].nunique() >= 2
+
+        sns.violinplot(
+            data=violin_df,
+            x="x",
+            y="y",
+            hue="hue",
+            split=split,
+            inner="quart",      # THIS fixes ugly boxplot
+            cut=0,              # prevents long spikes
+            linewidth=2.5,
+            bw_method=.2,              # smoother shape
+            density_norm="width",      # makes widths consistent
+            palette=["#4C72B0", "#DC1D33","#16A944"],
+            ax=ax,
+        )
+        for pc in ax.collections:
+            pc.set_alpha(0.6)
+    else:
+
+        sns.violinplot(
+            data=violin_df,
+            x="x",
+            y="y",
+            inner="quart",
+            cut=0,
+            linewidth=2.5,
+            bw_method=.2,
+            density_norm="width",
+            color="#4C72B0",
+            ax=ax,
+        )
+
+    fig.suptitle(titlename, fontsize=fontsize*2, y=0.98)
+
+    ax.set_title(
+        sub_title,
+        fontsize=fontsize*1.5,
+        pad=10
+    )
+
+    ax.set_xlabel(axis_labels[0], fontsize=fontsize)
+    ax.set_ylabel(axis_labels[1], fontsize=fontsize)
+
+    ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
 
     output_file = file_path / file_name
-
-    # ensure folder exists
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    plt.savefig(output_file)
+    plt.savefig(output_file, dpi=300)
     plt.close(fig)
 
 def axis_units(axis_names: list) -> tuple[list,list]:
@@ -552,7 +654,6 @@ def add_active_stream_count(streams: list[dict]) -> list[dict]:
 
     return streams
 
-
 def plot_naming(axis_names: list[str],
                 percentile_matrixs: list[str],
                 percentile: str,
@@ -564,9 +665,7 @@ def plot_naming(axis_names: list[str],
         if name in percentile_matrixs:
             percentile_str += f"percentile_{percentile}_"
     axis_part = "_".join(axis_names)
-
     plot_file_name = f"{file_name}_{percentile_str}axis_{axis_part}_{stream_file_name}"
-
     return plot_file_name
 
 def plot_titling(
@@ -574,10 +673,11 @@ def plot_titling(
     axis_names: list[str],
     percentile_matrixs: list[str],
     percentile: str,
-    mesh_size: int
-) -> str:
+    constants: list
+) -> tuple[str,str]:
 
-    title_parts = [stream, f"Mesh Size: {mesh_size}"]
+    title_parts = ["With Streams Used Being",stream]
+    under_title_parts = []
 
     # Check manually if any axis is in percentile_matrixs
     has_percentile = False
@@ -590,8 +690,15 @@ def plot_titling(
         percentile_str = percentile.split("_")[0]
         title_parts.append(f"Percentile: {percentile_str}")
 
-    return " | ".join(title_parts)
+    # Add global constant variables 
+    if constants:                           #ensure not empty
+        under_title_parts.append("Fixed Parameters")
+        for constant in constants:
+            under_title_parts.append(f"{constant}")
 
+    title = " | ".join(title_parts)
+    under_title = " | ".join(under_title_parts)
+    return title,under_title
 
 def resolve_stream(req_client, req_server, full_grid):
     if full_grid == req_client and full_grid == req_server:
@@ -620,6 +727,7 @@ if __name__ == "__main__":
     parser.add_argument('-c','--client',type=str,help='If Desire only observe one specific Stream Set Client and Server')
     parser.add_argument('-s','--server',type=str,help='If Desire only observe one specific Stream Set Client and Server')
     parser.add_argument('-f','--filter',action="store_true",help='Filter streams at time stamp: 0')
+    parser.add_argument('--hue',type=str,help='Optional grouping variable for seaborn hue')
     args = parser.parse_args()
 
     input_path = args.input
@@ -653,15 +761,21 @@ if __name__ == "__main__":
     # sanity check if that varaible for axis are avaliable
     axis_names = []
     axis_nsperfs = []
-    for axis in [args.x_axis, args.y_axis]:
-        axis = axis.strip().lower()
-        results = plot_variables_allowed(data_variable=axis,variable_map=variable_map)
-        if results is None:
-            exit()
 
-        name, nsperf = results
-        axis_names.append(name)
-        axis_nsperfs.append(nsperf)
+    requested_axes = [args.x_axis, args.y_axis]
+
+    if args.hue:
+        requested_axes.append(args.hue)
+
+    for axis in requested_axes:
+            axis = axis.strip().lower()
+            results = plot_variables_allowed(data_variable=axis,variable_map=variable_map)
+            if results is None:
+                exit()
+
+            name, nsperf = results
+            axis_names.append(name)
+            axis_nsperfs.append(nsperf)
     
     all_nsperfs = {}
 
@@ -856,6 +970,73 @@ if __name__ == "__main__":
             # if "iter_03" in loss and int(s['num']) == 210:
             #if s["active_streams"] in (7,9,14):
                 # print(f"link_loss {loss}: {s['client']} -> {s['server']} Num: {s['num']} | start: {s['start_s']} stop: {s['stop_s']} | streams: {s['active_streams']}")
+
+
+    # To check what constants are constant in each folder
+    constant_vars = {}  # exp_name -> dict of constant variable -> value
+
+    for exp_name, entries in plot_data.items():
+        if not entries:
+            continue
+
+        constants = {}
+        keys = entries[0].keys()
+
+        for key in keys:
+            if key in ("client", "server", "num"):
+                continue
+
+            first_value = entries[0][key]
+            all_same = True
+
+            for entry in entries[1:]:
+                if entry.get(key) != first_value:
+                    all_same = False
+                    break
+
+            if all_same:
+                constants[key] = first_value  # ✅ key + value
+
+        constant_vars[exp_name] = constants
+
+    #check if all folders have some constant being equal to each other
+    common_keys = None
+
+    for consts in constant_vars.values():
+        keys = set(consts.keys())
+        if common_keys is None:
+            common_keys = keys.copy()
+        else:
+            common_keys &= keys
+
+    global_constants = {}
+
+    for key in common_keys:
+        first_exp = next(iter(constant_vars))
+        first_value = constant_vars[first_exp][key]
+
+        same_everywhere = True
+        for consts in constant_vars.values():
+            if consts[key] != first_value:
+                same_everywhere = False
+                break
+
+        if same_everywhere:
+            global_constants[key] = first_value
+
+    # scale to right unit
+    constant_names = list(global_constants.keys())
+    units_for_constants, scales_for_constants = axis_units(axis_names=constant_names)
+    scaled_constants = {}
+    for name, scale in zip(constant_names, scales_for_constants):
+        raw_value = global_constants[name]
+        scaled_constants[name] = raw_value * scale
+    constant_labels = []
+    for name, unit in zip(constant_names, units_for_constants):
+        value = scaled_constants[name]
+        constant_labels.append(f"{name}: {value:.2f} {unit}")
+
+
     for loss, runs in plot_data.items():
         for entry in runs:
             # IF set to one specific stream only save data for this stream
@@ -863,10 +1044,14 @@ if __name__ == "__main__":
             if entry['client'] in req_client and entry['server'] in req_server:
                 x_value = entry[axis_names[0]]
                 y_value = entry[axis_names[1]]
+                hue_value = None
+                if len(axis_names) > 2:
+                    hue_value = entry.get(axis_names[2])
                 if x_value is not None and y_value is not None:                      # if they are none we dont want them
                     client_server.append(f"{entry['client']}-{entry['server']}")
                     axis_values.append({"x_axis": x_value,
-                                        "y_axis": y_value
+                                        "y_axis": y_value,
+                                        "hue": hue_value
                                         })
                 else:
                     files_not_used.append(f"{entry['client']}_{entry['server']}_{entry["num"]}")
@@ -902,32 +1087,47 @@ if __name__ == "__main__":
         scaled_values.append(values * scale)
 
     scaled_x_values, scaled_y_values = scaled_values
+    
+    violin_data = {
+    "x": scaled_x_values,
+    "y": scaled_y_values,
+    "hue": [e["hue"] for e in axis_values]
+    }
 
+    hue_value = entry.get(axis_names[2]) if len(axis_names) > 2 else None
+
+    violin_df = pd.DataFrame(violin_data)
 
     axis_labels = []
     for i, axis in enumerate(axis_names):
-        axis_labels.append(f"{axis} {units[i]}")
+        axis_labels.append(f"{axis} {units[i]:}")
     axis_labels_naming = [label.replace(" ", "_") for label in axis_labels]
+
+
     plot_file_name = plot_naming(axis_names=axis_labels_naming,
                                  percentile_matrixs=percentile_matrixs,
                                  percentile=percentile,
                                  file_name=base_name,
                                  stream_file_name=stream_file_name)
-    plot_title = plot_titling(stream=stream,
+    plot_title,plot_under_title = plot_titling(stream=stream,
                               axis_names=axis_labels_naming,
                               percentile_matrixs=percentile_matrixs,
                               percentile=percentile,
-                              mesh_size=mesh_size)
-
+                              constants=constant_labels)
     plot_graph(
         x_axis=scaled_x_values,
         y_axis=scaled_y_values,
         axis_labels = axis_labels,
+        hue = (
+            [e["hue"] for e in axis_values]
+            if any(e["hue"] is not None for e in axis_values)
+            else None
+        ),
         fontsize=12,
         picture_size=(16, 9),
         file_path=output_path,
-        titlename = f" DATA points for {plot_title}",
-        type_graph = 1,
+        titlename = f" DATA points {plot_title}",
+        sub_title = plot_under_title,
         file_name=f"{plot_file_name}.png"
     )
     if axis_names[0] not in ("link_loss", "num_streams"):
@@ -945,13 +1145,24 @@ if __name__ == "__main__":
         for x, y in zip(scaled_x_values, scaled_y_values):
             box_data[x].append(y)
     plot_boxplot(
-        boxplot_data = box_data,
+    df=violin_df,
+    axis_labels=axis_labels,
+    fontsize=12,
+    picture_size=(16, 9),
+    file_path=output_path,
+    file_name=f"{plot_file_name}_boxplot.png",
+    titlename=f"BOXPLOT {plot_title}",
+    sub_title=plot_under_title,
+    )
+    plot_violin(
+        violin_df = violin_df,
         axis_labels = axis_labels,
-        titlename = f" BOXPLOT FOR {plot_title}",
+        titlename = f" Violin {plot_title}",
         fontsize=12,
         picture_size=(16, 9),
         file_path=output_path,
-        file_name=f"{plot_file_name}_boxplot.png"
+        file_name=f"{plot_file_name}_violin.png",
+        sub_title = plot_under_title,
     )
 
     for name in percentile_matrixs:
