@@ -901,14 +901,13 @@ def get_node_ids(graph: dict):
     all_ids : list[str]
         all node ids
     """
-    all_ids = map(lambda x: x["id"], graph["nodes"])
-    drone_ids = list(filter(lambda x: x.startswith("n"), all_ids))
-    adapter_ids = list(filter(lambda x: x.startswith("a"), all_ids))
+    drone_ids = list(filter(lambda x: x.startswith("n"), map(lambda x: x["id"], graph["nodes"])))
+    adapter_ids = list(filter(lambda x: x.startswith("a"), map(lambda x: x["id"], graph["nodes"])))
 
     if verbosity != "quiet":
         print(f"Running simulation on {len(drone_ids)} drones and {len(adapter_ids)} devices")
 
-    return drone_ids, adapter_ids, all_ids
+    return drone_ids, adapter_ids, list(map(lambda x: x["id"], graph["nodes"]))
 
 def start_node_tcpdumps(all_ids, pcap_dir):
     """
