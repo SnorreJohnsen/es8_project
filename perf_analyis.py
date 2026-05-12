@@ -1243,7 +1243,7 @@ if __name__ == "__main__":
     axis_labels_naming = [label.replace(" ", "_") for label in axis_labels]
 
 
-    plot_file_name = plot_naming(axis_names=axis_labels_naming,
+    plot_file_name = plot_naming(axis_names=axis_names,
                                  percentile_matrixs=percentile_matrixs,
                                  percentile=percentile,
                                  file_name=base_name,
