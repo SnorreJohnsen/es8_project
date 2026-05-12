@@ -13,6 +13,7 @@ import hashlib
 WIDTH = 150
 PLOT_SPACING = 10
 WINDOW_START_END_SPACING = 5
+FONT_SIZE = 18
 
 def extract_percentile_data(dict_name: str, file_data: dict, percentile: str) -> dict:
     data = file_data.get(dict_name, {})
@@ -421,7 +422,7 @@ def plot_graph(x_axis: list,
     ax.set_title(sub_title, fontsize=fontsize*1.5, pad=10)
     ax.set_xlabel(axis_labels[0],fontsize=fontsize)
     ax.set_ylabel(axis_labels[1],fontsize=fontsize)
-    ax.tick_params(axis='both', labelsize=fontsize)
+    ax.tick_params(axis='both', labelsize=fontsize*0.8)
 
     ax.grid(True)
 
@@ -471,6 +472,7 @@ def plot_boxplot(
     ax.set_title(sub_title, fontsize=fontsize*1.5, pad=10)
     ax.set_xlabel(axis_labels[0],fontsize=fontsize)
     ax.set_ylabel(axis_labels[1],fontsize=fontsize)
+    ax.tick_params(axis='both', labelsize=fontsize*0.8)
     ax.grid(True)
 
     plt.tight_layout()
@@ -546,6 +548,7 @@ def plot_violin(
 
     ax.set_xlabel(axis_labels[0], fontsize=fontsize)
     ax.set_ylabel(axis_labels[1], fontsize=fontsize)
+    ax.tick_params(axis='both', labelsize=fontsize*0.8)
 
     ax.grid(True, alpha=0.3)
 
@@ -1262,7 +1265,7 @@ if __name__ == "__main__":
             if any(e["hue"] is not None for e in axis_values)
             else None
         ),
-        fontsize=12,
+        fontsize=FONT_SIZE,
         picture_size=(16, 9),
         file_path=output_path,
         titlename = f" DATA points {plot_title}",
@@ -1286,7 +1289,7 @@ if __name__ == "__main__":
     plot_boxplot(
     df=violin_df,
     axis_labels=axis_labels,
-    fontsize=12,
+    fontsize=FONT_SIZE,
     picture_size=(16, 9),
     file_path=output_path,
     file_name=f"{plot_file_name}_boxplot.png",
@@ -1297,7 +1300,7 @@ if __name__ == "__main__":
         violin_df = violin_df,
         axis_labels = axis_labels,
         titlename = f" Violin {plot_title}",
-        fontsize=12,
+        fontsize=FONT_SIZE,
         picture_size=(16, 9),
         file_path=output_path,
         file_name=f"{plot_file_name}_violin.png",
