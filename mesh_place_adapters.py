@@ -51,8 +51,13 @@ def find_closest_node(this: dict, others: list[dict]):
 def adapter_to_drone_dist(adapter_pos: np.ndarray, drone_pos: np.ndarray, tol: float) -> float:
     drone_xy   = drone_pos[:2]
     adapter_xy = adapter_pos[:2]
-    direction_worst = (drone_xy - adapter_xy) / np.linalg.norm(drone_xy - adapter_xy)
-    direction_worst.resize(3)
+    xy_dist = drone_xy - adapter_xy
+    xy_dist_norm = np.linalg.norm(xy_dist)
+    if xy_dist_norm > 0.001:
+        direction_worst = xy_dist / xy_dist_norm
+        direction_worst.resize(3)
+    else:
+        direction_worst = np.asarray([1, 0, 0]) # dir doesn't matter if adapter and device have same xy
     drone_worst = drone_pos + tol*direction_worst
     return float(np.linalg.norm(drone_worst - adapter_pos))
 

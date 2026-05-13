@@ -125,6 +125,60 @@ msh_analyze_all_nsperf() {
 	' sh "$raw_dir" "$out_dir_nsperf" "$nsperf_analyze_script" "$python_exe"
 }
 
+msh_pause_file_default() {
+	out_dir="$1"
+	echo "$out_dir/PAUSE"
+}
+
+msh_pause_before_next_run() {
+	pause_file="$1"
+
+	if [ ! -e "$pause_file" ]; then
+		return 0
+	fi
+
+	printf "\n[pause] pause marker exists: %s\n" "$pause_file"
+	printf "[pause] pausing before next run. Press Enter/c to continue, or q to exit cleanly.\n"
+
+	while [ -e "$pause_file" ]; do
+		printf "[pause] continue or quit? [c/q] "
+		if [ -t 0 ]; then
+			if IFS= read -r answer; then
+				:
+			else
+				answer="q"
+			fi
+		elif ( : </dev/tty ) 2>/dev/null; then
+			if IFS= read -r answer </dev/tty; then
+				:
+			else
+				answer="q"
+			fi
+		else
+			if IFS= read -r answer; then
+				:
+			else
+				answer="q"
+			fi
+		fi
+
+		case "$answer" in
+		"" | c | C | continue | Continue | CONTINUE)
+			rm -f "$pause_file"
+			printf "[pause] removed pause marker and continuing: %s\n" "$pause_file"
+			return 0
+			;;
+		q | Q | quit | Quit | QUIT | exit | Exit | EXIT)
+			printf "[pause] exiting cleanly before starting the next run.\n"
+			exit 0
+			;;
+		*)
+			printf "[pause] unknown response: %s\n" "$answer"
+			;;
+		esac
+	done
+}
+
 msh_word_count() {
 	words="${1:-}"
 	if [ -z "$words" ]; then

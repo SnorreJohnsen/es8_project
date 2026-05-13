@@ -42,6 +42,7 @@ runtime_fixed="${RUNTIME_FIXED:-60}"
 runtime_dropout_event_coeff="${RUNTIME_DROPOUT_EVENT_COEFF:-0.35}"
 
 . "$helpers_script"
+pause_file="${PAUSE_FILE:-$(msh_pause_file_default "$out_dir")}"
 
 if [ -f "$graph_input" ]; then
 	graphs="$graph_input"
@@ -118,6 +119,8 @@ echo "runtime_fixed: $runtime_fixed"
 echo "runtime_dropout_event_coeff: $runtime_dropout_event_coeff"
 echo "total_simulations: $total_simulations"
 echo "model_total_runtime: $model_total_duration (${model_total_seconds_fmt}s)"
+echo "pause_file: $pause_file"
+echo "to pause before next simulation: touch $pause_file"
 
 graph_idx=0
 for graph in $graphs; do
@@ -164,6 +167,8 @@ for graph in $graphs; do
 							loss_idx=$((loss_idx + 1))
 							i=1
 							while [ "$i" -le "$iterations" ]; do
+								msh_pause_before_next_run "$pause_file"
+
 								iter_name=$(printf "iter_%02d" "$i")
 								sched_dir="$graph_out_dir/sched/$bitrate/$conns_label/$fail_label/$delay_label/$step_label/$loss"
 								sched="$sched_dir/${iter_name}.json"

@@ -39,6 +39,7 @@ PYTHON="${PYTHON_EXE:-python3}"
 runtime_fixed="${RUNTIME_FIXED:-60}"
 
 . "$helpers_script"
+pause_file="${PAUSE_FILE:-$(msh_pause_file_default "$out_dir")}"
 
 if [ -f "$graph_input" ]; then
 	graphs="$graph_input"
@@ -102,6 +103,8 @@ echo "adapter grid: ${adapter_rows}x${adapter_cols}, z=$adapter_z"
 echo "runtime_fixed: $runtime_fixed"
 echo "total_simulations: $total_simulations"
 echo "model_total_runtime: $model_total_duration (${model_total_seconds_fmt}s)"
+echo "pause_file: $pause_file"
+echo "to pause before next simulation: touch $pause_file"
 
 graph_idx=0
 for graph in $graphs; do
@@ -130,6 +133,8 @@ for graph in $graphs; do
 			bitrate_idx=$((bitrate_idx + 1))
 			i=1
 			while [ "$i" -le "$iterations" ]; do
+				msh_pause_before_next_run "$pause_file"
+
 				iter_name=$(printf "iter_%02d" "$i")
 				sched_dir="$graph_out_dir/sched/$bitrate/$loss"
 				sched="$sched_dir/${iter_name}.json"
