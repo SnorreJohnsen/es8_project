@@ -191,6 +191,85 @@ msh_progress_start_context() {
 		"$simulation_idx" "$total_simulations" "$context" "$elapsed" "$eta"
 }
 
+msh_format_seconds_1() {
+	seconds="${1:-0}"
+	awk -v seconds="$seconds" 'BEGIN { printf "%.1f", seconds + 0 }'
+}
+
+msh_progress_model_eta() {
+	remaining_model_seconds="${1:-0}"
+	completed_model_seconds="${2:-0}"
+	completed_observed_seconds="${3:-0}"
+
+	scale=$(awk -v model="$completed_model_seconds" -v observed="$completed_observed_seconds" 'BEGIN {
+		if (model > 0) {
+			printf "%.3f", observed / model
+		} else {
+			printf "1.000"
+		}
+	}')
+	scaled_remaining=$(awk -v remaining="$remaining_model_seconds" -v scale="$scale" 'BEGIN {
+		remaining = remaining + 0
+		if (remaining < 0) {
+			remaining = 0
+		}
+		printf "%d", remaining * scale
+	}')
+	now_epoch=$(date +%s)
+	eta_epoch=$((now_epoch + scaled_remaining))
+	eta=$(msh_epoch_utc "$eta_epoch")
+	remaining_fmt=$(msh_format_duration "$scaled_remaining")
+
+	printf "model_scale %sx | model_remaining %s | model_eta %s\n" \
+		"$scale" "$remaining_fmt" "$eta"
+}
+
+msh_progress_start_context_model() {
+	script_start_epoch="$1"
+	completed="$2"
+	simulation_idx="$3"
+	total_simulations="$4"
+	context="$5"
+	model_single_seconds="$6"
+	remaining_model_seconds="$7"
+	completed_model_seconds="$8"
+	completed_observed_seconds="$9"
+
+	now_epoch=$(date +%s)
+	elapsed=$(msh_format_duration "$((now_epoch - script_start_epoch))")
+	model_eta=$(msh_progress_model_eta \
+		"$remaining_model_seconds" \
+		"$completed_model_seconds" \
+		"$completed_observed_seconds")
+	model_single_fmt=$(msh_format_duration "$model_single_seconds")
+	model_single_s=$(msh_format_seconds_1 "$model_single_seconds")
+
+	printf "[progress] starting simulation %s/%s | %s | elapsed %s | model_single %s (%ss) | %s\n" \
+		"$simulation_idx" "$total_simulations" "$context" "$elapsed" \
+		"$model_single_fmt" "$model_single_s" "$model_eta"
+}
+
+msh_progress_done_model() {
+	script_start_epoch="$1"
+	run_start_epoch="$2"
+	completed="$3"
+	total_simulations="$4"
+	remaining_model_seconds="$5"
+	completed_model_seconds="$6"
+	completed_observed_seconds="$7"
+
+	now_epoch=$(date +%s)
+	run_duration=$(msh_format_duration "$((now_epoch - run_start_epoch))")
+	elapsed=$(msh_format_duration "$((now_epoch - script_start_epoch))")
+	model_eta=$(msh_progress_model_eta \
+		"$remaining_model_seconds" \
+		"$completed_model_seconds" \
+		"$completed_observed_seconds")
+
+	printf "[progress] completed simulation %s/%s | run %s | elapsed %s | %s\n" \
+		"$completed" "$total_simulations" "$run_duration" "$elapsed" "$model_eta"
+}
+
 msh_progress_done() {
 	script_start_epoch="$1"
 	run_start_epoch="$2"

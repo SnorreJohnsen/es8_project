@@ -28,6 +28,7 @@ compress_program="${COMPRESS_PROGRAM:-pigz}"
 # Paths
 grid_script="${GRID_SCRIPT:-$script_dir/grid.py}"
 sched_script="${SCHED_SCRIPT:-$script_dir/sched.py}"
+runtime_script="${RUNTIME_SCRIPT:-$script_dir/runtime.py}"
 helpers_script="${HELPERS_SCRIPT:-$script_dir/../meshsim_meas_helpers.sh}"
 place_adapters_script="${PLACE_ADAPTERS_SCRIPT:-/home/aau/meshsim/repo/mesh_place_adapters.py}"
 emulation_script="${EMULATION_SCRIPT:-/home/aau/meshsim/repo/emulation.py}"
@@ -35,6 +36,7 @@ network_script="${NETWORK_SCRIPT:-/home/aau/meshsim/repo/meshnet-lab/network.py}
 nsperf_analyze_script="${NSPERF_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/nsperf/tools/analyze.py}"
 emulation_dir="${EMULATION_DIR:-${PCAP_DIR:-/home/aau/meshsim/output/emulation}}"
 PYTHON="${PYTHON_EXE:-python3}"
+runtime_fixed="${RUNTIME_FIXED:-60}"
 
 . "$helpers_script"
 
@@ -73,7 +75,23 @@ loss_count=$(msh_word_count "$losses")
 bitrate_count=$(msh_word_count "$target_bitrates")
 total_simulations=$((graph_count * loss_count * bitrate_count * iterations))
 completed_simulations=0
+completed_model_seconds="0"
+completed_observed_seconds="0"
 script_start_epoch=$(date +%s)
+model_total_seconds=$("$PYTHON" "$runtime_script" \
+	--graph-input "$graph_input" \
+	--graph-pattern "$graph_pattern" \
+	--bitrates "$target_bitrates" \
+	--num-loss "$loss_count" \
+	--num-iters "$iterations" \
+	--fixed "$runtime_fixed" \
+	--silence "$silence" \
+	--streamlen "$stream_duration" \
+	--delay "$start_time" \
+	--num-streams-sequence "$num_streams_sequence" \
+	--output total-seconds)
+model_total_duration=$(msh_format_duration "$model_total_seconds")
+model_total_seconds_fmt=$(msh_format_seconds_1 "$model_total_seconds")
 
 echo "Running nsperf stress test with many streams"
 echo "losses: $losses"
@@ -81,7 +99,9 @@ echo "target_bitrates: $target_bitrates"
 echo "iterations: $iterations"
 echo "num_streams_sequence: $num_streams_sequence"
 echo "adapter grid: ${adapter_rows}x${adapter_cols}, z=$adapter_z"
+echo "runtime_fixed: $runtime_fixed"
 echo "total_simulations: $total_simulations"
+echo "model_total_runtime: $model_total_duration (${model_total_seconds_fmt}s)"
 
 graph_idx=0
 for graph in $graphs; do
@@ -139,14 +159,32 @@ for graph in $graphs; do
 
 				timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 				logfile="$log_dir/log_${graph_name}_${bitrate}_${loss}_${iter_name}_${timestamp}.txt"
+				model_single_runtime_s=$("$PYTHON" "$runtime_script" \
+					--graph "$graph" \
+					--bitrates "$bitrate" \
+					--num-loss 1 \
+					--num-iters 1 \
+					--fixed "$runtime_fixed" \
+					--silence "$silence" \
+					--streamlen "$stream_duration" \
+					--delay "$start_time" \
+					--num-streams-sequence "$num_streams_sequence" \
+					--output single-seconds)
+				remaining_model_seconds=$(awk -v total="$model_total_seconds" -v completed="$completed_model_seconds" 'BEGIN {
+					remaining = total - completed
+					if (remaining < 0) {
+						remaining = 0
+					}
+					printf "%.6f", remaining
+				}')
 
 				simulation_idx=$((completed_simulations + 1))
-				msh_progress_start "$script_start_epoch" "$completed_simulations" \
+				progress_context="graph ${graph_idx}/${graph_count} ${graph_name} | loss ${loss_idx}/${loss_count} ${loss} | bitrate ${bitrate_idx}/${bitrate_count} ${bitrate} | iteration ${i}/${iterations}"
+				msh_progress_start_context_model "$script_start_epoch" "$completed_simulations" \
 					"$simulation_idx" "$total_simulations" \
-					"$graph_idx" "$graph_count" "$graph_name" \
-					"$loss_idx" "$loss_count" "$loss" \
-					"$bitrate_idx" "$bitrate_count" "$bitrate" \
-					"$i" "$iterations"
+					"$progress_context" "$model_single_runtime_s" \
+					"$remaining_model_seconds" "$completed_model_seconds" \
+					"$completed_observed_seconds"
 				run_start_epoch=$(date +%s)
 				msh_run_emulation "$placed_graph" "$sched" "$loss" "$logfile" \
 					"$emulation_script" "$network_script" "$verbosity" "$PYTHON"
@@ -157,9 +195,26 @@ for graph in $graphs; do
 
 				msh_finalize_emulation_output "$emulation_dir" "$result_dir" "$compress_program"
 
+				run_end_epoch=$(date +%s)
+				run_elapsed=$((run_end_epoch - run_start_epoch))
+				completed_model_seconds=$(awk -v completed="$completed_model_seconds" -v single="$model_single_runtime_s" 'BEGIN {
+					printf "%.6f", completed + single
+				}')
+				completed_observed_seconds=$(awk -v completed="$completed_observed_seconds" -v run="$run_elapsed" 'BEGIN {
+					printf "%.6f", completed + run
+				}')
+				remaining_model_seconds=$(awk -v total="$model_total_seconds" -v completed="$completed_model_seconds" 'BEGIN {
+					remaining = total - completed
+					if (remaining < 0) {
+						remaining = 0
+					}
+					printf "%.6f", remaining
+				}')
 				completed_simulations=$((completed_simulations + 1))
-				msh_progress_done "$script_start_epoch" "$run_start_epoch" \
-					"$completed_simulations" "$total_simulations"
+				msh_progress_done_model "$script_start_epoch" "$run_start_epoch" \
+					"$completed_simulations" "$total_simulations" \
+					"$remaining_model_seconds" "$completed_model_seconds" \
+					"$completed_observed_seconds"
 
 				i=$((i + 1))
 			done
