@@ -13,7 +13,7 @@ losses="${LOSSES:-0}"
 target_bitrates="${TARGET_BITRATES:-100k 500k 1M 2M 5M}"
 iterations="${ITERATIONS:-10}"
 num_streams_sequence="${NUM_STREAMS_SEQUENCE:-1 2 4 6 8 10 15 20 25 30 40}"
-graph_pattern="${GRAPH_PATTERN:-Triangle_network_*_tolerance_*_datarate_Mbps_*_bandwidth_Mhz_*_nodes.json}"
+graph_pattern="${GRAPH_PATTERN:-triangle_*_nodes.json}"
 
 adapter_rows="${ADAPTER_ROWS:-3}"
 adapter_cols="${ADAPTER_COLS:-7}"

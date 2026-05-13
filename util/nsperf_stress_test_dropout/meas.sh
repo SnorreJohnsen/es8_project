@@ -16,7 +16,7 @@ failure_probabilities="${FAILURE_PROBABILITIES:-0 0.005 0.025 0.04}"
 replacement_delays="${REPLACEMENT_DELAYS:-15}"
 dropout_time_steps="${DROPOUT_TIME_STEPS:-5}"
 iterations="${ITERATIONS:-10}"
-graph_pattern="${GRAPH_PATTERN:-Triangle_network_*_tolerance_*_datarate_Mbps_*_bandwidth_Mhz_*_nodes.json}"
+graph_pattern="${GRAPH_PATTERN:-triangle_*_nodes.json}"
 
 adapter_rows="${ADAPTER_ROWS:-3}"
 adapter_cols="${ADAPTER_COLS:-7}"
