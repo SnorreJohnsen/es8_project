@@ -3,6 +3,8 @@ import os
 import argparse
 import json
 
+import numpy as np
+
 from pprint import pprint
 
 from mesh_design_lib import data_rate_given_dist_comm
@@ -46,6 +48,14 @@ def find_closest_node(this: dict, others: list[dict]):
 
     return closest, min_dist_sq
 
+def adapter_to_drone_dist(adapter_pos: np.ndarray, drone_pos: np.ndarray, tol: float) -> float:
+    drone_xy   = drone_pos[:2]
+    adapter_xy = adapter_pos[:2]
+    direction_worst = (drone_xy - adapter_xy) / np.linalg.norm(drone_xy - adapter_xy)
+    direction_worst.resize(3)
+    drone_worst = drone_pos + tol*direction_worst
+    return float(np.linalg.norm(drone_worst - adapter_pos))
+
 def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]]):
     """
     Place adapter at device coordinates to connect a device to drone(node). 
@@ -69,11 +79,15 @@ def place_test_adapters(graph: dict, dev_coords: list[tuple[float, float, float]
             "z": round(z, 2),
         }
         devs.append(dev)
-        closest_drone, dist_sq = find_closest_node(dev, graph["nodes"])
+        closest_drone, _ = find_closest_node(dev, graph["nodes"])
+        tol = int(eval(graph["metadata"]["TOLERANCES"])[0])
+        drone_pos = np.asarray([closest_drone["x"], closest_drone["y"], closest_drone["z"]])
+        adapter_pos = np.asarray([dev["x"], dev["y"], dev["z"]])
+        dist = adapter_to_drone_dist(adapter_pos, drone_pos, tol)
         link = {
             "source": dev["id"],
             "target": closest_drone["id"],
-            "phyrate_mbps": round(data_rate_given_dist_comm(math.sqrt(dist_sq)), 2),
+            "phyrate_mbps": round(data_rate_given_dist_comm(dist), 2),
             "loss_percent": 10,
         }
 
