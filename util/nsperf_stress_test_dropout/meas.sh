@@ -5,14 +5,14 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 # Arguments
-graph_input="${1:-/home/aau/meshsim/testgraphs}"
+graph_input="${1:-/home/aau/meshsim/testgraphs_drop}"
 out_dir="${2:-/home/aau/meshsim/output/nsperf_stress_test_dropout}"
 
 # Run controls. Override these with environment variables for smaller runs.
 losses="${LOSSES:-0}"
-target_bitrates="${TARGET_BITRATES:-100k 500k 1M 2M 5M}"
-num_conns_values="${NUM_CONNS:-1 2 4 6 8 10 15 20 25 30 40}"
-failure_probabilities="${FAILURE_PROBABILITIES:-0 0.005 0.025 0.04}"
+target_bitrates="${TARGET_BITRATES:-200k 5M}"
+num_conns_values="${NUM_CONNS:-2 5 10 15 20}"
+failure_probabilities="${FAILURE_PROBABILITIES:-0 0.015 0.04}"
 replacement_delays="${REPLACEMENT_DELAYS:-15}"
 dropout_time_steps="${DROPOUT_TIME_STEPS:-5}"
 iterations="${ITERATIONS:-10}"
