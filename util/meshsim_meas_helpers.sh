@@ -58,37 +58,71 @@ msh_analyze_nsperf() {
 	fi
 }
 
+msh_nsperf_analyze_jobs() {
+	jobs="${1:-${NSPERF_ANALYZE_JOBS:-}}"
+
+	if [ -z "$jobs" ]; then
+		if command -v nproc >/dev/null 2>&1; then
+			jobs=$(nproc)
+		else
+			jobs=1
+		fi
+	fi
+
+	case "$jobs" in
+	"" | *[!0-9]*)
+		jobs=1
+		;;
+	esac
+	if [ "$jobs" -le 0 ]; then
+		jobs=1
+	fi
+
+	echo "$jobs"
+}
+
 msh_analyze_all_nsperf() {
 	raw_dir="$1"
 	out_dir_nsperf="$2"
 	nsperf_analyze_script="$3"
 	python_exe="${4:-python3}"
+	jobs=$(msh_nsperf_analyze_jobs "${5:-}")
 
-	mkdir -p "$out_dir_nsperf"
-	client_files=$(find "$raw_dir" -type f -name "*.send.csv")
-	for client_file in $client_files; do
+	mkdir -p "$out_dir_nsperf" "$out_dir_nsperf/intervals"
+	echo "Analyzing nsperf streams with $jobs parallel job(s)"
+	find "$raw_dir" -type f -name "*.send.csv" -print0 |
+		xargs -0 -r -n 1 -P "$jobs" sh -c '
+		raw_dir="$1"
+		out_dir_nsperf="$2"
+		nsperf_analyze_script="$3"
+		python_exe="$4"
+		client_file="$5"
+
 		client_filename=$(basename "$client_file")
 		stream_id=$(basename "$client_file" .send.csv)
 		server_device=$(echo "$client_filename" | cut -d "_" -f 1)
 		client_device=$(echo "$client_filename" | cut -d "_" -f 2)
 		simtime=$(echo "$client_filename" | cut -d "_" -f 3 | cut -d "." -f 1)
 		server_file="${raw_dir}/${server_device}.recv.csv"
-		echo "$client_file" "receiver: $server_device" "client: $client_device" "simtime: $simtime" "server_file: $server_file"
+		echo "[nsperf:$stream_id]" "$client_file" "receiver: $server_device" "client: $client_device" "simtime: $simtime" "server_file: $server_file"
 
 		if [ ! -f "$server_file" ]; then
 			echo "server file not found: $server_file" >&2
-			return 1
+			exit 1
 		fi
 
 		out="$out_dir_nsperf/${stream_id}.json"
-		msh_analyze_nsperf "$nsperf_analyze_script" "$client_file" "$server_file" "$out" "$python_exe"
+		if ! "$python_exe" "$nsperf_analyze_script" --send "$client_file" --recv "$server_file" --json >"$out"; then
+			exit $?
+		fi
 
 		for interval in "0.5" "1" "2" "5"; do
 			out="$out_dir_nsperf/intervals/${stream_id}_inter_${interval}.json"
-			mkdir -p "$out_dir_nsperf/intervals"
-			msh_analyze_nsperf "$nsperf_analyze_script" "$client_file" "$server_file" "$out" "$python_exe" "$interval"
+			if ! "$python_exe" "$nsperf_analyze_script" --interval "$interval" --send "$client_file" --recv "$server_file" --json >"$out"; then
+				exit $?
+			fi
 		done
-	done
+	' sh "$raw_dir" "$out_dir_nsperf" "$nsperf_analyze_script" "$python_exe"
 }
 
 msh_word_count() {
