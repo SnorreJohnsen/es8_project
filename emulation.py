@@ -373,7 +373,7 @@ def run_nsperf_client(server_name: str,
     client_cmd = ["ip", "netns", "exec", f"ns-{client_name}", 
                   "nsperf", "client", "--dst", server_ipv4, "--port", str(server_port), 
                   "--bitrate", bitrate, "--duration", duration, 
-                  "--run-id", run_id, "--flow-id", flow_id, "--out", nsperf_path]
+                  "--run-id", run_id, "--flow-id", flow_id, "--out", nsperf_path, "--late-tolerance", "100ms"]
 
     if verbosity == "verbose":
         print(f"run_nsperf_client({server_name=}, {client_name=}, {out_dir=})")
