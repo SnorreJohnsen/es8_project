@@ -14,6 +14,7 @@ WIDTH = 150
 PLOT_SPACING = 10
 WINDOW_START_END_SPACING = 5
 FONT_SIZE = 18
+PALLETTE = ["#4C72B0", "#DC1D33","#16A944","#D9D31C"]
 
 def extract_percentile_data(dict_name: str, file_data: dict, percentile: str) -> dict:
     data = file_data.get(dict_name, {})
@@ -407,7 +408,7 @@ def plot_graph(x_axis: list,
             y=y_axis,
             hue=hue,
             ax=ax,
-            palette=["#4C72B0", "#DC1D33","#16A944"],
+            palette=PALLETTE,
             alpha=0.6
         )
     else:
@@ -415,7 +416,7 @@ def plot_graph(x_axis: list,
             x=x_axis,
             y=y_axis,
             ax=ax,
-            color="#4C72B0"
+            color=PALLETTE[0]
         )
 
     fig.suptitle(titlename, fontsize=fontsize*2, y=0.98)
@@ -456,7 +457,7 @@ def plot_boxplot(
             y="y",
             hue="hue",
             ax=ax,
-            palette=["#4C72B0", "#DC1D33","#16A944"]
+            palette=PALLETTE
         )
 
     else:
@@ -466,7 +467,7 @@ def plot_boxplot(
             x="x",
             y="y",
             ax=ax,
-            color="#4C72B0"
+            color=PALLETTE[0]
         )
     fig.suptitle(titlename, fontsize=fontsize*2, y=0.98)
     ax.set_title(sub_title, fontsize=fontsize*1.5, pad=10)
@@ -518,7 +519,7 @@ def plot_violin(
             linewidth=2.5,
             bw_method=.2,              # smoother shape
             density_norm="width",      # makes widths consistent
-            palette=["#4C72B0", "#DC1D33","#16A944"],
+            palette=PALLETTE,
             ax=ax,
         )
         for pc in ax.collections:
@@ -534,7 +535,7 @@ def plot_violin(
             linewidth=2.5,
             bw_method=.2,
             density_norm="width",
-            color="#4C72B0",
+            color=PALLETTE[0],
             ax=ax,
         )
 
