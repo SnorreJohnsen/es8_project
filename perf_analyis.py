@@ -9,6 +9,7 @@ import numpy as np
 import seaborn as sns
 import pandas as pd
 import hashlib
+from tqdm import tqdm
 
 WIDTH = 150
 PLOT_SPACING = 10
@@ -752,7 +753,7 @@ if __name__ == "__main__":
     parser.add_argument('-i','--input',type=json_path,required=True,help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
     parser.add_argument('-o','--output',type=Path,help='The desired directory for saving PLOTS')
     # parser.add_argument('-g','--graph',type=json_path,help='The directory or file which is the entail nodes and links desription (Json Format)')
-    parser.add_argument('-p','--percentile',type=str,required=True,help='What data is of interest for the analysis 0 = mean 50 %,95 % 99 % percentile (Json Format IPERF/NSPERF)')
+    parser.add_argument('-p','--percentile',type=str,required=True,help='Percentile selection: 50, 95, 99, mean, min, max')
     parser.add_argument('-x','--x_axis',type=str,required=True,help='Variable for X axis')
     parser.add_argument('-y','--y_axis',type=str,required=True,help='Variable for Y axis')
     parser.add_argument('-c','--client',type=str,help='If Desire only observe one specific Stream Set Client and Server')
@@ -849,7 +850,7 @@ if __name__ == "__main__":
     # -------------------------
     # 1. GROUP PHASE (what you already did)
     # -------------------------
-    for exp in experiments:
+    for exp in tqdm(experiments, desc="Grouping Grid Types"):
         graph_file = exp["graphs"]
 
         with open(graph_file) as f:
@@ -868,7 +869,7 @@ if __name__ == "__main__":
     req_client_grids = {}
     req_server_grids = {}
     full_grids = {}
-    for grid_type, experiments_in_grid in grouped_by_grid.items():
+    for grid_type, experiments_in_grid in tqdm(grouped_by_grid.items(), desc="Processing All Grid types"):
 
         # -------------------------
         # GRID LEVEL (graph loaded once per grid)
@@ -891,7 +892,7 @@ if __name__ == "__main__":
         req_client_grids[grid_type] = req_client_local
         req_server_grids[grid_type] = req_server_local
         full_grids[grid_type] = full_grid_with_devices
-        for exp in experiments_in_grid:
+        for exp in tqdm(experiments_in_grid, desc=f"Processing Grid Type {grid_type}", leave=False):
 
             # -------------------------
             # EXPERIMENT LEVEL
@@ -918,7 +919,7 @@ if __name__ == "__main__":
             # -------------------------
             prev_client = None
             first_client = True
-            for f in exp["nsperf"]:
+            for f in tqdm(exp["nsperf"], desc=f"Processing all Files within directory {exp['name'][:20]}", leave=False):
                 # Just for structure
                 stem = Path(f).stem  
                 parts = stem.split("_")
@@ -1138,6 +1139,8 @@ if __name__ == "__main__":
         constant_labels.append(f"{name}: {value:.2f} {unit}")
 
     count = 0
+    title = " Files NOT used | Because entail values of None"
+    print(title.center(WIDTH, "_"))
     for grid_type, experiments in filtered_plot_data.items():
 
         req_client_local = req_client_grids[grid_type]
@@ -1172,27 +1175,11 @@ if __name__ == "__main__":
                             "y_axis": y_value,
                             "hue": hue_value
                         })
-
                     else:
-
-                        files_not_used.append(
-                            f"{entry['client']}_{entry['server']}_{entry['num']}"
-                        )
+                        print(f"Name: {exp_name} | Stream {entry['client']}-{entry['server']} Num: {entry["num"]} | Mesh Grid Type {grid_type} with {entry["mesh_size"]} Nodes | X: {x_value} | Y: {y_value}")
+    print("=" * WIDTH)
     print(f"Found {count} streams with specified client and server")
-    title = " Files NOT used | Because entail values of None"
-    print(title.center(WIDTH, "_"))
   
-    for file_id in files_not_used:                # finding file which is not use
-
-        for grid_type, experiments in grouped_by_grid.items():
-
-            for exp in experiments:
-
-                for path in exp["nsperf"]:
-
-                    if file_id in str(path):
-                        print(path)
-
 
     for grid_type in req_client_grids:
 
