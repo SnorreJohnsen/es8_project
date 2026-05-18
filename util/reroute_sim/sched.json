@@ -1,0 +1,31 @@
+{
+	"start_timestamp": 0,
+	"duration": 120,
+	"sched_plan": [
+		{
+			"time": 10,
+			"event": {
+				"nsperf_header": "reroute",
+				"client_name": "a0",
+				"server_name": "a1",
+				"bitrate": "5M",
+				"duration": "100"
+			}
+		},
+		{
+			"time": 40,
+			"event": {
+				"name": "n1",
+				"state": "DOWN"
+			}
+		},
+		{
+			"time": 70,
+			"event": {
+				"name": "n1",
+				"state": "UP"
+			}
+		}
+	],
+	"sched_real": []
+}

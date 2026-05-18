@@ -204,7 +204,7 @@ msh_pause_before_next_run() {
 			else
 				answer="q"
 			fi
-		elif ( : </dev/tty ) 2>/dev/null; then
+		elif (: </dev/tty) 2>/dev/null; then
 			if IFS= read -r answer </dev/tty; then
 				:
 			else
