@@ -327,8 +327,8 @@ def pairing_files(input: Path) -> list:
 
     for stream_dir in input.rglob("nsperf/streams"):
 
-        experiment_root = stream_dir.parents[2]  # <- THIS IS iter_X folder
-        experiment_naming = stream_dir.parents[1]  # <- THIS IS iter_X folder
+        experiment_root = stream_dir.parents[2] 
+        experiment_naming = stream_dir.parents[1]  
 
         nsperf_files = get_json_files(stream_dir)
         graph_file = next(experiment_root.rglob("graph.json"), None)
@@ -620,7 +620,7 @@ def convert_ns_to_s_list_numstreams(starts_ns: list[int],
     if not starts_ns or not stops_ns:
         return None, [], []
 
-    # 🔥 reference = global minimum start
+    # reference = global minimum start
     reference = min(starts_ns)
 
     start_s_list = []
@@ -848,7 +848,7 @@ if __name__ == "__main__":
     grouped_by_grid = defaultdict(list)
 
     # -------------------------
-    # 1. GROUP PHASE (what you already did)
+    # 1. GROUP PHASE 
     # -------------------------
     for exp in tqdm(experiments, desc="Grouping Grid Types"):
         graph_file = exp["graphs"]
@@ -863,7 +863,7 @@ if __name__ == "__main__":
         grouped_by_grid[grid_type].append(exp)
 
     # -------------------------
-    # 2. PROCESS PHASE (THIS IS WHAT YOU'RE MISSING)
+    # 2. PROCESS PHASE 
     # -------------------------
 
     req_client_grids = {}
@@ -915,7 +915,7 @@ if __name__ == "__main__":
                 print(f"Files in directory '{exp['name']}'".center(WIDTH, "_"))
 
             # -------------------------
-            # FILE LEVEL (THIS IS WHERE YOUR REAL WORK HAPPENS)
+            # FILE LEVEL 
             # -------------------------
             prev_client = None
             first_client = True
@@ -1052,7 +1052,7 @@ if __name__ == "__main__":
         if results is None:
             exit()
 
-        name, _ = results   # convert alias → real key
+        name, _ = results   
         normalized_filter_map[name] = v
 
     filter_map = normalized_filter_map
@@ -1203,7 +1203,7 @@ if __name__ == "__main__":
         if "host_local" in nsperf:
             name_item = item.get("name")
             percentile_matrixs.append(name_item)
-    base_name = Path(input_path).name  # or .stem
+    base_name = Path(input_path).name  
 
     scaled_values = []
     units, unit_scales = axis_units(axis_names=axis_names)
