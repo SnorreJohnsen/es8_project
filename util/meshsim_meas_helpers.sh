@@ -87,6 +87,7 @@ msh_analyze_all_nsperf() {
 	nsperf_analyze_script="$3"
 	python_exe="${4:-python3}"
 	jobs=$(msh_nsperf_analyze_jobs "${5:-}")
+	skip_start_ms="${6:-}"
 
 	mkdir -p "$out_dir_nsperf" "$out_dir_nsperf/intervals"
 	echo "Analyzing nsperf streams with $jobs parallel job(s)"
@@ -96,7 +97,8 @@ msh_analyze_all_nsperf() {
 		out_dir_nsperf="$2"
 		nsperf_analyze_script="$3"
 		python_exe="$4"
-		client_file="$5"
+		skip_start_ms="$5"
+		client_file="$6"
 
 		client_filename=$(basename "$client_file")
 		stream_id=$(basename "$client_file" .send.csv)
@@ -111,18 +113,26 @@ msh_analyze_all_nsperf() {
 			exit 1
 		fi
 
-		out="$out_dir_nsperf/${stream_id}.json"
-		if ! "$python_exe" "$nsperf_analyze_script" --send "$client_file" --recv "$server_file" --json >"$out"; then
+		skip_suffix=""
+		if [ -n "$skip_start_ms" ]; then
+			skip_suffix="_skip_${skip_start_ms}ms"
+			set -- --skip-start-ms "$skip_start_ms"
+		else
+			set --
+		fi
+
+		out="$out_dir_nsperf/${stream_id}${skip_suffix}.json"
+		if ! "$python_exe" "$nsperf_analyze_script" "$@" --send "$client_file" --recv "$server_file" --json >"$out"; then
 			exit $?
 		fi
 
 		for interval in "0.5" "1" "2" "5"; do
-			out="$out_dir_nsperf/intervals/${stream_id}_inter_${interval}.json"
-			if ! "$python_exe" "$nsperf_analyze_script" --interval "$interval" --send "$client_file" --recv "$server_file" --json >"$out"; then
+			out="$out_dir_nsperf/intervals/${stream_id}_inter_${interval}${skip_suffix}.json"
+			if ! "$python_exe" "$nsperf_analyze_script" "$@" --interval "$interval" --send "$client_file" --recv "$server_file" --json >"$out"; then
 				exit $?
 			fi
 		done
-	' sh "$raw_dir" "$out_dir_nsperf" "$nsperf_analyze_script" "$python_exe"
+	' sh "$raw_dir" "$out_dir_nsperf" "$nsperf_analyze_script" "$python_exe" "$skip_start_ms"
 }
 
 msh_pause_file_default() {
