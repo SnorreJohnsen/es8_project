@@ -14,6 +14,7 @@ target_bitrates="${TARGET_BITRATES:-100k 500k 1M 2M 5M}"
 iterations="${ITERATIONS:-10}"
 num_streams_sequence="${NUM_STREAMS_SEQUENCE:-1 2 4 6 8 10 15 20 25 30 40}"
 graph_pattern="${GRAPH_PATTERN:-triangle_*_nodes.json}"
+extra_emulation_args="${EXTRA_EMULATION_ARGS:-}"
 
 adapter_rows="${ADAPTER_ROWS:-3}"
 adapter_cols="${ADAPTER_COLS:-7}"
@@ -192,7 +193,7 @@ for graph in $graphs; do
 					"$completed_observed_seconds"
 				run_start_epoch=$(date +%s)
 				msh_run_emulation "$placed_graph" "$sched" "$loss" "$logfile" \
-					"$emulation_script" "$network_script" "$verbosity" "$PYTHON"
+					"$emulation_script" "$network_script" "$verbosity" "$PYTHON" "$extra_emulation_args"
 
 				msh_analyze_all_nsperf "$emulation_dir/nsperf/raw" \
 					"$emulation_dir/nsperf/streams" \
