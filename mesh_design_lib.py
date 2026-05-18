@@ -7,7 +7,7 @@ def distance_calc(dist_comm: float,
                   tolerance: float,
                   dist_redundancy: float) -> float:
 
-    distance = dist_comm - tolerance - dist_redundancy
+    distance = dist_comm - (tolerance*2) - dist_redundancy
 
     return distance
 

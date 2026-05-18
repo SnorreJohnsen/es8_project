@@ -203,7 +203,8 @@ def process_drone_mesh(*,
 
         tolerance = tolerances[i]
         # Calculate distance from wireless communication range and tolerances
-        drone_distance = distance_calc(dist_comm, tolerance, drone_distance_redundancy)
+        drone_distance = distance_calc(dist_comm, tolerance, drone_distance_redundancy) #with tolerance
+        print(f'Distance between drones: {drone_distance}')
 
         # Choose grid function
         all_drone_positions = grid_func(dim=dim, dist=drone_distance, **kwargs)
@@ -211,67 +212,74 @@ def process_drone_mesh(*,
         z_row = np.full((all_drone_positions.shape[0], 1), drone_height)
         all_drone_positions = np.hstack((all_drone_positions, z_row))
 
-        # For loop over number of dropouts
-        bar_dropout_rates = tqdm(dropout_rates)
-        for j, dropout_rate in enumerate(bar_dropout_rates):
-            bar_dropout_rates.set_description(f"Processing {grid_prefix} mesh tol={tolerance} | all dropout rates {dropout_rates} | current dropout={dropout_rate:.2f}")
+        # For loop over number of dropouts'
+        if len(dropout_rates) > 0:
+            bar_dropout_rates = tqdm(dropout_rates)
+            for j, dropout_rate in enumerate(bar_dropout_rates):
+                bar_dropout_rates.set_description(f"Processing {grid_prefix} mesh tol={tolerance} | all dropout rates {dropout_rates} | current dropout={dropout_rate:.2f}")
 
-            # Iterate over dropout rates and add to metadata
-            #dropout_rate = dropout_rates[j]
-            metadata[f"{grid_prefix}_{j}_DROPOUT_RATE"] = dropout_rate
+                # Iterate over dropout rates and add to metadata
+                #dropout_rate = dropout_rates[j]
+                metadata[f"{grid_prefix}_{j}_DROPOUT_RATE"] = dropout_rate
 
-            # Create array for total number of link count for dropout networks
-            total_link_count_dropout = []
-            total_link_count_dropout_cmd = []
-            # Create variable for network is fully connected percentage
-            total_reachable_phyrate = 0
-            reachable_phyrates = []
+                # Create array for total number of link count for dropout networks
+                total_link_count_dropout = []
+                total_link_count_dropout_cmd = []
+                # Create variable for network is fully connected percentage
+                total_reachable_phyrate = 0
+                reachable_phyrates = []
 
-            # For loop over dropout iterations for histogram
-            for i in range(dropout_iters):
-                drone_positions_dropout = dropout_drones(meta_prefix=f"{grid_prefix}_{j}_", drone_positions=all_drone_positions, dropout_rate=dropout_rate)
-                
-                # Make node and link list for partial drone mesh with removed drones
-                node_list_dropout = node_list(drone_positions=drone_positions_dropout)
-                link_list_dropout, link_count_dropout,link_count_dropout_cmd = link_list(wireless_prefix=wireless_prefix,
-                                                                  nodes=node_list_dropout,
-                                                                  dist_comm=dist_comm,
-                                                                  margin_loss_db= margin_loss_db,
-                                                                  metadata=metadata,
-                                                                  eta=metadata["ETA_STRICT"],
-                                                                  snr_eff=metadata["SNR_EFF_STRICT"],
-                                                                  threshold_link=threshold_link_mbps,
-                                                                  use_lookup_table=link_budget_model)
+                # For loop over dropout iterations for histogram
+                for i in range(dropout_iters):
+                    drone_positions_dropout = dropout_drones(meta_prefix=f"{grid_prefix}_{j}_", drone_positions=all_drone_positions, dropout_rate=dropout_rate)
+                    
+                    # Make node and link list for partial drone mesh with removed drones
+                    node_list_dropout = node_list(drone_positions=drone_positions_dropout)
+                    link_list_dropout, link_count_dropout,link_count_dropout_cmd = link_list(wireless_prefix=wireless_prefix,
+                                                                    nodes=node_list_dropout,
+                                                                    dist_comm=dist_comm,
+                                                                    margin_loss_db= margin_loss_db,
+                                                                    metadata=metadata,
+                                                                    eta=metadata["ETA_STRICT"],
+                                                                    snr_eff=metadata["SNR_EFF_STRICT"],
+                                                                    threshold_link=threshold_link_mbps,
+                                                                    tolerance=tolerance,
+                                                                    use_lookup_table=link_budget_model)
 
-                # Make array of all link counts for partial drone mesh
-                total_link_count_dropout.append(link_count_dropout)
-                total_link_count_dropout_cmd.append(link_count_dropout_cmd)
-                # Check if the remaining network after dropout is fully connected
+                    # Make array of all link counts for partial drone mesh
+                    total_link_count_dropout.append(link_count_dropout)
+                    total_link_count_dropout_cmd.append(link_count_dropout_cmd)
+                    # Check if the remaining network after dropout is fully connected
+                    if debug_plots == True:
+                        reachable_phyrate = checking_max_phyrate_fully_connected(nodes=node_list_dropout,
+                                                                                dist_comm=dist_comm,
+                                                                                base_rate=data_rate_Mbps,
+                                                                                metadata=metadata,
+                                                                                use_lookup_table=link_budget_model)
+                        total_reachable_phyrate = total_reachable_phyrate + reachable_phyrate
+                        reachable_phyrates.append(reachable_phyrate)
+
                 if debug_plots == True:
-                    reachable_phyrate = checking_max_phyrate_fully_connected(nodes=node_list_dropout,
-                                                                             dist_comm=dist_comm,
-                                                                             base_rate=data_rate_Mbps,
-                                                                             metadata=metadata,
-                                                                             use_lookup_table=link_budget_model)
-                    total_reachable_phyrate = total_reachable_phyrate + reachable_phyrate
-                    reachable_phyrates.append(reachable_phyrate)
+                    # Calculate the connected percentage of given dropout mesh
+                    metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_AVERAGE"] = total_reachable_phyrate / dropout_iters
+                    metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_MIN"] = min(reachable_phyrates)
+                    metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_MAX"] = max(reachable_phyrates)
 
-            if debug_plots == True:
-                # Calculate the connected percentage of given dropout mesh
-                metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_AVERAGE"] = total_reachable_phyrate / dropout_iters
-                metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_MIN"] = min(reachable_phyrates)
-                metadata[f"{grid_prefix}_{j}_FULLY_CONNECTED_PHYRATE_MAX"] = max(reachable_phyrates)
+                # Metaprefix for file names
+                prefix_dropout_real_perc = metadata[f"{grid_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
 
-            # Metaprefix for file names
-            prefix_dropout_real_perc = metadata[f"{grid_prefix}_{j}_DROPOUT_REAL_PERCENTAGE"]
+                num_nodes_dropout = len(node_list_dropout)
+                
+                extra = metadata.copy()
+                if "DATA_RATE" in extra:
+                    del extra["DATA_RATE"]
 
-            num_nodes_dropout = len(node_list_dropout)
-
-            # Make single network of each dropout rate
-            make_json_network(file_name=f"{grid_prefix}_network_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_{num_nodes_dropout}_nodes.json",
-                              file_folder_path=dir_origin_partial_json,
-                              nodes=node_list_dropout,
-                              links=link_list_dropout)
+                # Make single network of each dropout rate
+                make_json_network(file_name=f"{grid_prefix}_{num_nodes_dropout}_nodes.json",
+                                file_folder_path=dir_origin_partial_json,
+                                extra=extra,
+                                nodes=node_list_dropout,
+                                links=link_list_dropout)
 
             # Calculating links from devices to drones for partial drone mesh
             if debug_plots == True:
@@ -284,12 +292,12 @@ def process_drone_mesh(*,
                 # Histogram and drone position plots over total iterations
                 video_rate= metadata["histogram_high_rate"]
                 cmd_rate= metadata["histogram_low_rate"]
-                plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram.png",
+                plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram_{num_nodes_dropout}_nodes.png",
                                                 title_name=f"{grid_prefix} Video {video_rate} Mbps Histogram \n Dropout = {prefix_dropout_real_perc*100:.2f}% Tolerance = {tolerance} [m]",
                                                 drone_link_count=total_link_count_dropout,
                                                 iterations=dropout_iters,
                                                 file_folder_path=dir_origin_partial_plots)
-                plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram.png",
+                plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram_{num_nodes_dropout}_nodes.png",
                                                 title_name=f"{grid_prefix} Command {cmd_rate} Mbps Histogram \n Dropout = {prefix_dropout_real_perc*100:.2f}% Tolerance = {tolerance} [m]",
                                                 drone_link_count=total_link_count_dropout_cmd,
                                                 iterations=dropout_iters,
@@ -335,15 +343,21 @@ def process_drone_mesh(*,
                                                   eta=metadata["ETA_STRICT"],
                                                   snr_eff=metadata["SNR_EFF_STRICT"],
                                                   threshold_link=threshold_link_mbps,
+                                                  tolerance=tolerance,
                                                   use_lookup_table=link_budget_model)
 
         # Add number drones used in full mesh to metadata
         metadata[f"{grid_prefix}_ALL_NUMBER_DRONES"] = len(node_list_all)
         num_nodes = len(node_list_all)
 
+        extra = metadata.copy()
+        if "DATA_RATE" in extra:
+            del extra["DATA_RATE"]
+
         # Make the json network from list of nodes
-        make_json_network(file_name=f"{grid_prefix}_network_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_{num_nodes}_nodes.json",
+        make_json_network(file_name=f"{grid_prefix}_{num_nodes}_nodes.json",
                           file_folder_path=dir_origin_full_json,
+                          extra=extra,
                           nodes=node_list_all,
                           links=link_list_all)
 
@@ -354,20 +368,22 @@ def process_drone_mesh(*,
                                 dist_comm=dist_comm,
                                 metadata=metadata,
                                 device_positions=device_grid)
-
+            
+            video_rate= metadata["histogram_high_rate"]
+            cmd_rate= metadata["histogram_low_rate"]
             # Histogram and drone position plots over full drone mesh
-            plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram.png",
+            plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram_{num_nodes}_nodes.png",
                                         title_name=f"{grid_prefix} Video {video_rate} Mbps Histogram \n Tolerance = {tolerance} [m]",
                                         drone_link_count=link_count_all,
                                         file_folder_path=dir_origin_full_plots)
-            plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram.png",
+            plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram_{num_nodes}_nodes.png",
                                         title_name=f"{grid_prefix} Command {cmd_rate} Mbps Histogram \n Tolerance = {tolerance} [m]",
                                         drone_link_count=link_count_all_cmd,
                                         file_folder_path=dir_origin_full_plots)
             
             plot_drone_positions(meta_prefix=f"{grid_prefix}_ALL_",
                                 wireless_prefix=wireless_prefix,
-                                file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_mesh.png",
+                                file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_mesh_{num_nodes}_nodes.png",
                                 title_name=f"{grid_prefix} Mesh | Tolerance = {tolerance} [m]",
                                 nodes=node_list_all,
                                 device_positions=device_grid,
@@ -384,7 +400,7 @@ def process_drone_mesh(*,
                                 metadata=metadata)
             
             plot_drone_links(title_name=f"{grid_prefix} Mesh | Tolerance = {tolerance} [m]",
-                            file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links.png",
+                            file_name=f"{grid_prefix}_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_links_{num_nodes}_nodes.png",
                             nodes=node_list_all,
                             links=link_list_all,
                             source_node="n0",
@@ -423,7 +439,7 @@ if __name__ == "__main__":
     test_samples = (30, 10)                             # number of sample points on area (x, y)
 
     default_tolerances = np.arange(10, 15, 5)           # tolerance in meters (min, max, stepsize) 
-    test_dist_redundancy = 0                            # distance redundancy for drone placement
+    default_margin = 0                                  # distance redundancy for drone placement
     default_dropout_rates = np.arange(0.05,0.20,0.05)   # dropout rate in percentage (min, max, stepsize)
     default_drop_iter = 100                             # number of iterations for each dropout rate (used for histogram)
 
@@ -439,16 +455,17 @@ if __name__ == "__main__":
     metadata["DRONE_HEIGHT"] = drone_height
     metadata["DEVICE_HEIGHT"] = device_height
     metadata["SAMPLES"] = str(test_samples)
-    metadata["DISTANCE_REDUNDANCY"] = test_dist_redundancy
+    #metadata["DISTANCE_REDUNDANCY"] = default_margin
 
     #metadata["FREQ_MHZ"] = freq_Mhz
     # metadata[f"{wireless_prefix}TRANSMIT_POWER"] = transmit_power_dbm
     metadata["MARGIN_LOSS"] = margin_loss_db
 
     # Save dropout iterations used for histogram
-    metadata["TOLERANCES"] = str(default_tolerances)
-    metadata["DROPOUT_RATES"] = str(default_dropout_rates)
-    metadata["DROPOUT_ITERATIONS"] = default_drop_iter
+    #metadata["MARGIN"] = str(default_margin)
+    #metadata["TOLERANCES"] = str(default_tolerances)
+    #metadata["DROPOUT_RATES"] = str(default_dropout_rates)
+    #metadata["DROPOUT_ITERATIONS"] = default_drop_iter
 
     # Calculate values for modelling wireless commmunication from wifi halow module
     # These values are the same for all grid types
@@ -462,11 +479,11 @@ if __name__ == "__main__":
             print()
 
             if grid == 1:
-                test_grid_meta_prefix = "Square"
+                test_grid_meta_prefix = "square"
                 test_grid_func = drone_sq_grid
                 break
             elif grid == 2:
-                test_grid_meta_prefix = "Triangle"
+                test_grid_meta_prefix = "triangle"
                 test_grid_func = drone_triangle_grid
                 break
             else:
@@ -528,19 +545,21 @@ if __name__ == "__main__":
         link_budget_model = args.link_budget.strip().lower() if args.link_budget else None
         data_rate_Mbps = args.datarate
         transmit_power_dbm = args.transmitpower
+        margin = args.margin
         tol = args.tolerances
         dropout_iter = args.iterations
         drop_rates = args.dropout_rates
         root_path = args.root_path
 
+        if margin is not None:
+            default_margin = margin 
         if tol is not None:
             default_tolerances = np.array([float(x) for x in tol.split(",")])
         if dropout_iter is not None:
             default_drop_iter = dropout_iter
         if drop_rates is not None:
-            default_dropout_rates = np.array([float(x) for x in drop_rates.split(",")])
-            for i in range(len(default_dropout_rates)):
-                rate = default_dropout_rates[i]
+            default_dropout_rates = [float(x) for x in drop_rates.split(",")if float(x) != 0]
+            for i, rate in enumerate(default_dropout_rates):
                 if rate > 1 and rate <= 100:
                     print(f"\nWARNING: dropout rate {rate} is not in range 0 to 1")
                     default_dropout_rates[i] = rate / 100
@@ -548,6 +567,7 @@ if __name__ == "__main__":
                 if rate > 100:
                     print(f"\nWARNING: THE RATES ARE SUPPORTED FOR 0.0 to 1.0, {rate} IS NOT WITHIN RANGE")
                     exit()
+        print(default_dropout_rates)
         if root_path is not None:
             root_path = os.path.expanduser(root_path)
             valid = True
@@ -565,15 +585,20 @@ if __name__ == "__main__":
         else:
             print(f'[INFO] Saving in default path: {default_dir}')
 
+        metadata["MARGIN"] = str(default_margin)
         metadata["TOLERANCES"] = str(default_tolerances)
         metadata["DROPOUT_RATES"] = str(default_dropout_rates)
         metadata["DROPOUT_ITERATIONS"] = default_drop_iter
+        metadata["MODEL"] = link_budget_model
+        metadata["WIFI_MODULE"] = wifi_module
+        metadata["SET_DATA_RATE"] = data_rate_Mbps
+
         print()
         if grid == "square":
-            test_grid_meta_prefix = "Square"
+            test_grid_meta_prefix = "square"
             test_grid_func = drone_sq_grid
         elif grid == "triangle":
-            test_grid_meta_prefix = "Triangle"
+            test_grid_meta_prefix = "triangle"
             test_grid_func = drone_triangle_grid
         else:
             print(f"Warning: NOT A GRID TYPE: {grid}\n")
@@ -630,7 +655,7 @@ if __name__ == "__main__":
                        dim=test_dim,
                        drone_height=drone_height,
                        tolerances=default_tolerances,
-                       drone_distance_redundancy=test_dist_redundancy,
+                       drone_distance_redundancy=default_margin,
                        dropout_rates=default_dropout_rates,
                        dropout_iters=default_drop_iter,
                        margin_loss_db=margin_loss_db,

@@ -279,12 +279,13 @@ def parse_arguments(default_dir: str):
     
     parser.add_argument("-t","--transmitpower",type=float, 
                         help ="Only possible/necessary if using Shannon link budget")
+    parser.add_argument('-m', '--margin', type=int, help='Set distance margin: Default = 0 m')
     parser.add_argument("-tol","--tolerances", type = str,
-                        help = "Set tolerances: Single value like 10 or comma-separated like 10,20,30. Default = 10")
+                        help = "Set tolerances: Single value like 10 or comma-separated like 10,20,30. Default = 10 m")
     parser.add_argument("-drop","--dropout_rates", type = str,
                         help = "Set dropout rates: Single value like 10 or comma-separated like 10,20,30. Default = 0.05, 0.1, 0.15, 0.2")
     parser.add_argument("-iter","--iterations", type = int,
-                        help = "Set amount of times each Dropout is ran. Default = 100 ")
+                        help = "Set amount of times each Dropout is ran. Default = 100")
     parser.add_argument("-p","--root_path", type = str,
                         help = f"Set custom root path. Default = {default_dir}")
     

@@ -186,6 +186,7 @@ def link_list(*,
               eta: float = 0.79,
               snr_eff: float = 0.14,
               threshold_link: float = 0,
+              tolerance: float,
               use_lookup_table: bool = False) -> list[Link]:
 
     """
@@ -221,7 +222,9 @@ def link_list(*,
             
             # Compute distances from drone i to all drones
             distances = (target.x - source.x)**2 + (target.y - source.y)**2 + (target.z - source.z)**2
-               
+            t = tolerance * 2
+            d = np.sqrt(distances)
+            distances += 2 * d * t + t**2
             if use_lookup_table == False:
                 links, count, count_cmd = link_shannon(
                              distance_sq = distances,
@@ -420,6 +423,7 @@ def link_datasheet(distance_sq: float,
 def make_json_network(*,
                       file_name: str,
                       file_folder_path: str,
+                      extra: dict,
                       nodes: list,
                       links: list):
     
@@ -439,7 +443,7 @@ def make_json_network(*,
     """
 
     network = dict()
-
+    network['metadata'] = extra
     network["nodes"] = [asdict(i) for i in nodes]
     network["links"] = [asdict(j) for j in links]
 

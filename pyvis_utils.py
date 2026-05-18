@@ -5,6 +5,99 @@ import os
 import webbrowser
 from pyvis.network import Network
 
+def extract_node_info(graph_json, addrs_json):
+
+    # build base dict from graph - ALL nodes/adapters included
+    result = {
+        n["id"]: {"x": n["x"], "y": n["y"], "z": n["z"]}
+        for n in graph_json["nodes"]
+        if n["id"].startswith(("n", "a", "d"))
+    }
+
+    for node_id, info in addrs_json.items():
+        if node_id not in result:
+            continue
+
+        interfaces = {
+            iface: mac_addr
+            for iface, mac_addr in info.get("mac", {}).items()
+            if iface != "lo" and mac_addr != "00:00:00:00:00:00"
+        }
+
+        preferred_mac = None
+
+        # Prefer uplink for plotting/PyVis identity
+        for iface, mac_addr in interfaces.items():
+            if iface.startswith("uplink"):
+                preferred_mac = mac_addr
+                break
+
+        # Fallbacks for nodes that do not have uplink, e.g. d* devices
+        if preferred_mac is None:
+            for prefix in ("veth0", "lan0", "bat0", "br-lan"):
+                for iface, mac_addr in interfaces.items():
+                    if iface.startswith(prefix):
+                        preferred_mac = mac_addr
+                        break
+                if preferred_mac is not None:
+                    break
+
+        result[node_id]["mac"] = preferred_mac
+        result[node_id]["interfaces"] = interfaces
+
+    return result
+
+def extract_link_metrics(graph_json, bidirectional=True):
+    result = {}
+
+    for link in graph_json.get('links', []):
+        src = link.get('source')
+        dst = link.get('target')
+
+        if src is None or dst is None:
+            continue
+
+        phyrate = link.get('phyrate_mbps')
+        loss = link.get('loss_percent')
+
+        metrics = {
+            'phyrate_mbps': float(phyrate) if phyrate is not None else None,
+            'loss_percent': float(loss) if loss is not None else None
+        }
+
+        result[(src, dst)] = metrics
+
+        if bidirectional:
+            result[(dst, src)] = metrics.copy()
+    
+    return result
+
+def build_mac_lookup(node_adapters_info):
+    """
+    Maps every known MAC address to:
+    {
+        "node_id": ...,
+        "interface": ...,
+        "plot_mac": ...  # preferred/uplink MAC
+    }
+    """
+
+    mac_lookup = {}
+
+    for node_id, info in node_adapters_info.items():
+        plot_mac = info.get("mac")
+        if plot_mac is None:
+            continue
+
+        for iface, mac_addr in info.get("interfaces", {}).items():
+            mac_lookup[mac_addr.lower()] = {
+                "node_id": node_id,
+                "interface": iface,
+                "plot_mac": plot_mac.lower()
+            }
+
+    return mac_lookup
+
 ###############################################################################
 #______________________________ HELPER FUNCTIONS _____________________________#
 ###############################################################################
@@ -29,36 +122,6 @@ def find_mac_path(obj, target_mac, path=""):
             return path
 
     return None
-
-def extract_used_macs_from_graph(G):
-    used = set()
-
-    for s, d in G.edges():
-        used.add(s)
-        used.add(d)
-
-    return used
-
-def extract_uplink_macs(reference_data):
-    uplink_macs = set()
-
-    for node, data in reference_data.items():
-        mac_dict = data.get("mac", {})
-
-        for iface, mac in mac_dict.items():
-            if iface == "lo":
-                continue
-
-            if "uplink" in iface:
-                uplink_macs.add(mac)
-
-    return uplink_macs
-
-def natural_key(text):
-    return [
-        int(chunk) if chunk.isdigit() else chunk.lower()
-        for chunk in re.split(r'(\d+)', text)
-    ]
 
 def heatmap_color(norm):
     if norm < 0.25:
@@ -107,17 +170,17 @@ def setting_node_attributes(node_mac,
     color = "gray"
     if "a" in node_id:
         color = "red"
-        label = f"MAC: {node_mac}\nADAPTER: {node_id}"
-        #label = f"ADAPTER: {node_id}"   # only use this for figure
+        #label = f"MAC: {node_mac}\nADAPTER: {node_id}"
+        label = f"ADAPTER: {node_id}"   # only use this for figure
         shape = 'triangle'
     elif "n" in node_id:
         color = "blue"
-        label = f"MAC: {node_mac}\nNODE: {node_id}"
-        #label = f"NODE: {node_id}"   # only use this for figure
+        #label = f"MAC: {node_mac}\nNODE: {node_id}"
+        label = f"NODE: {node_id}"   # only use this for figure
     elif "d" in node_id:
         color = "green" if plot_type == "throughput" else "blue"
-        label = f"MAC: {node_mac}\nDEVICE: {node_id}"
-        #label = f"DEVICE: {node_id}"   # only use this for figure
+        #label = f"MAC: {node_mac}\nDEVICE: {node_id}"
+        label = f"DEVICE: {node_id}"   # only use this for figure
 
     if node_id in node_states:
 
@@ -146,6 +209,176 @@ def setting_node_attributes(node_mac,
 #_______________________________ HTML FUNCTIONS ______________________________#
 ###############################################################################
 
+
+def build_injection(color_bar_title: str,
+                    color_bar_data_links: list,
+                    color_bar_data_nodes: list,
+                    current_pkt: int,
+                    total_pkts: int,
+                    time: float,
+                    total_time: float,
+                    interval: bool = False,
+                    time_prev: float = None,
+                    packet_prev: int = None):
+    
+    # For links
+    arr_links = np.array(color_bar_data_links)
+    min_links = np.min(arr_links)
+    q1_links = np.percentile(arr_links, 25)
+    median_links = np.percentile(arr_links, 50)
+    q3_links = np.percentile(arr_links, 75)
+    max_links = np.max(arr_links)
+
+    # For nodes
+    arr_nodes = np.array(color_bar_data_nodes)
+    min_nodes = np.min(arr_nodes)
+    q1_nodes = np.percentile(arr_nodes, 25)
+    median_nodes = np.percentile(arr_nodes, 50)
+    q3_nodes = np.percentile(arr_nodes, 75)
+    max_nodes = np.max(arr_nodes)
+
+    if interval:
+        if time_prev is None or packet_prev is None:
+            raise ValueError("time_prev and packet_prev must be provided when interval=True")
+        
+        packet_info_html = """
+        <div id="packet-info">
+            <div> Packet interval <b>""" + f"{packet_prev}" + """ - """ + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts </div>
+            <div> Time of interval <b>""" + f"{time_prev:.2f}" + """ - """ + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+            <div> UP/DOWN snapshot at <b>""" + f"{time:.2f}" + """</b> </div>
+        </div>
+        """
+    else:
+        packet_info_html = """
+        <div id="packet-info">
+            <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
+            <div>Time of instance <b>""" + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+        </div>
+        """
+
+    injection = """
+    <script type="text/javascript">
+    window.addEventListener("load", function () {
+        if (typeof network !== "undefined") {
+
+            // FORCE stabilization immediately
+            network.stabilize(1000);
+
+            // After stabilization → fit and lock view
+            setTimeout(function () {
+                network.fit({
+                    animation: {
+                        duration: 0
+                    }
+                });
+
+                // Optional: disable physics so it doesn't move again
+                network.setOptions({ physics: false });
+
+            }, 100);
+        }
+    });
+    </script>
+    <style>
+    #heatmap-legend {
+        position: fixed;
+        top: 20px;
+        right: 30px;
+        width: 800px;
+        padding: 24px;
+        background: white;
+        border-radius: 18px;
+        font-family: Arial;
+        font-size: 28px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        z-index: 9999;
+    }
+    #heatmap-container {
+        display: flex;
+        align-items: center;
+        gap: 30px;
+    }
+    #heatmap-main {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: 90px;
+        flex: 1;
+    }
+    #heatmap-bar {
+        height: 30px;
+        width: 100%;
+        border-radius: 10px;
+        background: linear-gradient(
+            to right,
+            rgb(0,0,255),
+            rgb(0,255,255),
+            rgb(0,255,0),
+            rgb(255,255,0),
+            rgb(255,0,0)
+        );
+    }
+    #heatmap-labels-top,
+    #heatmap-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 24px;
+    }
+    #heatmap-side-text {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: 90px;
+        font-size: 24px;
+        font-weight: bold;
+        white-space: nowrap;
+    }
+    #packet-info {
+        position: fixed;
+        top: 20px;
+        left: 30px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 16px 24px;
+        border-radius: 18px;
+        font-family: Arial;
+        font-size: 28px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        z-index: 9999;
+    }
+
+    </style>
+    <div id="heatmap-legend">
+        <b>""" + f'{color_bar_title}' + """</b>
+        <div id="heatmap-container">
+            <div id="heatmap-side-text">
+                <div>node</div>
+                <div>link</div>
+            </div>
+            <div id="heatmap-main">
+                <div id="heatmap-labels-top">
+                    <span>""" + f"{format_unit(min_nodes)}" + """</span>
+                    <span>""" + f"{format_unit(q1_nodes)}" + """</span>
+                    <span>""" + f"{format_unit(median_nodes)}" + """</span>
+                    <span>""" + f"{format_unit(q3_nodes)}" + """</span>
+                    <span>""" + f"{format_unit(max_nodes)}" + """</span>
+                </div>
+
+                <div id="heatmap-bar"></div>
+
+                <div id="heatmap-labels">
+                    <span>""" + f"{format_unit(min_links)}" + """</span>
+                    <span>""" + f"{format_unit(q1_links)}" + """</span>
+                    <span>""" + f"{format_unit(median_links)}" + """</span>
+                    <span>""" + f"{format_unit(q3_links)}" + """</span>
+                    <span>""" + f"{format_unit(max_links)}" + """</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    """ + packet_info_html
+
+    return injection
+
 def accumulative_injection(color_bar_title: str,
                            color_bar_data_links: list,
                            color_bar_data_nodes: list,
@@ -153,7 +386,7 @@ def accumulative_injection(color_bar_title: str,
                            total_pkts,
                            time,
                            total_time):
-# For links
+    # For links
     arr_links = np.array(color_bar_data_links)
     min_links = np.min(arr_links)
     q1_links = np.percentile(arr_links, 25)
@@ -455,98 +688,37 @@ def window_injection(color_bar_title: str,
 #___________________________ VISUALIZATION FUNCTIONS _________________________#
 ###############################################################################
 
-# def compute_graph_metrics(G,
-#                           plot_type: str,
-#                           precision_number=1e-7):
-#     link_values = []
-#     node_tx = {}
+def compute_graph_metrics(G,
+                          plot_type: str,
+                          time: float,
+                          time_prev: float,
+                          precision_number: float=1e-7):
+    
+    # Add nodes and edges with styling
+    link_values = []
+    node_tx = {}
 
-#     for src, dst, data in G.edges(data=True):
+    for src, dst, data in G.edges(data=True):
+        if plot_type == 'tcp':
+            v = data.get('weight', 1)
+        elif plot_type == 'udp':
+            v = data.get('weight', 1)
+        elif plot_type == 'throughput':
+            #dt = max(data.get('last_time') - data.get('first_time'), precision_number)   # burst throughput
+            dt = max(time - time_prev, precision_number)   # interval throughput 
+            bits = data.get("bits", 0)
+            v = bits / dt
+        link_values.append(v)
+        node_tx[src] = node_tx.get(src, 0) + v # outgoing transmission from a node
 
-#         if plot_type in ["tcp", "udp"]:
-#             v = data.get("weight", 1)
+    node_values = list(node_tx.values())
 
-#         elif plot_type == "throughput":
-#             dt = max(data.get("last_time") - data.get("first_time"), precision_number)
-#             bits = data.get("bits", 0)
-#             v = bits / dt
-
-#         link_values.append(v)                   # All link traffic
-#         node_tx[src] = node_tx.get(src, 0) + v  # outgoing node traffic
-
-#     node_values = list(node_tx.values())
-
-#     return link_values, node_values, node_tx
-
-# def add_nodes(net,
-#               G,
-#               node_macs,
-#               node_tx,
-#               min_nodes,
-#               max_nodes,
-#               reference_data,
-#               pos_lookup,
-#               node_states,
-#               last_rendered_time,
-#               time,
-#               plot_type):
-        
-#     for node in node_macs:
-
-#         node_info = find_mac_path(reference_data, node)
-
-#         # node_info = /n4/mac/uplink@if15  (example)
-#         if node_info:
-#             parts = node_info.split("/")
-#             node_id = parts[1]
-#             addr_type = parts[2]
-#             addr_type_type = parts[3]
-#             # expected adapter and node ids in the json lookup
-
-#             if node_id in pos_lookup and "uplink" in addr_type_type:
-#                 x = pos_lookup[node_id]["x"]
-#                 y = pos_lookup[node_id]["y"]
-#             elif "d" in node_id:
-#                 x = 30000 + np.random.random() * 1000
-#                 y = 15000 + np.random.random() * 1000
-#             else:
-#                 x = -10000 + np.random.random() * 1000
-#                 y = 15000 + np.random.random() * 1000
-#         else:
-#             # expect to be 33:33:00:00:00:02 which is to do with 0x08...
-#             node_id = "unknown"
-#             addr_type = "unknown"
-#             addr_type_type = "unknown"
-#             x = 30000
-#             y = 15000
-
-#         label, shape, color = setting_node_attributes(node_mac=node,
-#                                                       node_id=node_id,
-#                                                       node_states=node_states,
-#                                                       last_rendered_time=last_rendered_time,
-#                                                       time=time,
-#                                                       plot_type=plot_type)
-        
-#         node_value = node_value_lookup.get(node, 0)
-#         norm = normalize(w=node_value,min_w=min_nodes,max_w=max_nodes)
-#         color = heatmap_color(norm=norm)
-#         if node not in G.nodes():
-#             color = 'black'
-#         net.add_node(
-#             node,
-#             label=label,
-#             size=10,
-#             color=color,
-#             x=x/20,
-#             y=y/20,
-#             physics=False,
-#             shape=shape
-#         )
+    return link_values, node_values, node_tx
 
 def creation_of_pyvis(G,
                       index: str,
-                      reference_data: str,
-                      json_nodes: str,
+                      addr_data: str,
+                      graph_data: str,
                       current_pkt: str,
                       total_pkts: str,
                       time: float,
@@ -573,144 +745,79 @@ def creation_of_pyvis(G,
     net.barnes_hut() # Optional: better physics (important for mesh graphs)
 
     # Load layout data (graph.json)
-    with open(json_nodes,"r") as f:
-        node_link_data = json.load(f)
-    nodes_pos_data = node_link_data.get("nodes", [])
-    pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
-    print(pos_lookup)
-    nodes = []     # Add nodes + edges
+    with open(graph_data,"r") as f:
+        graph_data = json.load(f)
 
-    # 1. Add nodes that exist in G (only include nodes and adapters that have links)
-    uplink_macs = extract_uplink_macs(reference_data)
-    used_macs = set(extract_used_macs_from_graph(G))
-    node_macs = used_macs.union(uplink_macs)
-
-    # Add nodes and edges with styling
-    link_values = []
-    node_tx = {}
-
-    for src, dst, data in G.edges(data=True):
-        if plot_type == 'tcp':
-            v = data.get('weight', 1)
-        elif plot_type == 'udp':
-            v = data.get('weight', 1)
-        elif plot_type == 'throughput':
-            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
-            bits = data.get("bits", 0)
-            v = bits / dt
-        link_values.append(v)
-        node_tx[src] = node_tx.get(src, 0) + v # outgoing transmission from a node
-        print(f'src: {src} | transmits: {node_tx[src]}')
-    node_values = list(node_tx.values())
+    link_values, node_values, node_value_lookup = compute_graph_metrics(G=G,
+                                                                        plot_type=plot_type,
+                                                                        time=time,
+                                                                        time_prev=time_prev)
 
     min_links = min(link_values)
     max_links = max(link_values)
-    min_nodes = min(node_values) if node_values else 0
-    max_nodes = max(node_values) if node_values else 0
-    node_value_lookup = node_tx
+    min_nodes = min(node_values)
+    max_nodes = max(node_values)
 
-    for node in node_macs:
+    # Get info from graph.json and node_addrs.json
+    node_adapters_info = extract_node_info(graph_json=graph_data, addrs_json=addr_data)
+    link_info = extract_link_metrics(graph_json=graph_data)
+    
+    mac_to_node = {}
 
-        node_info = find_mac_path(reference_data, node)
+    for node_id, info in node_adapters_info.items():
+        x = info['x']
+        y = info['y']
+        mac = info.get('mac')
+    
+        if mac:
+            mac_to_node[mac.lower()] = node_id
 
-        # node_info = /n4/mac/uplink@if15  (example)
-        if node_info:
-            parts = node_info.split("/")
-            node_id = parts[1]
-            addr_type = parts[2]
-            addr_type_type = parts[3]
-            # expected adapter and node ids in the json lookup
-
-            if node_id in pos_lookup and "uplink" in addr_type_type:
-                x = pos_lookup[node_id]["x"]
-                y = pos_lookup[node_id]["y"]
-            elif "d" in node_id:
-                x = 30000 + np.random.random() * 1000
-                y = 15000 + np.random.random() * 1000
-            else:
-                x = -10000 + np.random.random() * 1000
-                y = 15000 + np.random.random() * 1000
-        else:
-            # expect to be 33:33:00:00:00:02 which is to do with 0x08...
-            node_id = "unknown"
-            addr_type = "unknown"
-            addr_type_type = "unknown"
-            x = 30000
-            y = 15000
-
-        label, shape, color = setting_node_attributes(node_mac=node,
+        label, shape, color = setting_node_attributes(node_mac=mac,
                                                       node_id=node_id,
                                                       node_states=node_states,
                                                       last_rendered_time=last_rendered_time,
                                                       time=time,
                                                       plot_type=plot_type)
         
-        node_value = node_value_lookup.get(node, 0)
+        node_value = node_value_lookup.get(mac, 0)
         norm = normalize(w=node_value,min_w=min_nodes,max_w=max_nodes)
         color = heatmap_color(norm=norm)
-        if node not in G.nodes():
+        if mac not in G.nodes():
             color = 'black'
+        if plot_type in ('tcp', 'udp'):
+            title = f'Transmitted packets: {format_unit(node_value)}' 
+        elif plot_type == 'throughput':
+            title = f'Transmitted bits: {format_unit(node_value)}bps'          
+
         net.add_node(
-            node,
+            node_id,
             label=label,
             size=10,
+            title=title,
             color=color,
             x=x/20,
             y=y/20,
             physics=False,
             shape=shape
         )
-        
-        if "uplink" in addr_type_type:
-            priority = 0
-        elif "veth" in addr_type_type:
-            priority = 1
-        elif "bat0" in addr_type_type:
-            priority = 2
-        elif "unknown" in addr_type_type:
-            priority = 3
-        else:
-            priority = 4
 
-        nodes.append((node_id, node, addr_type, addr_type_type,priority))
-
-    # natural sort here
-    nodes.sort(key=lambda x: (x[4], natural_key(x[0])))
-
-    current_priority = None
-    for node_id, mac, addr_type, addr_type_type, priority in nodes:
-
-        if priority != current_priority:
-            current_priority = priority
-            clean_iface = addr_type_type.split("@")[0]
-            text = f" PRIORITY {priority} | {clean_iface} "
-            text = text.ljust(80 - 30, "-")
-            print(f"{'-' * 30}{text}")
-        net.add_node(
-            mac,
-            label=f"MAC: {mac}\nNODE: {node_id}\nADDR TYPE: {addr_type} {addr_type_type}"
-        )
-
+        # For debugging
         if mac in G.nodes():
-            print(f"{node_id} -> {mac}")
+            print(f"{node_id:<3} -> {str(mac):<17}")
         else:
-            print(f'{node_id} -> {mac} - This node/adapter do not contain any links')
-
-    # ensure ALL graph nodes exist
-    for node in G.nodes():
-        if node not in net.get_nodes():
-            net.add_node(
-                node,
-                label=f"MAC: {node}",
-                size=8,
-                color="gray",
-                physics=False,
-                shape=shape
-            )
+            print(f'{node_id:<3} -> {str(mac):<17} - This node/adapter do not contain any links')
     
-    for src, dst, data in G.edges(data=True):
+    for src_mac, dst_mac, data in G.edges(data=True):
+        # Convert MACs -> graph node IDs
+        src = mac_to_node.get(src_mac.lower())
+        dst = mac_to_node.get(dst_mac.lower())
+
+        # Skip if mapping not found
+        if src is None or dst is None:
+            continue
+    
         #  check if reverse edge exists
-        has_reverse = G.has_edge(dst, src)
+        has_reverse = G.has_edge(dst_mac, src_mac)
 
         if has_reverse and src != dst:
             smooth = {
@@ -720,6 +827,11 @@ def creation_of_pyvis(G,
             }
         else:
             smooth = False
+
+        # Lookup physical link metrics
+        link_metrics = link_info.get((src, dst))
+        phyrate = link_metrics.get("phyrate_mbps") if link_metrics else None
+        loss_percent = link_metrics.get("loss_percent") if link_metrics else None
 
         if plot_type == 'tcp':
             value = data.get('weight',1)
@@ -748,22 +860,35 @@ def creation_of_pyvis(G,
             width=1 + np.log1p(value)  # optional smoother scaling
         )
         elif plot_type == "throughput":
-            dt = max(data.get('last_time') - data.get('first_time'), precision_number)
+            #dt = max(data.get('last_time') - data.get('first_time'), precision_number)  # burst throughput
+            dt = max(time - time_prev, precision_number) # interval throughput
             bits = data.get("bits", 0)
             value = bits / dt
             norm = normalize(w=value,min_w=min_links,max_w=max_links)
             color = heatmap_color(norm=norm)
 
+            phyrate_text = f"{phyrate:.2f}" if phyrate is not None else "N/A"
+            loss_text = f"{loss_percent:.2f}" if loss_percent is not None else "N/A"
+
+            if phyrate is not None and phyrate > 0:
+                load_percent = 100 * value / (phyrate * 1_000_000)
+                load_text = f"{load_percent:.3f}"
+            else:
+                load_text = 'N/A'
+
+
+            print(f'src: {src:<3} | dst: {dst:<3} | phyrate: {str(phyrate):>6} Mbps | total: {format_unit(bits):>8}b | rate: {format_unit(value):>8}bps | dt: {dt:>6.2f} s | link load: {load_text:>6} %') 
             net.add_edge(
                 src,
                 dst,
                 smooth=smooth,
                 title=(
-                    f"First {data.get('first_time')} | "
-                    f"Last {data.get('last_time')} | "
+                    f"src: {src} -> dst: {dst} | "
+                    f"phyrate: {phyrate_text} Mbps | "
                     f"message count: {data.get('count')} | "
-                    f"rate: {format_unit(value)}bit/s | "
-                    f"total: {format_unit(bits)}bit"
+                    f"total: {format_unit(bits)}b | "
+                    f"rate: {format_unit(value)}bps | "
+                    f"link load: {load_text} % "
                 ),
                 color=color,
                 width = 1 + 0.2 * np.log1p(value)   # width between 1 and 5
@@ -780,7 +905,7 @@ def creation_of_pyvis(G,
     elif plot_type == 'udp':
         color_bar_title = 'UDP packets transmitted on'
     elif plot_type == 'throughput':
-        color_bar_title = 'Throughput [bits/s] on link'
+        color_bar_title = 'Throughput [bps] on'
     
     # Inject auto-fit script
     with open(output_file, "r+", encoding="utf-8") as f:
@@ -788,22 +913,24 @@ def creation_of_pyvis(G,
        
         # Insert injection
         if flag_interval == True:
-            injection = window_injection(color_bar_title=color_bar_title,
-                                         color_bar_data_links=color_bar_data_links,
-                                         color_bar_data_nodes=color_bar_data_nodes,
-                                         current_pkt=current_pkt,
-                                         total_pkts=total_pkts,
-                                         time=time,
-                                         total_time=total_time,
-                                         time_prev = time_prev,
-                                         packet_prev=packet_prev)
+            injection = build_injection(color_bar_title=color_bar_title,
+                                        color_bar_data_links=color_bar_data_links,
+                                        color_bar_data_nodes=color_bar_data_nodes,
+                                        current_pkt=current_pkt,
+                                        total_pkts=total_pkts,
+                                        time=time,
+                                        total_time=total_time,
+                                        interval=flag_interval,
+                                        time_prev=time_prev,
+                                        packet_prev=packet_prev)
         else:
-            injection = accumulative_injection(color_bar_title=color_bar_title,
-                                               color_bar_data_links=color_bar_data_links,
-                                               color_bar_data_nodes=color_bar_data_nodes,
-                                               current_pkt=current_pkt,
-                                               total_pkts=total_pkts,time=time,
-                                               total_time=total_time)
+            injection = build_injection(color_bar_title=color_bar_title,
+                                        color_bar_data_links=color_bar_data_links,
+                                        color_bar_data_nodes=color_bar_data_nodes,
+                                        current_pkt=current_pkt,
+                                        total_pkts=total_pkts,
+                                        time=time,
+                                        total_time=total_time)
 
         html = html.replace("</body>", injection + "\n</body>")
 

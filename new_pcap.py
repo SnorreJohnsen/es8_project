@@ -14,7 +14,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 from pyvis_utils import (find_mac_path,
-                         creation_of_pyvis)
+                         creation_of_pyvis,
+                         extract_node_info,
+                         build_mac_lookup)
+
+from legacy_pyvis import legacy_pyvis
+
 
 adapter = []
 
@@ -183,6 +188,68 @@ def get_state_changes(sim_file: str):
             states[name].append((time, state))
 
     return states
+
+def is_counted_throughput_interface(iface):
+
+    if iface is None:
+        return False
+    
+    return iface.startswith(('uplink', 'lan0', 'veth0'))
+
+def add_throughput_bits(G, s, d, frame_length, time, mac_lookup):
+    """
+    Adds packet/frame bits to G only if:
+
+    1. source MAC exists in node_addrs.json
+    2. destination MAC exists in node_addrs.json
+    3. both interfaces are counted throughput interfaces
+    4. traffic is normalized to preferred/uplink plotting MACs
+    """
+
+    if s is None or d is None:
+        return
+    
+    src_entry = mac_lookup.get(s.lower())
+    dst_entry = mac_lookup.get(d.lower())
+
+
+    # Ignore unknown MACs
+    if src_entry is None or dst_entry is None:
+        return
+
+    # Ignore interfaces that should not count toward link load
+    if not is_counted_throughput_interface(src_entry["interface"]):
+        return
+
+    if not is_counted_throughput_interface(dst_entry["interface"]):
+        return
+    
+    # Normalize to preferred/uplink MACs
+    src_plot_mac = src_entry["plot_mac"]
+    dst_plot_mac = dst_entry["plot_mac"]
+
+    if src_plot_mac is None or dst_plot_mac is None:
+        return
+
+    # Avoid self-edge after normalization
+    if src_plot_mac == dst_plot_mac:
+        return
+
+    frame_bits = int(frame_length) * 8
+
+    if G.has_edge(src_plot_mac, dst_plot_mac):
+        G[src_plot_mac][dst_plot_mac]["bits"] += frame_bits
+        G[src_plot_mac][dst_plot_mac]["last_time"] = time
+        G[src_plot_mac][dst_plot_mac]["count"] += 1
+    else:
+        G.add_edge(
+            src_plot_mac,
+            dst_plot_mac,
+            bits=frame_bits,
+            first_time=time,
+            last_time=time,
+            count=1
+        )
 
 ###############################################################################
 #__________________________ EXECUTION FUNCTIONS ______________________________#
@@ -375,12 +442,24 @@ def all_link_throughput(*,
                       gif: bool = False,
                       browser_html: bool = False,
                       flag_interval: bool = False,
+                      plot_type: str,
                       input_pcap_name: str,
                       output_dir: str,
                       states: tuple = None):
     
     last_rendered_time = start_time
     frame_idx = 0
+    
+    with open(graph_json, 'r') as f:
+        graph_data_local = json.load(f)
+
+    node_adapters_info = extract_node_info(
+        graph_json=graph_data_local,
+        addrs_json=addr_data
+    )
+
+    mac_lookup = build_mac_lookup(node_adapters_info)
+
     with open(file, "r", encoding=encoding, errors="ignore") as f:
             lines = f.readlines()
             last_line = lines[-1]
@@ -429,27 +508,25 @@ def all_link_throughput(*,
                         print(f'Suppose to be frame length but get result {frame_length}')
                         exit()
                         
-
                 srcs = [s.strip() for s in src.split(",")]
                 dsts = [d.strip() for d in dst.split(",")]
-
 
                 for n, (s,d) in enumerate(zip(srcs, dsts)):
                     if s == "ff:ff:ff:ff:ff:ff" or d == "ff:ff:ff:ff:ff:ff":
                         # need to do something if broadcast like maybe at to all links that the node have
                         continue
                     
-                    # Only make the batadv packet, not the tcp
-                    if G.has_edge(s, d):
-                        G[s][d]["bits"] += int(frame_length)
-                        G[s][d]["last_time"] = time
-                        G[s][d]['count'] += 1
-                    else:
-                        G.add_edge(s, d, bits=int(frame_length), first_time = time,last_time = time, count=1)
-                        if first_time_tcp_packet == None:
-                            first_time_tcp_packet = time
-                            time_prev = first_time_tcp_packet
-                            packet_prev = int(pkt_num)
+                    # Add valid throughput bits, to parse bits sent per link
+                    add_throughput_bits(G=G,
+                                        s=s,
+                                        d=d,
+                                        frame_length=frame_length,
+                                        time=time,
+                                        mac_lookup=mac_lookup)
+                    if first_time_tcp_packet == None:
+                        first_time_tcp_packet = time
+                        time_prev = first_time_tcp_packet
+                        packet_prev = int(pkt_num)
 
                 if time > start_time + anime_time or time == tot_time or time >= stop_time:
                     anime_prev = start_time + anime_time
@@ -471,8 +548,8 @@ def all_link_throughput(*,
                         Path(png_file).parent.mkdir(parents=True, exist_ok=True)
                         creation_of_pyvis(G=G,
                                           index=time,
-                                          reference_data=addr_data,
-                                          json_nodes=json_link_nodes,
+                                          addr_data=addr_data,
+                                          graph_data=graph_json,
                                           current_pkt = pkt_num,
                                           total_pkts = tot_pkts,
                                           time = time,
@@ -480,7 +557,7 @@ def all_link_throughput(*,
                                           time_prev = time_prev,
                                           last_rendered_time=last_rendered_time,
                                           packet_prev=packet_prev,
-                                          plot_type='Throughput',
+                                          plot_type=plot_type,
                                           output_file=html_file,
                                           states=states,
                                           browser_html = browser_html,
@@ -637,8 +714,8 @@ def creation_of_edges_TCP(*,
                                 f"Mac info: SRC {s} type: {info['src_mac_type']} | DST {d} type: {info['dst_mac_type']}")
                         creation_of_pyvis(G=G,
                                           index=time,
-                                          reference_data=addr_data,
-                                          json_nodes=json_link_nodes,
+                                          addr_data=addr_data,
+                                          graph_data=graph_json,
                                           current_pkt=pkt_num,
                                           total_pkts=tot_pkts,
                                           time=time,
@@ -674,9 +751,9 @@ if __name__ == "__main__":
     default_interval = 5
 
     parser = argparse.ArgumentParser(description="What Parameters mean")
-    parser.add_argument("-in", "--input", type=str, help="Input file location | Either folder of pcaps, single pcap or txt file")
-    parser.add_argument("-addr", "--addresses", type=str, help="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
-    parser.add_argument("-j", "--json", type=str, help="Json file including pos of nodes (graph.json)")
+    parser.add_argument("-i", "--input", type=str, help="Input file location | Either folder of pcaps, single pcap or txt file")
+    parser.add_argument("-a", "--addresses", type=str, help="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
+    parser.add_argument("-g", "--graph", type=str, help="Json file including pos of nodes (graph.json)")
     parser.add_argument("-s", "--states", type=str, help="Json file for simulation schedule (reroute.json)")
     parser.add_argument("-gif", "--gif_enabled", action="store_true", help="enable creation of gif from png's, (png's are not created if gif is disabled)")
     parser.add_argument("-e", "--existing_png_for_gif", action="store_true", help="Don't recreate png, for gif instead use already existing pngs created previously")
@@ -684,7 +761,7 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--flag_interval", action="store_true", help="Set to enable HTML for intervals")
     parser.add_argument("-sta", "--start_time", type=float, help="Choose start time for analysis. Default = 0 sec")
     parser.add_argument("-sto", "--stop_time", type=float, help="Choose stop time for analysis. Default = 30 sec")
-    parser.add_argument("-i", "--interval", type=float, help="Choose interval size of windows. Default = 5 sec")
+    parser.add_argument("-int", "--interval", type=float, help="Choose interval size of windows. Default = 5 sec")
     parser.add_argument("-m", "--method", type=str, help="Choose type of analysis method. throughput, tcp, udp or (ogm, ogm2, ogmv2).")
     parser.add_argument("-ogm_orig", "--ogmv2_originator", type=str, help="Choose ogmv2 originator node. Can be multiple nodes (n1,n2)")
     parser.add_argument("-ogm_eth_src", "--ogmv2_ethernet_source", type=str, help="Choose ogmv2 ethernet source node. Can be multiple nodes (n1,n2)")
@@ -693,8 +770,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     analysis_file = args.input
-    addr_file = args.addresses
-    json_link_nodes = args.json
+    addr_json = args.addresses
+    graph_json = args.graph
     states_json = args.states
     enable_gif = args.gif_enabled
     exist_gif = args.existing_png_for_gif
@@ -720,7 +797,7 @@ if __name__ == "__main__":
     if interval_time is not None:
         default_interval = interval_time
 
-    with open(addr_file,"r") as f:
+    with open(addr_json,"r") as f:
         addr_data = json.load(f)
     
     # Save files in method_type folder
@@ -792,9 +869,9 @@ if __name__ == "__main__":
             ogmv2_origs = [orig.strip() for orig in ogmv2_orig.split(',')]
             ogmv2_eth_srcs = [src.strip() for src in ogmv2_eth_src.split(',')] 
             # Load layout data (graph.json)
-            with open(json_link_nodes,"r") as f:
-                node_link_data = json.load(f)
-            nodes_pos_data = node_link_data.get("nodes", [])
+            with open(graph_json,"r") as f:
+                graph_data = json.load(f)
+            nodes_pos_data = graph_data.get("nodes", [])
             pos_lookup = {n["id"]: n for n in nodes_pos_data}   # includes both nodes and adapters
 
             for orig in ogmv2_origs:
@@ -845,9 +922,11 @@ if __name__ == "__main__":
                                     gif=enable_gif,
                                     browser_html=enable_browser,
                                     flag_interval=enable_interval_graph,
+                                    plot_type=method_type,
                                     input_pcap_name=input_name,
                                     output_dir=output_dir,
                                     states=states)
             
             if enable_gif is True or exist_gif is True:
                 mp4_creation(output_dir=output_dir, file_name='Throughput', input_pcap_name=input_name)
+                
