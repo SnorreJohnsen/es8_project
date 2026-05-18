@@ -517,8 +517,8 @@ def battp_set_link_throughput(n1: str, n2: str, tp: float):
     n2_mac = exec(tid, remote, f'ip netns exec "ns-{n2}" {bat_mac_cmd}', get_output=True)[0].strip()
 
     # set throughput limit in both directions (*10 is to go from unit Mbit to 100kbit)
-    exec(tid, remote, f'ip netns exec "ns-{n1}" battpctl set bat0 uplink {n2_mac} {int(tp*10)}')
-    exec(tid, remote, f'ip netns exec "ns-{n2}" battpctl set bat0 uplink {n1_mac} {int(tp*10)}')
+    exec(tid, remote, f'ip netns exec "ns-{n1}" battpctl set bat0 uplink {n2_mac} {int(tp*10)} || true')
+    exec(tid, remote, f'ip netns exec "ns-{n2}" battpctl set bat0 uplink {n1_mac} {int(tp*10)} || true')
 
 def batctl_set_neigh_throughputs(graph: dict):
     """
