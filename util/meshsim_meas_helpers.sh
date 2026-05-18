@@ -135,6 +135,52 @@ msh_analyze_all_nsperf() {
 	' sh "$raw_dir" "$out_dir_nsperf" "$nsperf_analyze_script" "$python_exe" "$skip_start_ms"
 }
 
+msh_analyze_nsperf_tree() {
+	src_dir="$1"
+	nsperf_analyze_script="$2"
+	python_exe="${3:-python3}"
+	jobs="${4:-}"
+	skip_start_ms="${5:-}"
+
+	if [ -z "$src_dir" ] || [ -z "$nsperf_analyze_script" ]; then
+		echo "usage: msh_analyze_nsperf_tree SRC_DIR NSPERF_ANALYZE_SCRIPT [PYTHON_EXE] [JOBS] [SKIP_START_MS]" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+
+	find "$src_dir" -type d -name raw -path "*/nsperf/raw" |
+		sort |
+		while IFS= read -r raw_dir; do
+			out_dir_nsperf="${raw_dir%/raw}/streams"
+			echo "Analyzing nsperf raw dir: $raw_dir -> $out_dir_nsperf"
+			msh_analyze_all_nsperf "$raw_dir" "$out_dir_nsperf" \
+				"$nsperf_analyze_script" "$python_exe" "$jobs" "$skip_start_ms" || exit $?
+		done
+}
+
+msh_remove_nsperf_streams_tree() {
+	src_dir="$1"
+
+	if [ -z "$src_dir" ]; then
+		echo "usage: msh_remove_nsperf_streams_tree SRC_DIR" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+
+	find "$src_dir" -depth -type d -name streams -path "*/nsperf/streams" |
+		sort -r |
+		while IFS= read -r streams_dir; do
+			echo "Removing nsperf streams dir: $streams_dir"
+			rm -rf "$streams_dir" || exit $?
+		done
+}
+
 msh_pause_file_default() {
 	out_dir="$1"
 	echo "$out_dir/PAUSE"
