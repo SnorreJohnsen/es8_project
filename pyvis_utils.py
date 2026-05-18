@@ -782,7 +782,7 @@ def creation_of_pyvis(G,
         node_value = node_value_lookup.get(mac, 0)
         norm = normalize(w=node_value,min_w=min_nodes,max_w=max_nodes)
         color = heatmap_color(norm=norm)
-        if mac not in G.nodes():
+        if mac not in G.nodes() or node_value == 0.00:
             color = 'black'
         if plot_type in ('tcp', 'udp'):
             title = f'Transmitted packets: {format_unit(node_value)}' 
@@ -841,10 +841,10 @@ def creation_of_pyvis(G,
             src,
             dst,
             smooth=smooth,
-            title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {data.get('weight')}",        
+            title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {format_unit(data.get('weight'))}",        
             # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
             color= color,               
-            width=1 + np.log1p(value)  # optional smoother scaling
+            width=3
         )
         elif plot_type == 'udp':
             value = data.get('weight',1)
@@ -854,10 +854,10 @@ def creation_of_pyvis(G,
             src,
             dst,
             smooth=smooth,
-            title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {data.get('weight')}",        
+            title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {format_unit(data.get('weight'))}",        
             # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
-            color= color,               
-            width=1 + np.log1p(value)  # optional smoother scaling
+            color=color,
+            width=3
         )
         elif plot_type == "throughput":
             #dt = max(data.get('last_time') - data.get('first_time'), precision_number)  # burst throughput
@@ -891,7 +891,7 @@ def creation_of_pyvis(G,
                     f"link load: {load_text} % "
                 ),
                 color=color,
-                width = 1 + 0.2 * np.log1p(value)   # width between 1 and 5
+                width=3
             )
 
     # Save and open
