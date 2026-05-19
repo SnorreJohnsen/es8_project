@@ -599,6 +599,9 @@ def set_node_down(node_name: str):
     tid = get_thread_id()
     remote = None
 
+    if verbosity == "verbose":
+        print(f"set_node_down({node_name=})")
+
     exec(tid, remote, f'ip netns exec "ns-{node_name}" batctl meshif bat0 interface destroy 2>/dev/null || true')
     exec(tid, remote, f'ip netns add "trash-{node_name}" 2>/dev/null || true')
     exec(tid, remote, f'ip netns exec "ns-{node_name}" ip link set uplink down')
@@ -621,6 +624,10 @@ def set_node_up(node_name: str, graph: dict):
     """
     tid = get_thread_id()
     remote = None
+
+    if verbosity == "verbose":
+        print(f"set_node_up({node_name=})")
+
     exec(tid, remote, f'ip netns exec "trash-{node_name}" ip link set uplink netns "ns-{node_name}"')
     start_batadv(node_name, version5=True, tid=tid)
     exec(tid, remote, f'ip netns exec "ns-{node_name}" ip link set uplink up', get_output=True) # get_output=True -> syncronous guard
@@ -1186,6 +1193,8 @@ def main():
             args, pcap_dir, verbosity
             )
 
+    if verbosity == "verbose":
+        print(f"Schedule: {sched}")
     sim = run_sim_sched(graph=graph, sched=sched, duration=duration)
     with open(sim_sched_json_path, "wb") as f:
         f.write(to_json(sim))
