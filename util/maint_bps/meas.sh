@@ -9,7 +9,7 @@ graph_input="${1:-/home/aau/meshsim/testgraphs}"
 out_dir="${2:-/home/aau/meshsim/output/maint_bps}"
 
 # Run controls. Override these with environment variables for smaller runs.
-graph_pattern="${GRAPH_PATTERN:-Triangle_network_*_tolerance_*_datarate_Mbps_*_bandwidth_Mhz_*_nodes.json}"
+graph_pattern="${GRAPH_PATTERN:-triangle_*_nodes.json}"
 sim_duration="${SIM_DURATION:-300}"
 bucket_size="${BUCKET_SIZE:-1}"
 verbosity="${VERBOSITY:-verbose}"

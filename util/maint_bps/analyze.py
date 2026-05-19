@@ -23,7 +23,7 @@ NODE_FIELDS = [
     "duration_s",
     "bucket_s",
     "total_bits",
-    "mean_bps",
+    "avg_tx_bps",
     "max_bps",
     "p50_bps",
     "p90_bps",
@@ -38,14 +38,14 @@ NETWORK_FIELDS = [
     "duration_s",
     "bucket_s",
     "total_bits",
-    "mean_total_bps",
-    "max_total_bps",
-    "mean_node_mean_bps",
-    "max_node_mean_bps",
-    "p50_node_mean_bps",
-    "p90_node_mean_bps",
-    "p95_node_mean_bps",
-    "p99_node_mean_bps",
+    "avg_total_tx_bps",
+    "max_total_tx_bps",
+    "avg_node_tx_bps",
+    "max_node_avg_tx_bps",
+    "p50_node_avg_tx_bps",
+    "p90_node_avg_tx_bps",
+    "p95_node_avg_tx_bps",
+    "p99_node_avg_tx_bps",
 ]
 
 
@@ -116,7 +116,6 @@ def mean(values: list[float]) -> float:
 
 def bps_stats(values: list[float]) -> dict[str, float]:
     return {
-        "mean_bps": mean(values),
         "max_bps": max(values) if values else 0.0,
         "p50_bps": percentile(values, 50),
         "p90_bps": percentile(values, 90),
@@ -186,7 +185,11 @@ def sort_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         except ValueError:
             mesh_key = 10**12
 
-        return (mesh_key, str(row.get("graph_name", "")), natural_key(str(row.get("node", ""))))
+        return (
+            mesh_key,
+            str(row.get("graph_name", "")),
+            natural_key(str(row.get("node", ""))),
+        )
 
     return sorted(rows, key=key)
 
@@ -222,12 +225,8 @@ def upsert_csv(
         writer.writerows(rows)
 
 
-def write_boxplot(nodes_csv: Path, output: Path) -> None:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+def load_plot_data(nodes_csv: Path) -> tuple[Any, list[str]]:
     import pandas as pd
-    import seaborn as sns
 
     df = pd.read_csv(nodes_csv)
     if df.empty:
@@ -238,18 +237,51 @@ def write_boxplot(nodes_csv: Path, output: Path) -> None:
         key=lambda value: (int(value) if str(value).isdigit() else 10**12, str(value)),
     )
     df["mesh_size"] = df["mesh_size"].astype(str)
+    return df, mesh_order
+
+
+def plot_distribution(
+    nodes_csv: Path,
+    output: Path,
+    kind: str,
+) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    df, mesh_order = load_plot_data(nodes_csv)
 
     width = max(7.0, min(18.0, 0.75 * len(mesh_order) + 4.0))
     plt.figure(figsize=(width, 5.0))
     sns.set_theme(style="whitegrid")
-    ax = sns.boxplot(data=df, x="mesh_size", y="mean_bps", order=mesh_order)
+    if kind == "box":
+        ax = sns.boxplot(data=df, x="mesh_size", y="avg_tx_bps", order=mesh_order)
+    elif kind == "violin":
+        ax = sns.violinplot(
+            data=df,
+            x="mesh_size",
+            y="avg_tx_bps",
+            order=mesh_order,
+            cut=0,
+            inner="quartile",
+        )
+    else:
+        raise ValueError(f"Unknown distribution plot kind: {kind}")
+
     ax.set_xlabel("Mesh size [drones]")
-    ax.set_ylabel("Mean transmitted bitrate per drone [bps]")
+    ax.set_ylabel("Average TX bitrate per drone [bps]")
     ax.set_title("B.A.T.M.A.N. maintenance bitrate by mesh size")
     plt.tight_layout()
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output, dpi=150)
     plt.close()
+
+
+def write_aggregate_plots(out_dir: Path) -> None:
+    nodes_csv = out_dir / "maint_bps_nodes.csv"
+    plot_distribution(nodes_csv, out_dir / "maint_bps_boxplot.png", "box")
+    plot_distribution(nodes_csv, out_dir / "maint_bps_violinplot.png", "violin")
 
 
 def analyze(
@@ -282,6 +314,7 @@ def analyze(
         samples = run_tshark(pcap, mac)
         times, bits = bucket_bits(samples, bucket_s, start_epoch=start_epoch, duration=duration)
         bps = bits_to_bps(bits, bucket_s)
+        total_bits = sum(bits)
         node_dir = details_dir / graph_name / node
 
         write_bucket_outputs(node_dir, times, bits, bps)
@@ -295,7 +328,8 @@ def analyze(
             "node_type": node_type(node),
             "duration_s": duration,
             "bucket_s": bucket_s,
-            "total_bits": sum(bits),
+            "total_bits": total_bits,
+            "avg_tx_bps": total_bits / duration,
             **stats,
         }
         node_rows.append(row)
@@ -308,25 +342,26 @@ def analyze(
         sum(node_bps[idx] for node_bps in all_node_bps)
         for idx in range(bucket_count)
     ]
-    node_mean_bps = [float(row["mean_bps"]) for row in node_rows]
+    total_bits = sum(int(row["total_bits"]) for row in node_rows)
+    node_avg_tx_bps = [float(row["avg_tx_bps"]) for row in node_rows]
     network_row = {
         "graph_name": graph_name,
         "mesh_size": mesh_size,
         "node_count": len(node_rows),
         "duration_s": duration,
         "bucket_s": bucket_s,
-        "total_bits": sum(int(row["total_bits"]) for row in node_rows),
-        "mean_total_bps": mean(total_bps_by_bucket),
-        "max_total_bps": max(total_bps_by_bucket) if total_bps_by_bucket else 0.0,
-        "mean_node_mean_bps": mean(node_mean_bps),
-        "max_node_mean_bps": max(node_mean_bps) if node_mean_bps else 0.0,
-        "p50_node_mean_bps": percentile(node_mean_bps, 50),
-        "p90_node_mean_bps": percentile(node_mean_bps, 90),
-        "p95_node_mean_bps": percentile(node_mean_bps, 95),
-        "p99_node_mean_bps": percentile(node_mean_bps, 99),
+        "total_bits": total_bits,
+        "avg_total_tx_bps": total_bits / duration,
+        "max_total_tx_bps": max(total_bps_by_bucket) if total_bps_by_bucket else 0.0,
+        "avg_node_tx_bps": mean(node_avg_tx_bps),
+        "max_node_avg_tx_bps": max(node_avg_tx_bps) if node_avg_tx_bps else 0.0,
+        "p50_node_avg_tx_bps": percentile(node_avg_tx_bps, 50),
+        "p90_node_avg_tx_bps": percentile(node_avg_tx_bps, 90),
+        "p95_node_avg_tx_bps": percentile(node_avg_tx_bps, 95),
+        "p99_node_avg_tx_bps": percentile(node_avg_tx_bps, 99),
     }
     upsert_csv(out_dir / "maint_bps_network.csv", [network_row], NETWORK_FIELDS, ["graph_name"])
-    write_boxplot(out_dir / "maint_bps_nodes.csv", out_dir / "maint_bps_boxplot.png")
+    write_aggregate_plots(out_dir)
 
 
 def main() -> None:
@@ -340,7 +375,7 @@ def main() -> None:
     ap.add_argument(
         "--plot-only",
         action="store_true",
-        help="Regenerate the aggregate boxplot from maint_bps_nodes.csv and exit",
+        help="Regenerate aggregate plots from maint_bps_nodes.csv and exit",
     )
     args = ap.parse_args()
 
@@ -348,7 +383,7 @@ def main() -> None:
         raise ValueError("--bucket must be > 0")
 
     if args.plot_only:
-        write_boxplot(args.out_dir / "maint_bps_nodes.csv", args.out_dir / "maint_bps_boxplot.png")
+        write_aggregate_plots(args.out_dir)
         return
 
     graph_name = args.graph_name or args.emulation_dir.name
