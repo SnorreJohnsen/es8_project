@@ -4,7 +4,7 @@ import json
 from typing import Tuple, Optional, Dict, Any
 import re
 import matplotlib.pyplot as plt
-from collections import defaultdict
+from collections import defaultdict, Counter
 import numpy as np
 import seaborn as sns
 import pandas as pd
@@ -192,52 +192,119 @@ def extract_variable_full(data: dict,
     if nsperf_variable == "IDK":
         print(f"Still need implemenation for this NSPERF variable | {nsperf_variable=}")
         exit()
-    # NSPERF IS A STRING
+    # -------------------------
+    # SIMPLE STRING CASE
+    # -------------------------
     if isinstance(nsperf_variable, str):
         _, value = find_nsperf_variable(data, nsperf_variable)
-        if value is not None:
-            return round(value,2)
-        else:
-            return None
-    # NSPERF IS A TUPLE
-    if isinstance(nsperf_variable, list) and len(nsperf_variable) == 2:
-        _,value_1 = find_nsperf_variable(data=data,target=nsperf_variable[0])
-        _,value_2 = find_nsperf_variable(data=data,target=nsperf_variable[1])
+        value = round(value, 2) if value is not None else None
+        return value
+        # return value
 
-        if value_1 is None or value_2 is None:
-            print("Missing values in equation")
-            return None
-        else:
-            return value_1,value_2
+    
+    if not isinstance(nsperf_variable, list):
+        return None
 
-    if isinstance(nsperf_variable, list) and len(nsperf_variable) == 3:
-        _,value_1 = find_nsperf_variable(data=data,target=nsperf_variable[0])
-        sign = nsperf_variable[1]
-        _,value_2 = find_nsperf_variable(data=data,target=nsperf_variable[2])
 
-        if value_1 is None or value_2 is None or sign is None:
-            return None
-        value = calc_tuple_nsperf(key_1=value_1,key_2=value_2,sign=sign)
-        if value is not None:
-            return round(value,2)
-        else:
-            return None
-    if isinstance(nsperf_variable, list) and len(nsperf_variable) == 4:
-        _,value_1 = find_nsperf_variable(data=data,target=nsperf_variable[0])
-        sign = nsperf_variable[1]
-        _,value_2 = find_nsperf_variable(data=data,target=nsperf_variable[2])
+    # -------------------------
+    # HANDLE PARENTHESIS GROUPS
+    # -------------------------
+    while "(" in nsperf_variable:
 
-        if value_1 == 0:
+        start = None
+        end = None
+
+        for i, item in enumerate(nsperf_variable):
+            if item == "(":
+                start = i
+
+            if item == ")" and start is not None:
+                end = i
+                break
+
+        if start is None or end is None:
+            print("[WARN] Unmatched parentheses")
             return None
-        if value_1 is None or value_2 is None or sign is None:
-            print("Missing values in equation")
+
+        # extract inner expression
+        inner_expr = nsperf_variable[start + 1:end]
+
+        # recursively evaluate
+        inner_value = extract_variable_full(data, inner_expr)
+        if inner_value is None:
             return None
-        value = calc_tuple_nsperf(key_1=value_1,key_2=value_2,sign=sign)
-        value = float(nsperf_variable[3]) - value
-        if value is not None:
-            return round(value,2)
+
+        # replace "( ... )" with computed value
+        nsperf_variable = (
+            nsperf_variable[:start]
+            + [inner_value]
+            + nsperf_variable[end + 1:]
+        )
+
+    # -------------------------
+    # BASE VALUE EXTRACTION
+    # -------------------------
+    values = []
+    ops = []
+    for item in nsperf_variable:
+        # -------------------------
+        # OPERATOR CASE
+        # -------------------------
+        if isinstance(item, str) and item in {"+", "-", "*", "/"}:
+            ops.append(item)
+            continue
+        # -------------------------
+        # VALUE CASE (string key or constant)
+        # -------------------------
+        if isinstance(item, (int, float)):
+            values.append(item)
         else:
+            _, v = find_nsperf_variable(data, item)
+            if v is None:
+                print(f"[WARN] Missing key: {item} in {nsperf_variable}")
+                return None
+            if v == 0:
+                # Remove data points which don't desribe anything
+                # print(f"[WARN] Value is 0: {item} in {nsperf_variable}")
+                return None
+            values.append(v)
+
+    # -------------------------
+    # VALIDATION
+    # -------------------------
+    if len(values) == 0:
+        return None
+
+    if len(values) == 2 and len(ops) == 0:
+        return values[0], values[1]
+        #return None, values, []
+
+    # last element might be "expected value"
+    expected = None
+    if len(nsperf_variable) > 0 and isinstance(nsperf_variable[-1], (int, float)):
+        expected = values.pop()   # remove last value safely
+
+    if len(values) != len(ops) + 1:
+        print(f"[WARN] Mismatch values/operators: {nsperf_variable}")
+        return None
+
+    # -------------------------
+    # CALCULATION CHAIN
+    # -------------------------
+    result = values[0]
+
+    for i, op in enumerate(ops):
+        result = calc_tuple_nsperf(result, values[i + 1], op)
+        if result is None:
             return None
+
+    # -------------------------
+    # OPTIONAL FINAL TRANSFORM
+    # -------------------------
+    if expected is not None:
+        result = expected - result
+
+    return round(result, 2)
 
 def normalize_nsperf(name: str) -> str:
     return name.removeprefix("nsperf_")
@@ -525,6 +592,14 @@ def plot_violin(
         )
         for pc in ax.collections:
             pc.set_alpha(0.6)
+        
+        ax.legend(
+    title=f"{axis_labels[2]}",
+    loc="upper right",
+    fontsize=10,
+    title_fontsize=12,
+    frameon=True,
+    )
     else:
 
         sns.violinplot(
@@ -547,7 +622,6 @@ def plot_violin(
         fontsize=fontsize*1.5,
         pad=10
     )
-
     ax.set_xlabel(axis_labels[0], fontsize=fontsize)
     ax.set_ylabel(axis_labels[1], fontsize=fontsize)
     ax.tick_params(axis='both', labelsize=fontsize*0.8)
@@ -564,9 +638,9 @@ def plot_violin(
 
 def axis_units(axis_names: list) -> tuple[list,list]:
 
-    procent = ["link_loss","total_loss"]
+    procent = ["link_loss","loss_vs_transmit","loss_vs_scheduled","scheduled_vs_transmit_loss"]
     unitless = ["num_streams","hops","mesh_size"]
-    unit_mb = ["throughput","request_throughput"]
+    unit_mb = ["throughput","transmit_throughput","scheduled_throughput"]
     unit_time = ["latency","jitter"]
     units = []
     unit_scales = []
@@ -583,9 +657,9 @@ def axis_units(axis_names: list) -> tuple[list,list]:
             unitscale = 1e-6 #maybe change ot milli if to high numbers
         elif name in procent:
             unit = "[%]"
-            if name == procent[0]:
+            if name == "link_loss":
                 unitscale = 1
-            elif name == procent[1]:
+            else:
                 unitscale = 100
         else:
             unit = "[-]"
@@ -663,14 +737,18 @@ def plot_naming(axis_names: list[str],
                 percentile_matrixs: list[str],
                 percentile: str,
                 file_name: str,
-                stream_file_name: str) -> str:
+                stream_file_name: str,
+                constant_labels: str) -> str:
     percentile_str = ""
+    new_labels = [" ".join(label.split()[:2]) for label in constant_labels]
+    fixed_parameters = f"{' '.join(new_labels)}"
+    clean_labels = fixed_parameters.replace(":", "").replace(" ", "_")
 
     for name in axis_names:
         if name in percentile_matrixs:
             percentile_str += f"percentile_{percentile}_"
     axis_part = "_".join(axis_names)
-    plot_file_name = f"{file_name}_{percentile_str}axis_{axis_part}_{stream_file_name}"
+    plot_file_name = f"{file_name}_{percentile_str}axis_{axis_part}_{stream_file_name}_Fixed_{clean_labels}"
     return plot_file_name
 
 def plot_titling(
@@ -785,15 +863,17 @@ if __name__ == "__main__":
 
     variable_map  = []
     variable_map .append({"name": "link_loss", "aliases": ["link_loss", "link loss"], "nsperf": "link_loss"})                     #Need to change to just what's in graph
-    variable_map .append({"name": "total_loss", "aliases": ["total_loss", "total loss"], "nsperf": ["received_bits", "/", "generated_bits","1"]})
+    variable_map .append({"name": "loss_vs_transmit", "aliases": ["loss_vs_transmit", "loss_vs_trans"], "nsperf": ["received_bits", "/", "generated_bits",1]})
     variable_map .append({"name": "throughput", "aliases": ["throughput", "tp"], "nsperf": "received_bps"})
     variable_map .append({"name": "latency", "aliases": ["latency", "lat"], "nsperf": "host_local_latency_estimate_ns"})    #IDK if this is the right latency
     variable_map .append({"name": "jitter", "aliases": ["jitter", "jit"], "nsperf": "host_local_latency_jitter_abs_ns"})    #IDK if this is the right jitter
     variable_map .append({"name": "num_streams", "aliases": ["num_streams", "num streams"], "nsperf": ["send_start_ns", "send_end_ns"]})
-    variable_map .append({"name": "request_throughput", "aliases": ["request_throughput", "request throughput", "req_tp", "req tp"], "nsperf": "generated_bps"}) # NOT Sure if the right one
+    variable_map .append({"name": "transmit_throughput", "aliases": ["transmit_throughput", "transmit throughput","transmit_bps","tr_tp", "tra_tp"], "nsperf": "generated_bps"}) # NOT Sure if the right one
+    variable_map .append({"name": "scheduled_throughput", "aliases": ["scheduled_throughput", "sch_tp"], "nsperf": ["generated_bps","/","send_attempts","*","scheduled_packets_logged"]})
+    variable_map .append({"name": "loss_vs_scheduled", "aliases": ["loss_vs_scheduled", "scheduled_loss","loss_vs_sch"], "nsperf": ["received_bits","/","(","generated_bits","/","send_attempts","*","scheduled_packets_logged",")",1]})
     # variable_map .append({"name": "hops", "aliases": ["hops"], "nsperf": "IDK"})                                            # STILL NOT SURE IF POSSIBLE
     variable_map .append({"name": "mesh_size", "aliases": ["mesh_size", "mesh size"], "nsperf": "mesh_size"})                           #ALSO TAKE FROM GRAPH
-
+    variable_map .append({"name": "scheduled_vs_transmit_loss", "aliases": ["sch_vs_trans"], "nsperf": ["send_attempts","/","scheduled_packets_logged",1]})
     # sanity check if that varaible for axis are avaliable
     axis_names = []
     axis_nsperfs = []
@@ -941,12 +1021,15 @@ if __name__ == "__main__":
                     all_nsperf_values = {}
                     data["mesh_size"] = mesh_size
                     data["link_loss"] = link_loss
+                    
                     for variable in variable_map:
                             nsperf = variable["nsperf"]
                             name = variable["name"]
                             nsperf_value = extract_variable_full(data=data,nsperf_variable=nsperf)
+                            if name == "scheduled_throughput" or name == "transmit_throughput":
+                                nsperf_value = round(nsperf_value, -5)  #round to nearest 100k
                             #overwritting of requested throughput on streams
-                            if name == "request_throughput":
+                            if name == "scheduled_throughput":
                                 for split in exp["name"].split("_"):
                                     if split.lower().endswith("k"):
                                         nsperf_value = float(split[:-1]) * 1_000
@@ -964,6 +1047,7 @@ if __name__ == "__main__":
                                                 **all_nsperf_values,
                                                 "grid_type": grid_type
                                                 })
+                    # print(plot_data[grid_type][exp["name"]])
                     if client in req_client_local and server in req_server_local and verbosity is True:
                         if client != prev_client and first_client is False:
                             title = f" Client: {client} "
@@ -990,6 +1074,35 @@ if __name__ == "__main__":
     client_server = []
     files_not_used = []
     box_data = defaultdict(list)
+
+    sch_vs_req_tp = defaultdict(lambda: {
+    "total": 0,
+    "match": 0,
+    "mismatch": 0,
+    "trans_counts": Counter()
+    })
+
+    for grid_type, experiments in plot_data.items():
+        for exp_name, runs in experiments.items():
+            for entry in runs:
+
+                req_tp = entry.get("transmit_throughput")
+                sch_tp = entry.get("scheduled_throughput")
+
+                if req_tp is None or sch_tp is None:
+                    continue
+
+                bucket = round(sch_tp, -5)  # 100k binning ensures again
+
+                stats = sch_vs_req_tp[bucket]
+
+                stats["total"] += 1
+                stats["trans_counts"][req_tp] += 1
+
+                if req_tp == bucket:
+                    stats["match"] += 1
+                else:
+                    stats["mismatch"] += 1
 
     # first run til to extract the amount of num_streams there is during a stream
     for grid_type, experiments in plot_data.items():
@@ -1130,6 +1243,7 @@ if __name__ == "__main__":
     constant_names = list(global_constants.keys())
     units_for_constants, scales_for_constants = axis_units(axis_names=constant_names)
     scaled_constants = {}
+    print(global_constants)
     for name, scale in zip(constant_names, scales_for_constants):
         raw_value = global_constants[name]
         scaled_constants[name] = raw_value * scale
@@ -1178,8 +1292,24 @@ if __name__ == "__main__":
                     else:
                         print(f"Name: {exp_name} | Stream {entry['client']}-{entry['server']} Num: {entry["num"]} | Mesh Grid Type {grid_type} with {entry["mesh_size"]} Nodes | X: {x_value} | Y: {y_value}")
     print("=" * WIDTH)
+    print(f"Found {count} Entries which fit the filtering")
     print(f"Found {count} streams with specified client and server")
-  
+    
+    for sch_tp, stats in sorted(sch_vs_req_tp.items()):
+        total = stats["total"]
+
+        match_pct = (stats["match"] / total * 100) if total else 0
+
+        print("\n" + "-" * 50)
+        print(f"Scheduled TP: {sch_tp}")
+        print(f"Total samples : {total}")
+        print(f"Match rate    : {match_pct:.2f}%")
+        print(f"Match         : {stats["match"]}")
+        print(f"Mismatch      : {stats['mismatch']}")
+
+        print("Transmit distribution:")
+        for req_tp, count in sorted(stats["trans_counts"].items(), reverse=True):
+            print(f"   {req_tp:<10} -> {count}")
 
     for grid_type in req_client_grids:
 
@@ -1238,7 +1368,8 @@ if __name__ == "__main__":
                                  percentile_matrixs=percentile_matrixs,
                                  percentile=percentile,
                                  file_name=base_name,
-                                 stream_file_name=stream_file_name)
+                                 stream_file_name=stream_file_name,
+                                 constant_labels=constant_labels)
     plot_title,plot_under_title = plot_titling(stream=stream,
                               axis_names=axis_labels_naming,
                               percentile_matrixs=percentile_matrixs,
