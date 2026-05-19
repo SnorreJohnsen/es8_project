@@ -21,7 +21,6 @@ from pyvis_utils import (find_mac_path,
 
 from legacy_pyvis import legacy_pyvis
 
-
 adapter = []
 
 '''

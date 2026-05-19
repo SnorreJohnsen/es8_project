@@ -209,7 +209,6 @@ def setting_node_attributes(node_mac,
 #_______________________________ HTML FUNCTIONS ______________________________#
 ###############################################################################
 
-
 def build_injection(color_bar_title: str,
                     color_bar_data_links: list,
                     color_bar_data_nodes: list,
@@ -366,321 +365,16 @@ def build_injection(color_bar_title: str,
                 <div id="heatmap-bar"></div>
 
                 <div id="heatmap-labels">
-                    <span>""" + f"{format_unit(min_links)}" + """</span>
-                    <span>""" + f"{format_unit(q1_links)}" + """</span>
-                    <span>""" + f"{format_unit(median_links)}" + """</span>
-                    <span>""" + f"{format_unit(q3_links)}" + """</span>
-                    <span>""" + f"{format_unit(max_links)}" + """</span>
+                    <span>""" + f"{format_unit(min_links)}" +"%" + """</span>
+                    <span>""" + f"{format_unit(q1_links)}" + "%" + """</span>
+                    <span>""" + f"{format_unit(median_links)}" + "%" + """</span>
+                    <span>""" + f"{format_unit(q3_links)}" + "%" + """</span>
+                    <span>""" + f"{format_unit(max_links)}" + "%" + """</span>
                 </div>
             </div>
         </div>
     </div>
     """ + packet_info_html
-
-    return injection
-
-def accumulative_injection(color_bar_title: str,
-                           color_bar_data_links: list,
-                           color_bar_data_nodes: list,
-                           current_pkt,
-                           total_pkts,
-                           time,
-                           total_time):
-    # For links
-    arr_links = np.array(color_bar_data_links)
-    min_links = np.min(arr_links)
-    q1_links = np.percentile(arr_links, 25)
-    median_links = np.percentile(arr_links, 50)
-    q3_links = np.percentile(arr_links, 75)
-    max_links = np.max(arr_links)
-
-    # For nodes
-    arr_nodes = np.array(color_bar_data_nodes)
-    min_nodes = np.min(arr_nodes)
-    q1_nodes = np.percentile(arr_nodes, 25)
-    median_nodes = np.percentile(arr_nodes, 50)
-    q3_nodes = np.percentile(arr_nodes, 75)
-    max_nodes = np.max(arr_nodes)
-
-    injection = """
-        <script type="text/javascript">
-        window.addEventListener("load", function () {
-            if (typeof network !== "undefined") {
-
-                // FORCE stabilization immediately
-                network.stabilize(1000);
-
-                // After stabilization → fit and lock view
-                setTimeout(function () {
-                    network.fit({
-                        animation: {
-                            duration: 0
-                        }
-                    });
-
-                    // Optional: disable physics so it doesn't move again
-                    network.setOptions({ physics: false });
-
-                }, 100);
-            }
-        });
-        </script>
-        <style>
-        #heatmap-legend {
-            position: fixed;
-            top: 20px;
-            right: 30px;
-            width: 800px;
-            padding: 24px;
-            background: white;
-            border-radius: 18px;
-            font-family: Arial;
-            font-size: 28px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            z-index: 9999;
-        }
-        #heatmap-container {
-            display: flex;
-            align-items: center;
-            gap: 30px;
-        }
-        #heatmap-main {
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            height: 90px;
-            flex: 1;
-        }
-        #heatmap-bar {
-            height: 30px;
-            width: 100%;
-            border-radius: 10px;
-            background: linear-gradient(
-                to right,
-                rgb(0,0,255),
-                rgb(0,255,255),
-                rgb(0,255,0),
-                rgb(255,255,0),
-                rgb(255,0,0)
-            );
-        }
-        #heatmap-labels-top,
-        #heatmap-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 24px;
-        }
-        #heatmap-side-text {
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            height: 90px;
-            font-size: 24px;
-            font-weight: bold;
-            white-space: nowrap;
-        }
-        #packet-info {
-            position: fixed;
-            top: 20px;
-            left: 30px;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 16px 24px;
-            border-radius: 18px;
-            font-family: Arial;
-            font-size: 28px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-            z-index: 9999;
-        }
-
-        </style>
-        <div id="heatmap-legend">
-            <b>""" + f'{color_bar_title}' + """</b>
-            <div id="heatmap-container">
-                <div id="heatmap-side-text">
-                    <div>node</div>
-                    <div>link</div>
-                </div>
-                <div id="heatmap-main">
-                    <div id="heatmap-labels-top">
-                        <span>""" + f"{format_unit(min_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(q1_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(median_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(q3_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(max_nodes)}" + """</span>
-                    </div>
-
-                    <div id="heatmap-bar"></div>
-
-                    <div id="heatmap-labels">
-                        <span>""" + f"{format_unit(min_links)}" + """</span>
-                        <span>""" + f"{format_unit(q1_links)}" + """</span>
-                        <span>""" + f"{format_unit(median_links)}" + """</span>
-                        <span>""" + f"{format_unit(q3_links)}" + """</span>
-                        <span>""" + f"{format_unit(max_links)}" + """</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="packet-info">
-            <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
-            <div>Time of instance <b>""" + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
-        </div>
-        """
-    return injection
-
-def window_injection(color_bar_title: str,
-                     color_bar_data_links: list,
-                     color_bar_data_nodes: list,
-                     current_pkt: int,
-                     total_pkts: int,
-                     time: float,
-                     total_time: float,
-                     time_prev: float,
-                     packet_prev: int):
-
-    # For links
-    arr_links = np.array(color_bar_data_links)
-    min_links = np.min(arr_links)
-    q1_links = np.percentile(arr_links, 25)
-    median_links = np.percentile(arr_links, 50)
-    q3_links = np.percentile(arr_links, 75)
-    max_links = np.max(arr_links)
-
-    # For nodes
-    arr_nodes = np.array(color_bar_data_nodes)
-    min_nodes = np.min(arr_nodes)
-    q1_nodes = np.percentile(arr_nodes, 25)
-    median_nodes = np.percentile(arr_nodes, 50)
-    q3_nodes = np.percentile(arr_nodes, 75)
-    max_nodes = np.max(arr_nodes)
-
-    injection = """
-        <script type="text/javascript">
-        window.addEventListener("load", function () {
-            if (typeof network !== "undefined") {
-
-                // FORCE stabilization immediately
-                network.stabilize(1000);
-
-                // After stabilization → fit and lock view
-                setTimeout(function () {
-                    network.fit({
-                        animation: {
-                            duration: 0
-                        }
-                    });
-
-                    // Optional: disable physics so it doesn't move again
-                    network.setOptions({ physics: false });
-
-                }, 100);
-            }
-        });
-        </script>
-        <style>
-        #heatmap-legend {
-            position: fixed;
-            top: 20px;
-            right: 30px;
-            width: 800px;
-            padding: 24px;
-            background: white;
-            border-radius: 18px;
-            font-family: Arial;
-            font-size: 28px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            z-index: 9999;
-        }
-        #heatmap-container {
-            display: flex;
-            align-items: center;
-            gap: 30px;
-        }
-        #heatmap-main {
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            height: 90px;
-            flex: 1;
-        }
-        #heatmap-bar {
-            height: 30px;
-            width: 100%;
-            border-radius: 10px;
-            background: linear-gradient(
-                to right,
-                rgb(0,0,255),
-                rgb(0,255,255),
-                rgb(0,255,0),
-                rgb(255,255,0),
-                rgb(255,0,0)
-            );
-        }
-        #heatmap-labels-top,
-        #heatmap-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 24px;
-        }
-        #heatmap-side-text {
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            height: 90px;
-            font-size: 24px;
-            font-weight: bold;
-            white-space: nowrap;
-        }
-        #packet-info {
-            position: fixed;
-            top: 20px;
-            left: 30px;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 16px 24px;
-            border-radius: 18px;
-            font-family: Arial;
-            font-size: 28px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-            z-index: 9999;
-        }
-
-        </style>
-        <div id="heatmap-legend">
-            <b>""" + f'{color_bar_title}' + """</b>
-            <div id="heatmap-container">
-                <div id="heatmap-side-text">
-                    <div>node</div>
-                    <div>link</div>
-                </div>
-                <div id="heatmap-main">
-                    <div id="heatmap-labels-top">
-                        <span>""" + f"{format_unit(min_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(q1_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(median_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(q3_nodes)}" + """</span>
-                        <span>""" + f"{format_unit(max_nodes)}" + """</span>
-                    </div>
-
-                    <div id="heatmap-bar"></div>
-
-                    <div id="heatmap-labels">
-                        <span>""" + f"{format_unit(min_links)}" + """</span>
-                        <span>""" + f"{format_unit(q1_links)}" + """</span>
-                        <span>""" + f"{format_unit(median_links)}" + """</span>
-                        <span>""" + f"{format_unit(q3_links)}" + """</span>
-                        <span>""" + f"{format_unit(max_links)}" + """</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="packet-info">
-            <div> Packet interval <b>""" + f"{packet_prev}" + """ - """ + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts </div>
-            <div> Time of interval <b>""" + f"{time_prev:.2f}" + """ - """ + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
-            <div> UP/DOWN snapshot at <b>""" + f"{time:.2f}" + """</b> </div>
-        </div>
-        """
 
     return injection
 
@@ -864,8 +558,6 @@ def creation_of_pyvis(G,
             dt = max(time - time_prev, precision_number) # interval throughput
             bits = data.get("bits", 0)
             value = bits / dt
-            norm = normalize(w=value,min_w=min_links,max_w=max_links)
-            color = heatmap_color(norm=norm)
 
             phyrate_text = f"{phyrate:.2f}" if phyrate is not None else "N/A"
             loss_text = f"{loss_percent:.2f}" if loss_percent is not None else "N/A"
@@ -875,7 +567,10 @@ def creation_of_pyvis(G,
                 load_text = f"{load_percent:.3f}"
             else:
                 load_text = 'N/A'
-
+            
+            #norm = normalize(w=value,min_w=min_links,max_w=max_links)
+            norm = normalize(w=load_percent,min_w=0, max_w=100)
+            color = heatmap_color(norm=norm)
 
             print(f'src: {src:<3} | dst: {dst:<3} | phyrate: {str(phyrate):>6} Mbps | total: {format_unit(bits):>8}b | rate: {format_unit(value):>8}bps | dt: {dt:>6.2f} s | link load: {load_text:>6} %') 
             net.add_edge(
@@ -898,14 +593,17 @@ def creation_of_pyvis(G,
     # Save HTML (DO NOT use show)
     net.write_html(output_file)
 
-    color_bar_data_links = link_values
     color_bar_data_nodes = node_values
     if plot_type == 'tcp':
         color_bar_title = 'TCP packets transmitted on'
+        color_bar_data_links = link_values
     elif plot_type == 'udp':
         color_bar_title = 'UDP packets transmitted on'
+        color_bar_data_links = link_values
     elif plot_type == 'throughput':
         color_bar_title = 'Throughput [bps] on'
+        #color_bar_data_links = link_values # use for throughput on link
+        color_bar_data_links = [0, 25, 50, 75, 100] # use for relative link load
     
     # Inject auto-fit script
     with open(output_file, "r+", encoding="utf-8") as f:
