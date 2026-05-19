@@ -6,6 +6,7 @@ import time
 import glob
 import subprocess
 import shutil
+from tqdm import tqdm
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -383,7 +384,8 @@ def tracking_of_OGM2_at_source(*,
             throughput = None
             print(f"OGM Original Address at node id: {OGM2_node} with MAC address: {OGM2_orig_mac} | Broadcasted at node id: {src_node} with MAC Adress {eth_src}")
             print("------------------------------------------------------------------------------------------------------------")
-            for i, line in enumerate(f):
+            
+            for i, line in enumerate(tqdm(f, desc='Processing OGMv2', total=len(f))):
 
                 # get the relative time
                 parts = line.strip().split()
@@ -479,8 +481,8 @@ def all_link_throughput(*,
             anime_time = stepsize_anime
             first_time_tcp_packet = None
             first_before_stop = True
-
-            for i, line in enumerate(lines):
+            
+            for i, line in enumerate(tqdm(lines, desc="Throughput processing", total=len(lines))):
                 parts = line.strip().split()
                 time = float(clean(parts[2]))
                 if time < start_time:
@@ -617,7 +619,7 @@ def creation_of_edges_TCP(*,
             first_time_tcp_packet = None
             first_before_stop = True
 
-            for i, line in enumerate(lines):
+            for i, line in enumerate(tqdm(lines, desc=f'processing {plot_type}', total=len(lines))):
                 parts = line.strip().split()
                 time = float(clean(parts[2]))
                 if time < start_time:
