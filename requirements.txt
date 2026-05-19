@@ -4,3 +4,4 @@ tqdm>=4.67
 scipy>=1.16
 pandas
 pydantic>=2.12
+seaborn
