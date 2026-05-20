@@ -719,7 +719,7 @@ def creation_of_pyvis_topology(*,
             if loss is not None:
                 title += f"\nloss: {loss:.2f} %"
 
-            net.add_edge(src, dst, title=title, width=1, color="rgba(80,80,80,0.7)")
+            net.add_edge(src, dst, title=title, width=2, color="rgba(80,80,80,0.7)")
 
     net.write_html(output_file)
 
