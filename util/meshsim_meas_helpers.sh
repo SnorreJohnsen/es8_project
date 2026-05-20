@@ -181,6 +181,99 @@ msh_remove_nsperf_streams_tree() {
 		done
 }
 
+msh_analyze_access_node_fail() {
+	run_dir="$1"
+	analyze_script="$2"
+	python_exe="${3:-python3}"
+	aggregate_csv="${4:-}"
+
+	if [ -z "$run_dir" ] || [ -z "$analyze_script" ]; then
+		echo "usage: msh_analyze_access_node_fail RUN_DIR ANALYZE_SCRIPT [PYTHON_EXE] [AGGREGATE_CSV]" >&2
+		return 2
+	fi
+	if [ ! -d "$run_dir" ]; then
+		echo "access-node fail run directory not found: $run_dir" >&2
+		return 1
+	fi
+	if [ ! -f "$analyze_script" ]; then
+		echo "access-node fail analyzer script not found: $analyze_script" >&2
+		return 1
+	fi
+	if [ ! -f "$run_dir/sim_sched.json" ]; then
+		echo "sim schedule not found: $run_dir/sim_sched.json" >&2
+		return 1
+	fi
+	if [ ! -d "$run_dir/nsperf/streams/intervals" ]; then
+		echo "nsperf interval analysis directory not found: $run_dir/nsperf/streams/intervals" >&2
+		return 1
+	fi
+
+	echo "Analyzing access-node fail run: $run_dir"
+	if [ -n "$aggregate_csv" ]; then
+		"$python_exe" "$analyze_script" "$run_dir" --aggregate-csv "$aggregate_csv"
+	else
+		"$python_exe" "$analyze_script" "$run_dir"
+	fi
+}
+
+msh_analyze_access_node_fail_tree() {
+	src_dir="$1"
+	analyze_script="$2"
+	python_exe="${3:-python3}"
+
+	if [ -z "$src_dir" ] || [ -z "$analyze_script" ]; then
+		echo "usage: msh_analyze_access_node_fail_tree SRC_DIR ANALYZE_SCRIPT [PYTHON_EXE]" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+	if [ ! -f "$analyze_script" ]; then
+		echo "access-node fail analyzer script not found: $analyze_script" >&2
+		return 1
+	fi
+
+	aggregate_csv="$src_dir/access_node_fail_summary.csv"
+	find "$src_dir" -type f -name sim_sched.json |
+		sort |
+		while IFS= read -r sched_json; do
+			run_dir=$(dirname "$sched_json")
+			if [ ! -d "$run_dir/nsperf/streams/intervals" ]; then
+				echo "Skipping access-node fail run without nsperf intervals: $run_dir" >&2
+				continue
+			fi
+
+			msh_analyze_access_node_fail "$run_dir" "$analyze_script" \
+				"$python_exe" "$aggregate_csv" || exit $?
+		done
+}
+
+msh_remove_access_node_fail_analysis_tree() {
+	src_dir="$1"
+
+	if [ -z "$src_dir" ]; then
+		echo "usage: msh_remove_access_node_fail_analysis_tree SRC_DIR" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+
+	if [ -f "$src_dir/access_node_fail_summary.csv" ]; then
+		echo "Removing access-node fail aggregate: $src_dir/access_node_fail_summary.csv"
+		rm -f "$src_dir/access_node_fail_summary.csv" || return $?
+	fi
+
+	find "$src_dir" -type f \( -name access_node_fail_summary.json -o -name access_node_fail_throughput.png \) |
+		sort -r |
+		while IFS= read -r artifact; do
+			echo "Removing access-node fail analysis artifact: $artifact"
+			rm -f "$artifact" || exit $?
+		done
+}
+
 msh_analyze_net_stats() {
 	emulation_dir="$1"
 	net_stats_analyze_script="${2:-${NET_STATS_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/util/analyze_net_stats.py}}"

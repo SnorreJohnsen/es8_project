@@ -26,6 +26,7 @@ compress_program="${COMPRESS_PROGRAM:-pigz}"
 
 # Paths
 sched_script="${SCHED_SCRIPT:-$script_dir/sched.py}"
+analyze_script="${ANALYZE_SCRIPT:-$script_dir/analyze.py}"
 helpers_script="${HELPERS_SCRIPT:-$script_dir/../meshsim_meas_helpers.sh}"
 emulation_script="${EMULATION_SCRIPT:-/home/aau/meshsim/repo/emulation.py}"
 network_script="${NETWORK_SCRIPT:-/home/aau/meshsim/repo/meshnet-lab/network.py}"
@@ -104,6 +105,9 @@ for graph in $graphs; do
 				"$nsperf_analyze_script" "$PYTHON"
 
 			msh_finalize_emulation_output "$emulation_dir" "$result_dir" "$compress_program"
+
+			msh_analyze_access_node_fail "$result_dir" "$analyze_script" \
+				"$PYTHON" "$out_dir/access_node_fail_summary.csv"
 		done
 	done
 done
