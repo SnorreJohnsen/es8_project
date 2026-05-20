@@ -226,6 +226,9 @@ for graph in $graphs; do
 
 				i=$((i + 1))
 			done
+
+			msh_analyze_net_stats_details_tree "$graph_out_dir/$bitrate/$loss" \
+				"$net_stats_analyze_script" "$PYTHON"
 		done
 	done
 done

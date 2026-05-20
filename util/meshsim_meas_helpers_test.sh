@@ -97,10 +97,31 @@ assert uplink["tc"]["backlog_bytes"] == 8
 PY
 }
 
+assert_recursive_summary() {
+	summary_path="$1"
+	"$PYTHON" - "$summary_path" <<'PY'
+import csv
+import sys
+
+with open(sys.argv[1], newline="", encoding="utf-8") as f:
+    rows = {row["interface_type"]: row for row in csv.DictReader(f)}
+
+uplink = rows["batman_hardif"]
+assert uplink["interface_count"] == "2"
+assert float(uplink["ip_rx_bytes_avg"]) == 50.0
+assert float(uplink["ip_tx_bytes_avg"]) == 75.0
+assert float(uplink["ip_rx_dropped_avg"]) == 2.0
+assert float(uplink["ip_tx_dropped_avg"]) == 4.0
+assert float(uplink["tc_dropped_avg"]) == 3.0
+PY
+}
+
 single_dir="$tmp_dir/single"
 build_net_stats_fixture "$single_dir"
 msh_analyze_net_stats "$single_dir" "$net_stats_analyze_script" "$PYTHON"
 test -f "$single_dir/net_stats/details.json"
+test -f "$single_dir/net_stats/summary.csv"
+test -f "$single_dir/net_stats/net_stats_table.tex"
 assert_details "$single_dir/net_stats/details.json"
 
 tree_dir="$tmp_dir/tree"
@@ -110,9 +131,20 @@ mkdir -p "$tree_dir/incomplete/net_stats/before/ns-n0"
 
 msh_analyze_net_stats_tree "$tree_dir" "$net_stats_analyze_script" "$PYTHON"
 test -f "$tree_dir/run_01/net_stats/details.json"
+test -f "$tree_dir/run_01/net_stats/summary.csv"
+test -f "$tree_dir/run_01/net_stats/net_stats_table.tex"
 test -f "$tree_dir/nested/run_02/net_stats/details.json"
+test -f "$tree_dir/nested/run_02/net_stats/summary.csv"
+test -f "$tree_dir/nested/run_02/net_stats/net_stats_table.tex"
 test ! -e "$tree_dir/incomplete/net_stats/details.json"
+test ! -e "$tree_dir/incomplete/net_stats/summary.csv"
+test ! -e "$tree_dir/incomplete/net_stats/net_stats_table.tex"
 assert_details "$tree_dir/run_01/net_stats/details.json"
 assert_details "$tree_dir/nested/run_02/net_stats/details.json"
+
+msh_analyze_net_stats_details_tree "$tree_dir" "$net_stats_analyze_script" "$PYTHON"
+test -f "$tree_dir/net_stats_summary.csv"
+test -f "$tree_dir/net_stats_table.tex"
+assert_recursive_summary "$tree_dir/net_stats_summary.csv"
 
 echo "meshsim measurement helper tests passed"

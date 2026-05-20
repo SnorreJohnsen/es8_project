@@ -242,6 +242,28 @@ msh_analyze_net_stats_tree() {
 		done
 }
 
+msh_analyze_net_stats_details_tree() {
+	src_dir="$1"
+	net_stats_analyze_script="${2:-${NET_STATS_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/util/analyze_net_stats.py}}"
+	python_exe="${3:-python3}"
+
+	if [ -z "$src_dir" ]; then
+		echo "usage: msh_analyze_net_stats_details_tree SRC_DIR [NET_STATS_ANALYZE_SCRIPT] [PYTHON_EXE]" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+	if [ ! -f "$net_stats_analyze_script" ]; then
+		echo "net stats analyzer script not found: $net_stats_analyze_script" >&2
+		return 1
+	fi
+
+	echo "Aggregating net stats details tree: $src_dir -> $src_dir/net_stats_summary.csv"
+	"$python_exe" "$net_stats_analyze_script" --details-tree "$src_dir"
+}
+
 msh_pause_file_default() {
 	out_dir="$1"
 	echo "$out_dir/PAUSE"
