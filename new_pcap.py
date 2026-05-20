@@ -16,6 +16,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from pyvis_utils import (find_mac_path,
                          creation_of_pyvis,
+                         creation_of_pyvis_topology,
                          extract_node_info,
                          build_mac_lookup)
 
@@ -745,6 +746,68 @@ def creation_of_edges_TCP(*,
                         print("_______________________________________________________________________________")
     return G
 
+def render_topology_htmls(*,
+                          graph_json_path: str,
+                          addr_data: dict,
+                          output_dir: str,
+                          input_name: str = "topology",
+                          states: dict = None,
+                          browser_html: bool = False,
+                          png_enable: bool = True):
+    """
+    Create PyVis HTML(s) using only graph.json positions + links.
+    If states are given, produce one HTML per state-change time (plus t=0).
+    """
+
+    with open(graph_json_path, "r") as f:
+        graph_data = json.load(f)
+    
+    # Total amount of nodes from graph.json
+    num_nodes = sum(
+        1 for node in graph_data.get("nodes", [])
+        if node.get("id", "").startswith("n"))
+
+
+    # Determine snapshot times
+    snapshot_times = [0.0]
+    if states:
+        # collect all times from all nodes
+        all_times = sorted({t for node_events in states.values() for (t, _) in node_events})
+        snapshot_times.extend(all_times)
+
+    base_folder = os.path.join(output_dir, input_name)
+    Path(base_folder).mkdir(parents=True, exist_ok=True)
+
+    # Build a graph from topology links (node IDs, not MACs)
+    topo_edges = []
+    for link in graph_data.get("links", []):
+        src = link.get("source")
+        dst = link.get("target")
+        if src and dst:
+            topo_edges.append((src, dst, link))
+
+    for idx, t in enumerate(snapshot_times, start=1):
+
+        html_file = os.path.join(base_folder, f"topology_{num_nodes}_nodes.html")
+        png_file = os.path.join(base_folder, f"topology_{num_nodes}_nodes.png")
+
+        creation_of_pyvis_topology(
+            graph_data=graph_data,
+            addr_data=addr_data,
+            topo_edges=topo_edges,
+            time=t,
+            last_rendered_time=snapshot_times[idx-2] if idx > 1 else 0.0,
+            output_file=html_file,
+            states=states,
+            browser_html=browser_html
+        )
+
+        if png_enable:
+            print(f"Creating PNG: {png_file}")
+            html_to_png(html_file, png_file)
+
+    print(f"Topology HTML(s) saved in: {base_folder}")
+
 if __name__ == "__main__":
 
     default_start_time = 0
@@ -752,7 +815,7 @@ if __name__ == "__main__":
     default_interval = 5
 
     parser = argparse.ArgumentParser(description="What Parameters mean")
-    parser.add_argument("-i", "--input", type=str, help="Input file location | Either folder of pcaps, single pcap or txt file")
+    parser.add_argument("-i", "--input", type=str, default=None, help="Input file location | Either folder of pcaps, single pcap or txt file, or omit for topology only")
     parser.add_argument("-a", "--addresses", type=str, help="Json file including all associated adresses for the Nodes, Adapters, Devices (node_addr.json)")
     parser.add_argument("-g", "--graph", type=str, help="Json file including pos of nodes (graph.json)")
     parser.add_argument("-s", "--states", type=str, help="Json file for simulation schedule (reroute.json)")
@@ -785,6 +848,10 @@ if __name__ == "__main__":
     ogmv2_orig = args.ogmv2_originator
     ogmv2_eth_src = args.ogmv2_ethernet_source
     output_dir = args.output_dir
+
+    if method_type is None:
+        print("ERROR: -m/--method is required (e.g., topology, throughput, tcp)")
+        exit()
     method_type = method_type.strip().lower()
 
     states = None
@@ -808,7 +875,8 @@ if __name__ == "__main__":
     'udp': 'stream_graphs',
     'ogm': 'ogm_files',
     'ogmv2': 'ogm_files',
-    'ogm2': 'ogm_files'
+    'ogm2': 'ogm_files',
+    'topology': 'topology_graphs',
     }
 
     if method_type not in method_dirs:
@@ -816,6 +884,21 @@ if __name__ == "__main__":
         exit()
     
     subdir = method_dirs[method_type]
+
+    if method_type == "topology":
+        render_topology_htmls(
+            graph_json_path=graph_json,
+            addr_data=addr_data,
+            output_dir=output_dir,
+            input_name="topology",
+            states=states,
+            browser_html=enable_browser
+        )
+        exit()
+
+    if args.input is None:
+        print("ERROR: -i/--input is required for methods other than topology")
+        exit()
 
     if output_dir is None:
         output_dir = subdir

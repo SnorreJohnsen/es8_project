@@ -171,16 +171,16 @@ def setting_node_attributes(node_mac,
     if "a" in node_id:
         color = "red"
         #label = f"MAC: {node_mac}\nADAPTER: {node_id}"
-        label = f"ADAPTER: {node_id}"   # only use this for figure
+        label = f"{node_id}"   # only use this for figure
         shape = 'triangle'
     elif "n" in node_id:
         color = "blue"
         #label = f"MAC: {node_mac}\nNODE: {node_id}"
-        label = f"NODE: {node_id}"   # only use this for figure
+        label = f"{node_id}"   # only use this for figure
     elif "d" in node_id:
         color = "green" if plot_type == "throughput" else "blue"
         #label = f"MAC: {node_mac}\nDEVICE: {node_id}"
-        label = f"DEVICE: {node_id}"   # only use this for figure
+        label = f"{node_id}"   # only use this for figure
 
     if node_id in node_states:
 
@@ -636,4 +636,133 @@ def creation_of_pyvis(G,
         f.write(html)
         f.truncate()
     if browser_html is True:
+        webbrowser.open("file://" + os.path.abspath(output_file))
+
+def creation_of_pyvis_topology(*,
+                               graph_data: dict,
+                               addr_data: dict,
+                               topo_edges: list,
+                               time: float,
+                               last_rendered_time: float,
+                               output_file: str,
+                               states: dict = None,
+                               browser_html: bool = False,
+                               show_links: bool = False):
+    """
+    Topology-only PyVis: nodes from graph.json positions, edges from graph.json links.
+    States are applied for node styling, but no traffic heatmap is computed.
+    """
+
+    node_states = states if states else {}
+
+    net = Network(height="100vh", width="100vw", directed=True, bgcolor="white", font_color="black")
+    net.barnes_hut()
+    net.set_options("""var options = { "physics": { "enabled": false } }""")
+
+    # Reuse your existing node extraction (positions + interface MACs)
+    node_adapters_info = extract_node_info(graph_json=graph_data, addrs_json=addr_data)
+
+    # Add nodes
+    count_nodes = 0
+    count_adapters = 0
+    for node_id, info in node_adapters_info.items():
+        x = info.get("x", 0) / 20
+        y = info.get("y", 0) / 20
+        mac = info.get("mac")
+        if 'n' in node_id:
+            count_nodes += 1
+        if 'a' in node_id:
+            count_adapters += 1
+        label, shape, base_color = setting_node_attributes(
+            node_mac=mac,
+            node_id=node_id,
+            node_states=node_states,
+            last_rendered_time=last_rendered_time,
+            time=time,
+            plot_type="topology"
+        )
+
+        # In topology mode we keep role-colors (node/adapter/device) unless DOWN
+        # setting_node_attributes already turns DOWN black + square.
+        color = base_color
+
+        title = f"{node_id}"
+        if mac:
+            title += f"\nMAC: {mac}"
+        if info.get("interfaces"):
+            title += "\n\nInterfaces:\n" + "\n".join([f"{k}: {v}" for k, v in info["interfaces"].items()])
+
+        net.add_node(
+            node_id,
+            label=label,
+            size=12,
+            title=title,
+            color=color,
+            x=x,
+            y=y,
+            physics=False,
+            shape=shape
+        )
+    # Add edges from graph.json links (with optional metrics)
+    #if show_links:
+    link_info = extract_link_metrics(graph_json=graph_data, bidirectional=False)
+    for src, dst, link_raw in topo_edges:
+        if 'a' in src:
+            metrics = link_info.get((src, dst), {})
+            phyrate = metrics.get("phyrate_mbps")
+            loss = metrics.get("loss_percent")
+
+            title = f"{src} → {dst}"
+            if phyrate is not None:
+                title += f"\nphyrate: {phyrate:.2f} Mbps"
+            if loss is not None:
+                title += f"\nloss: {loss:.2f} %"
+
+            net.add_edge(src, dst, title=title, width=1, color="rgba(80,80,80,0.7)")
+
+    net.write_html(output_file)
+
+    # Optional simple injection (no heatmap)
+    injection = f"""
+    <script type="text/javascript">
+    window.addEventListener("load", function () {{
+        if (typeof network !== "undefined") {{
+            network.stabilize(800);
+            setTimeout(function () {{
+                network.fit({{ animation: {{ duration: 0 }} }});
+                network.setOptions({{ physics: false }});
+            }}, 100);
+        }}
+    }});
+    </script>
+
+    <style>
+    #topology-info {{
+        position: fixed;
+        top: 20px;
+        left: 30px;
+        background: rgba(255, 255, 255, 0.92);
+        padding: 16px 24px;
+        border-radius: 18px;
+        font-family: Arial;
+        font-size: 28px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        z-index: 9999;
+    }}
+    </style>
+
+    <div id="topology-info">
+        <div><b>Topology snapshot</b></div>
+        <div><b>Mesh Size: {count_nodes} nodes, {count_adapters} adapters</b></div>
+    </div>
+    """
+
+    with open(output_file, "r+", encoding="utf-8") as f:
+        html = f.read()
+        html = html.replace("</body>", injection + "\n</body>")
+        f.seek(0)
+        f.write(html)
+        f.truncate()
+
+    if browser_html:
         webbrowser.open("file://" + os.path.abspath(output_file))
