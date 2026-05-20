@@ -384,7 +384,7 @@ def tracking_of_OGM2_at_source(*,
             print(f"OGM Original Address at node id: {OGM2_node} with MAC address: {OGM2_orig_mac} | Broadcasted at node id: {src_node} with MAC Adress {eth_src}")
             print("------------------------------------------------------------------------------------------------------------")
             
-            for i, line in enumerate(tqdm(f, desc='Processing OGMv2', total=len(f))):
+            for i, line in enumerate(f):
 
                 # get the relative time
                 parts = line.strip().split()

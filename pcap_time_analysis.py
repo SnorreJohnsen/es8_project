@@ -139,7 +139,7 @@ if __name__ == "__main__":
     total_packets = get_packet_count(pcap_file=pcap_file)
     desired_packets = sorted(set(
         min(x, total_packets)
-        for x in [1_000, 10_000, 100_000, 1_000_000, total_packets]))
+        for x in [total_packets]))
     print(f'{desired_packets=}')
  
     # Save txt file
