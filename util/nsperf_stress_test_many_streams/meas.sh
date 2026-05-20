@@ -10,7 +10,8 @@ out_dir="${2:-/home/aau/meshsim/output/nsperf_stress_test_many_streams}"
 
 # Run controls. Override these with environment variables for smaller runs.
 losses="${LOSSES:-0}"
-target_bitrates="${TARGET_BITRATES:-100k 500k 1M 2M 5M}"
+#target_bitrates="${TARGET_BITRATES:-100k 500k 1M 2M 5M}"
+target_bitrates="${TARGET_BITRATES:-1M 2M 5M}"
 iterations="${ITERATIONS:-10}"
 num_streams_sequence="${NUM_STREAMS_SEQUENCE:-1 2 4 6 8 10 15 20 25 30 40}"
 graph_pattern="${GRAPH_PATTERN:-triangle_*_nodes.json}"
@@ -19,10 +20,10 @@ adapter_rows="${ADAPTER_ROWS:-3}"
 adapter_cols="${ADAPTER_COLS:-7}"
 adapter_z="${ADAPTER_Z:-0}"
 stream_duration="${STREAM_DURATION:-10}"
-silence="${SILENCE:-30}"
-start_time="${START_TIME:-10}"
+silence="${SILENCE:-15}"
+start_time="${START_TIME:-80}"
 seed_base="${SEED_BASE:-nsperf_stress_test_many_streams}"
-verbosity="${VERBOSITY:-verbose}"
+verbosity="${VERBOSITY:-normal}"
 compress_program="${COMPRESS_PROGRAM:-pigz}"
 
 # Paths
