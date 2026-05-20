@@ -691,18 +691,19 @@ def creation_of_pyvis_topology(*,
             title += f"\nMAC: {mac}"
         if info.get("interfaces"):
             title += "\n\nInterfaces:\n" + "\n".join([f"{k}: {v}" for k, v in info["interfaces"].items()])
-
+    
         net.add_node(
             node_id,
-            label=label,
-            size=12,
-            title=title,
+            label=" ",
+            title=" ",
+            size=14,
             color=color,
             x=x,
             y=y,
             physics=False,
             shape=shape
         )
+
     # Add edges from graph.json links (with optional metrics)
     #if show_links:
     link_info = extract_link_metrics(graph_json=graph_data, bidirectional=False)
@@ -745,7 +746,7 @@ def creation_of_pyvis_topology(*,
         padding: 16px 24px;
         border-radius: 18px;
         font-family: Arial;
-        font-size: 28px;
+        font-size: 46px;
         box-shadow: 0 2px 6px rgba(0,0,0,0.2);
         z-index: 9999;
     }}
