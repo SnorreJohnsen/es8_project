@@ -119,6 +119,8 @@ sim_sched_json_path = os.path.join(output_root, "sim_sched.json")
 IPERF3_REF_PORT = 60000 # start port for iperf3
 NSPERF_PORT = 50000
 
+NODE_UPLINK_MACS = {}
+
 # Simulation schedule types
 class IperfEvent(BaseModel):
     iperf_header: str
@@ -499,7 +501,7 @@ def start_batadv(node_name: str, version5: bool = True, tid = None):
 
 def battp_set_link_throughput(n1: str, n2: str, tp: float):
     """
-    use battpctl to set link throughput in both directions between two nodes.
+    use battpctl to set link throughput in one direction between two nodes.
 
     Parameters
     ----------
@@ -514,13 +516,10 @@ def battp_set_link_throughput(n1: str, n2: str, tp: float):
     remote = None
 
     # get n1 and n2 MAC address
-    bat_mac_cmd = "ip -o -brief link show uplink | awk '{print $3}'"
-    n1_mac = exec(tid, remote, f'ip netns exec "ns-{n1}" {bat_mac_cmd}', get_output=True)[0].strip() # [0] to only get stdout
-    n2_mac = exec(tid, remote, f'ip netns exec "ns-{n2}" {bat_mac_cmd}', get_output=True)[0].strip()
+    n2_mac = NODE_UPLINK_MACS[n2]
 
     # set throughput limit in both directions (*10 is to go from unit Mbit to 100kbit)
     exec(tid, remote, f'ip netns exec "ns-{n1}" battpctl set bat0 uplink {n2_mac} {int(tp*10)} || true')
-    exec(tid, remote, f'ip netns exec "ns-{n2}" battpctl set bat0 uplink {n1_mac} {int(tp*10)} || true')
 
 def batctl_set_neigh_throughputs(graph: dict):
     """
@@ -533,6 +532,7 @@ def batctl_set_neigh_throughputs(graph: dict):
     """
     for link in graph["links"]:
         battp_set_link_throughput(n1=link["source"], n2=link["target"], tp=float(link["phyrate_mbps"]))
+        battp_set_link_throughput(n1=link["target"], n2=link["source"], tp=float(link["phyrate_mbps"]))
 
 def get_node_addrs(node_id: str, cmd: str):
     """
@@ -583,6 +583,12 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
             "ipv6": get_node_addrs(node_id, get_ipv6_cmd),
             "mac": get_node_addrs(node_id, get_macs_cmd) 
             }
+        
+        try:
+            uplink_name = next(filter(lambda x: x.startswith("uplink"), addrs_json[node_id]["mac"].keys()))
+            NODE_UPLINK_MACS[node_id] = addrs_json[node_id][uplink_name]
+        except:
+            pass # skip populating NODE_UPLINK_MACS if node doesn't have uplink
     with open(node_addrs_json_path, "w") as f:
         json.dump(addrs_json, f)
 
@@ -634,10 +640,11 @@ def set_node_up(node_name: str, graph: dict):
     start_batadv(node_name, version5=True, tid=tid)
     exec(tid, remote, f'ip netns exec "ns-{node_name}" ip link set uplink up', get_output=True) # get_output=True -> syncronous guard
 
-    filt = lambda link: link["source"] == node_name or link["target"] == node_name
-    links = filter(filt, graph["links"])
-    for link in links:
-        battp_set_link_throughput(link["source"], link["target"], float(link["phyrate_mbps"]))
+    for link in graph["links"]:
+        if node_name == link["source"]:
+            battp_set_link_throughput(node_name, link["target"], float(link["phyrate_mbps"]))
+        elif node_name == link["target"]:
+            battp_set_link_throughput(node_name, link["source"], float(link["phyrate_mbps"]))
 
 def gen_dropout_sched(nodes: list[str], t_start_step: float, t_sim_end: float, params: DropoutParams|DropoutUpDownOnlyParams) -> list[SchedEntry]:
     """
