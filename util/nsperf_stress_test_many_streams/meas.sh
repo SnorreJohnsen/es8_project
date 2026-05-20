@@ -34,6 +34,7 @@ place_adapters_script="${PLACE_ADAPTERS_SCRIPT:-/home/aau/meshsim/repo/mesh_plac
 emulation_script="${EMULATION_SCRIPT:-/home/aau/meshsim/repo/emulation.py}"
 network_script="${NETWORK_SCRIPT:-/home/aau/meshsim/repo/meshnet-lab/network.py}"
 nsperf_analyze_script="${NSPERF_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/nsperf/tools/analyze.py}"
+net_stats_analyze_script="${NET_STATS_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/util/analyze_net_stats.py}"
 emulation_dir="${EMULATION_DIR:-${PCAP_DIR:-/home/aau/meshsim/output/emulation}}"
 PYTHON="${PYTHON_EXE:-python3}"
 runtime_fixed="${RUNTIME_FIXED:-60}"
@@ -197,6 +198,8 @@ for graph in $graphs; do
 				msh_analyze_all_nsperf "$emulation_dir/nsperf/raw" \
 					"$emulation_dir/nsperf/streams" \
 					"$nsperf_analyze_script" "$PYTHON"
+
+				msh_analyze_net_stats "$emulation_dir" "$net_stats_analyze_script" "$PYTHON"
 
 				msh_finalize_emulation_output "$emulation_dir" "$result_dir" "$compress_program"
 

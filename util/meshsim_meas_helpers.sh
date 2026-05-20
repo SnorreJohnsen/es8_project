@@ -181,6 +181,67 @@ msh_remove_nsperf_streams_tree() {
 		done
 }
 
+msh_analyze_net_stats() {
+	emulation_dir="$1"
+	net_stats_analyze_script="${2:-${NET_STATS_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/util/analyze_net_stats.py}}"
+	python_exe="${3:-python3}"
+
+	if [ -z "$emulation_dir" ]; then
+		echo "usage: msh_analyze_net_stats EMULATION_DIR [NET_STATS_ANALYZE_SCRIPT] [PYTHON_EXE]" >&2
+		return 2
+	fi
+	if [ ! -d "$emulation_dir" ]; then
+		echo "emulation directory not found: $emulation_dir" >&2
+		return 1
+	fi
+	if [ ! -f "$net_stats_analyze_script" ]; then
+		echo "net stats analyzer script not found: $net_stats_analyze_script" >&2
+		return 1
+	fi
+	if [ ! -d "$emulation_dir/net_stats/before" ]; then
+		echo "net stats before snapshot directory not found: $emulation_dir/net_stats/before" >&2
+		return 1
+	fi
+	if [ ! -d "$emulation_dir/net_stats/after" ]; then
+		echo "net stats after snapshot directory not found: $emulation_dir/net_stats/after" >&2
+		return 1
+	fi
+
+	echo "Analyzing net stats: $emulation_dir -> $emulation_dir/net_stats/details.json"
+	"$python_exe" "$net_stats_analyze_script" "$emulation_dir"
+}
+
+msh_analyze_net_stats_tree() {
+	src_dir="$1"
+	net_stats_analyze_script="${2:-${NET_STATS_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/util/analyze_net_stats.py}}"
+	python_exe="${3:-python3}"
+
+	if [ -z "$src_dir" ]; then
+		echo "usage: msh_analyze_net_stats_tree SRC_DIR [NET_STATS_ANALYZE_SCRIPT] [PYTHON_EXE]" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+	if [ ! -f "$net_stats_analyze_script" ]; then
+		echo "net stats analyzer script not found: $net_stats_analyze_script" >&2
+		return 1
+	fi
+
+	find "$src_dir" -type d -path "*/net_stats/before" |
+		sort |
+		while IFS= read -r before_dir; do
+			net_stats_dir="${before_dir%/before}"
+			emulation_dir="${net_stats_dir%/net_stats}"
+			if [ ! -d "$net_stats_dir/after" ]; then
+				continue
+			fi
+
+			msh_analyze_net_stats "$emulation_dir" "$net_stats_analyze_script" "$python_exe" || exit $?
+		done
+}
+
 msh_pause_file_default() {
 	out_dir="$1"
 	echo "$out_dir/PAUSE"

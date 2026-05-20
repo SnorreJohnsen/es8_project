@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from pydantic_core import from_json, to_json
 
 from drop_model import DropoutEvent, DropoutParams, DropoutUpDownOnlyParams, MultipleDroneSim, SimpleDroneSim, State
+from util.net_stats_snapshot import parse_interface_names, parse_sysfs_stats, split_ip_link_show, split_tc_qdisc_show
 
 sim_root = "/home/aau/meshsim/"
 repo_root = os.path.join(sim_root, "repo")
@@ -109,6 +110,7 @@ output_root = os.path.join(sim_root, "output", "emulation")
 iperf3_dir = os.path.join(output_root, "iperf3", "raw")
 nsperf_dir = os.path.join(output_root, "nsperf", "raw")
 pcap_dir = os.path.join(output_root, "pcaps", "raw")
+net_stats_dir = os.path.join(output_root, "net_stats")
 node_addrs_json_path = os.path.join(output_root, "node_addrs.json")
 graph_json_path = os.path.join(output_root, "graph.json")
 sim_sched_json_path = os.path.join(output_root, "sim_sched.json")
@@ -819,22 +821,155 @@ def run_sim_sched(graph: dict, sched: list[SchedEntry], duration: float) -> Sim:
 
     return Sim(start_timestamp=t_start.timestamp(), duration=duration, sched_plan=sched_sorted, sched_real=sched_real)
 
+def shell_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+def run_snapshot_command(command: str) -> tuple[str, str, int]:
+    tid = get_thread_id()
+    remote = None
+    stdout, stderr, rcode = exec(tid, remote, command, get_output=True, ignore_error=True)
+    return stdout, stderr, rcode
+
+def list_net_namespaces() -> list[str]:
+    stdout, stderr, rcode = run_snapshot_command("ip netns list")
+    if rcode != 0:
+        if verbosity != "quiet":
+            print(f"Could not list network namespaces for stats snapshot: {stderr.strip()}")
+        return []
+
+    namespaces = []
+    for line in stdout.splitlines():
+        parts = line.split()
+        if parts:
+            namespaces.append(parts[0])
+    return namespaces
+
+def list_net_namespace_interfaces(namespace: str) -> list[str]:
+    command = f"ip netns exec {shell_quote(namespace)} ip -o link show"
+    stdout, stderr, rcode = run_snapshot_command(command)
+    if rcode != 0:
+        if verbosity != "quiet":
+            print(f"Could not list interfaces in namespace {namespace}: {stderr.strip()}")
+        return []
+
+    return parse_interface_names(stdout)
+
+def write_command_snapshot(path: str, timestamp: str, namespace: str, ifname: str,
+                           command: str, stdout: str, stderr: str, rcode: int,
+                           source_command: str | None = None):
+    with open(path, "w") as f:
+        f.write(f"timestamp: {timestamp}\n")
+        f.write(f"namespace: {namespace}\n")
+        f.write(f"interface: {ifname}\n")
+        f.write(f"command: {command}\n")
+        if source_command is not None and source_command != command:
+            f.write(f"source_command: {source_command}\n")
+        f.write(f"returncode: {rcode}\n")
+        f.write("\nstdout:\n")
+        f.write(stdout)
+        if stdout and not stdout.endswith("\n"):
+            f.write("\n")
+        f.write("\nstderr:\n")
+        f.write(stderr)
+        if stderr and not stderr.endswith("\n"):
+            f.write("\n")
+
+def read_namespace_sysfs_stats(namespace: str) -> dict[str, dict[str, int]]:
+    script = (
+        'for iface_path in /sys/class/net/*; do '
+        'iface="${iface_path##*/}"; '
+        '[ "$iface" = "lo" ] && continue; '
+        'for stat_path in "$iface_path/statistics/"*; do '
+        '[ -e "$stat_path" ] || continue; '
+        'stat_name="${stat_path##*/}"; '
+        'stat_value="$(cat "$stat_path" 2>/dev/null)"; '
+        'printf "%s %s %s\\n" "$iface" "$stat_name" "$stat_value"; '
+        'done; '
+        'done'
+    )
+    command = (
+        f"ip netns exec {shell_quote(namespace)} "
+        f"sh -c {shell_quote(script)}"
+    )
+    stdout, _, _ = run_snapshot_command(command)
+    return parse_sysfs_stats(stdout)
+
+def snapshot_net_stats(phase: str):
+    """
+    Dump raw network interface statistics for all named netns interfaces.
+
+    The raw ip/tc files include command metadata and unparsed stdout/stderr.
+    The sysfs JSON intentionally contains only statistic-name keys and integer
+    counter values for later analysis.
+    """
+    if phase not in ["before", "after"]:
+        raise ValueError(f"Invalid net stats snapshot phase: {phase}")
+
+    globalTerminalGroup.waitForCompletion()
+
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    phase_dir = os.path.join(net_stats_dir, phase)
+    os.makedirs(phase_dir, exist_ok=True)
+
+    for namespace in list_net_namespaces():
+        ns_dir = os.path.join(phase_dir, namespace)
+        os.makedirs(ns_dir, exist_ok=True)
+
+        interfaces = list_net_namespace_interfaces(namespace)
+        ip_bulk_command = f"ip netns exec {shell_quote(namespace)} ip -s link show"
+        tc_bulk_command = f"ip netns exec {shell_quote(namespace)} tc -s qdisc show"
+
+        ip_stdout, ip_stderr, ip_rcode = run_snapshot_command(ip_bulk_command)
+        tc_stdout, tc_stderr, tc_rcode = run_snapshot_command(tc_bulk_command)
+
+        ip_blocks = split_ip_link_show(ip_stdout)
+        tc_blocks = split_tc_qdisc_show(tc_stdout)
+        sysfs_stats = read_namespace_sysfs_stats(namespace)
+
+        for ifname in interfaces:
+            ip_command = (
+                f"ip netns exec {shell_quote(namespace)} "
+                f"ip -s link show dev {shell_quote(ifname)}"
+            )
+            tc_command = (
+                f"ip netns exec {shell_quote(namespace)} "
+                f"tc -s qdisc show dev {shell_quote(ifname)}"
+            )
+
+            write_command_snapshot(
+                    os.path.join(ns_dir, f"{ifname}_ip.txt"),
+                    timestamp, namespace, ifname, ip_command,
+                    ip_blocks.get(ifname, ""), ip_stderr, ip_rcode,
+                    source_command=ip_bulk_command,
+                    )
+            write_command_snapshot(
+                    os.path.join(ns_dir, f"{ifname}_tc.txt"),
+                    timestamp, namespace, ifname, tc_command,
+                    tc_blocks.get(ifname, ""), tc_stderr, tc_rcode,
+                    source_command=tc_bulk_command,
+                    )
+
+            stats = sysfs_stats.get(ifname, {})
+            with open(os.path.join(ns_dir, f"{ifname}_sysfs.json"), "w") as f:
+                json.dump(stats, f, indent=2, sort_keys=True)
+                f.write("\n")
+
 def setup_output_dirs():
     """
     Setup of output directories. 
 
     Existing directories are removed before new ones are created.
     """
-    try:
-        shutil.rmtree(pcap_dir)
-        shutil.rmtree(iperf3_dir)
-        shutil.rmtree(nsperf_dir)
-    except FileNotFoundError as e:
-        pass
+    for path in [pcap_dir, iperf3_dir, nsperf_dir, net_stats_dir]:
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError as e:
+            pass
 
     os.makedirs(exist_ok=False, name=pcap_dir)
     os.makedirs(exist_ok=False, name=iperf3_dir)
     os.makedirs(exist_ok=False, name=nsperf_dir)
+    os.makedirs(exist_ok=False, name=net_stats_dir)
 
 def load_graph(args, verbosity):
     """
@@ -1153,6 +1288,8 @@ def setup_simulation_environment(args, pcap_dir, verbosity):
     # Make json files for IP addrs and MAC addrs overview
     get_all_addrs(graph, device_ids)
 
+    snapshot_net_stats("before")
+
     if verbosity != "quiet":
         print("Wait for batman-adv to be ready")
     time.sleep(10) # wait for batman to be ready
@@ -1196,6 +1333,7 @@ def main():
     if verbosity == "verbose":
         print(f"Schedule: {sched}")
     sim = run_sim_sched(graph=graph, sched=sched, duration=duration)
+    snapshot_net_stats("after")
     with open(sim_sched_json_path, "wb") as f:
         f.write(to_json(sim))
 
