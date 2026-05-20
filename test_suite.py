@@ -4,468 +4,53 @@ from pathlib import Path
 from tqdm import tqdm
 
 # ── Output root ───────────────────────────────────────────────────────────────
-OUTPUT_ROOT = Path("./test_output")
+OUTPUT_ROOT = Path("./test_output_stress_beast")
 
 # ── Input directories to analyse ─────────────────────────────────────────────
 INPUT_DIRS = [
-    Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_1000startdelay"),
-    Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_flyvfart"),
+    #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_1000startdelay"),
+    Path(r"C:\Repositeries\ES8-Semester\Project-ES8\stress_beast"),
+    #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_flyvfart"),
 ]
 
-# ── Plot specifications ───────────────────────────────────────────────────────
-# Each entry produces one plot run per input directory.
-#
-# Required keys : percentile, x, y
-# Optional keys : hue, client, server, filters (dict of variable=value)
-#
-# Available variables: link_loss, throughput, latency, jitter, num_streams,
-#                      transmit_throughput, scheduled_throughput,
-#                      loss_vs_transmit, loss_vs_scheduled,
-#                      scheduled_vs_transmit_loss, mesh_size
+# ── Axis / filter values to sweep over ───────────────────────────────────────
+#SCHEDULED_THROUGHPUTS = ["100K", "500K", "1M", "2M", "5M"]
+SCHEDULED_THROUGHPUTS = ["1M", "2M", "5M"]
+MESH_SIZES            = ["18", "27", "38", "46"]
 
-PLOT_SPECS = [
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "100K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "500K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "1M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "2M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "5M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "100K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "500K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "1M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "2M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "5M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "100K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "500K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "1M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "2M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "5M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "100K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "500K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "1M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "2M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "5M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "100K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "500K"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "1M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "2M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "5M"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "100K"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "500K"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "1M"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "2M"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "5M"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "100K"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "500K"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "1M"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "2M"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "meshsize",
-        "filters": {"scheduled_throughput": "5M"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "18"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "27"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "38"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_transmit",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "46"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "18"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "27"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "38"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "loss_vs_scheduled",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "46"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "18"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "27"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "38"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "scheduled_vs_transmit_loss",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "46"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "18"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "27"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "38"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "throughput",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "46"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "18"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "27"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "38"},
-    },
-    {
-        "percentile": "95",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "46"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "18"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "27"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "38"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "latency",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "46"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "18"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "27"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "38"},
-    },
-    {
-        "percentile": "mean",
-        "x": "num_streams",
-        "y": "jitter",
-        "hue": "scheduled_throughput",
-        "filters": {"mesh_size": "46"},
-    },
+# (y_variable, percentile) pairs to generate for each sweep
+Y_SPECS = [
+    ("loss_vs_transmit",          "95"),
+    ("loss_vs_scheduled",         "95"),
+    ("scheduled_vs_transmit_loss","95"),
+    ("throughput",                "95"),
+    ("latency",                   "95"),
+    ("latency",                   "mean"),
+    ("jitter",                    "mean"),
 ]
+
+# ── Plot specifications (auto-generated) ──────────────────────────────────────
+PLOT_SPECS = []
+
+for y, perc in Y_SPECS:
+    for sch_tp in SCHEDULED_THROUGHPUTS:
+        PLOT_SPECS.append({
+            "percentile": perc,
+            "x": "num_streams",
+            "y": y,
+            "hue": "meshsize",
+            "filters": {"scheduled_throughput": sch_tp},
+        })
+
+for y, perc in Y_SPECS:
+    for ms in MESH_SIZES:
+        PLOT_SPECS.append({
+            "percentile": perc,
+            "x": "num_streams",
+            "y": y,
+            "hue": "scheduled_throughput",
+            "filters": {"mesh_size": ms},
+        })
 
 # ── Optional global flags ─────────────────────────────────────────────────────
 VERBOSE = False
