@@ -586,7 +586,7 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
         
         try:
             uplink_name = next(filter(lambda x: x.startswith("uplink"), addrs_json[node_id]["mac"].keys()))
-            NODE_UPLINK_MACS[node_id] = addrs_json[node_id][uplink_name]
+            NODE_UPLINK_MACS[node_id] = addrs_json[node_id]["mac"][uplink_name]
         except:
             pass # skip populating NODE_UPLINK_MACS if node doesn't have uplink
 
