@@ -4,16 +4,20 @@ import argparse
 import csv
 import json
 import math
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
 
 CSV_FIELDS = [
-    "graph_name",
-    "stream",
-    "loss",
-    "access_node",
+    "result_set",
+    "run_name",
+    "run_dir",
+    "stream_id",
+    "nsperf_header",
+    "failed_node",
     "client",
     "server",
     "requested_bps",
@@ -24,19 +28,61 @@ CSV_FIELDS = [
     "actual_active_time_s",
     "active_delay_s",
     "outage_duration_s",
-    "settled",
-    "settled_sim_time_s",
-    "settle_time_s",
-    "tolerance_fraction",
-    "sustain_seconds",
-    "sustain_intervals",
+    "slow_route_detected",
+    "slow_route_sim_time_s",
+    "failure_to_slow_route_s",
+    "fast_route_detected",
+    "fast_route_sim_time_s",
+    "active_to_fast_route_s",
+    "slow_threshold_bps",
+    "fast_threshold_fraction",
+    "fast_threshold_bps",
+    "fast_sustain_seconds",
+    "fast_sustain_intervals",
     "interval_seconds",
-    "pre_drop_avg_received_bps",
-    "outage_avg_received_bps",
+    "pre_failure_avg_received_bps",
+    "dropout_avg_received_bps",
+    "slow_route_avg_received_bps",
     "post_active_avg_received_bps",
-    "pre_drop_interval_count",
-    "outage_interval_count",
+    "pre_failure_interval_count",
+    "dropout_interval_count",
+    "slow_route_interval_count",
     "post_active_interval_count",
+]
+
+LATEX_SPECIAL_CHARS = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+LATEX_TABLE_COLUMNS = [
+    "reroute_time",
+    "min",
+    "max",
+    "mean",
+    "p50",
+]
+
+LATEX_COLUMN_LABELS = {
+    "reroute_time": "Reroute time",
+    "min": "Min [s]",
+    "max": "Max [s]",
+    "mean": "Mean [s]",
+    "p50": "p50 [s]",
+}
+
+LATEX_COLUMN_SPEC = "l | r r r r"
+REROUTE_TIME_ROWS = [
+    ("From failure", "failure_to_slow_route_s"),
+    ("From reactivation", "active_to_fast_route_s"),
 ]
 
 
@@ -85,12 +131,6 @@ def state_events(entries: list[dict[str, Any]], state: str) -> list[dict[str, An
     ]
 
 
-def one_event(entries: list[dict[str, Any]], description: str) -> dict[str, Any]:
-    if len(entries) != 1:
-        raise ValueError(f"Expected exactly one {description}, found {len(entries)}")
-    return entries[0]
-
-
 def nsperf_events(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         entry for entry in entries
@@ -98,6 +138,12 @@ def nsperf_events(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         and "client_name" in event(entry)
         and "server_name" in event(entry)
     ]
+
+
+def one_event(entries: list[dict[str, Any]], description: str) -> dict[str, Any]:
+    if len(entries) != 1:
+        raise ValueError(f"Expected exactly one {description}, found {len(entries)}")
+    return entries[0]
 
 
 def event_time(entry: dict[str, Any]) -> float:
@@ -117,17 +163,17 @@ def extract_schedule_events(sim_sched: dict[str, Any]) -> dict[str, Any]:
     actual_down = one_event(state_events(sched_real, "DOWN"), "actual DOWN event")
     actual_up = one_event(state_events(sched_real, "UP"), "actual UP event")
 
-    access_node = str(event(actual_down)["name"])
-    if str(event(actual_up)["name"]) != access_node:
+    failed_node = str(event(actual_down)["name"])
+    if str(event(actual_up)["name"]) != failed_node:
         raise ValueError(
-            f"Actual DOWN node {access_node!r} does not match actual UP node {event(actual_up)['name']!r}"
+            f"Actual DOWN node {failed_node!r} does not match actual UP node {event(actual_up)['name']!r}"
         )
 
     planned_nsperf = one_event(nsperf_events(sched_plan), "planned nsperf event")
     actual_nsperf = one_event(nsperf_events(sched_real), "actual nsperf event")
 
     return {
-        "access_node": access_node,
+        "failed_node": failed_node,
         "planned_down": planned_down,
         "planned_up": planned_up,
         "actual_down": actual_down,
@@ -164,6 +210,14 @@ def find_interval_json(run_dir: Path, interval: str, explicit_path: Path | None)
             f"found {len(matches)}: {found}{extra}"
         )
     return matches[0]
+
+
+def stream_id_from_interval(path: Path) -> str:
+    name = path.name
+    match = re.match(r"(.+)_inter_[0-9]+(?:\.[0-9]+)?(?:_skip_[0-9]+ms)?\.json$", name)
+    if match is None:
+        return path.stem
+    return match.group(1)
 
 
 def latency_stat_ms(stats: Any, key: str) -> float | None:
@@ -225,7 +279,7 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         }
 
     return {
-        "interval_count": len(rows),
+        "interval_count": len(values),
         "avg_received_bps": sum(values) / len(values),
         "min_received_bps": min(values),
         "max_received_bps": max(values),
@@ -233,57 +287,95 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def find_slow_route(
+    rows: list[dict[str, Any]],
+    failure_time_s: float,
+    threshold_bps: float,
+) -> dict[str, Any]:
+    for row in rows:
+        if float(row["sim_start_s"]) < failure_time_s:
+            continue
+        if float(row["received_bps"]) > threshold_bps:
+            detected_sim_time = float(row["sim_start_s"])
+            return {
+                "detected": True,
+                "detected_sim_time_s": detected_sim_time,
+                "failure_to_slow_route_s": detected_sim_time - failure_time_s,
+                "window_start_index": int(row["index"]),
+                "window_end_index": int(row["index"]),
+                "threshold_bps": threshold_bps,
+            }
+
+    return {
+        "detected": False,
+        "detected_sim_time_s": None,
+        "failure_to_slow_route_s": None,
+        "window_start_index": None,
+        "window_end_index": None,
+        "threshold_bps": threshold_bps,
+    }
+
+
+def find_fast_route(
+    rows: list[dict[str, Any]],
+    active_time_s: float,
+    threshold_bps: float,
+    sustain_intervals: int,
+) -> dict[str, Any]:
+    candidates = [row for row in rows if float(row["sim_start_s"]) >= active_time_s]
+    for idx in range(0, len(candidates) - sustain_intervals + 1):
+        window = candidates[idx:idx + sustain_intervals]
+        if all(float(row["received_bps"]) >= threshold_bps for row in window):
+            detected_sim_time = float(window[0]["sim_start_s"])
+            return {
+                "detected": True,
+                "detected_sim_time_s": detected_sim_time,
+                "active_to_fast_route_s": detected_sim_time - active_time_s,
+                "window_start_index": int(window[0]["index"]),
+                "window_end_index": int(window[-1]["index"]),
+                "threshold_bps": threshold_bps,
+            }
+
+    return {
+        "detected": False,
+        "detected_sim_time_s": None,
+        "active_to_fast_route_s": None,
+        "window_start_index": None,
+        "window_end_index": None,
+        "threshold_bps": threshold_bps,
+    }
+
+
 def throughput_summaries(
     rows: list[dict[str, Any]],
     failure_time_s: float,
     active_time_s: float,
+    slow_route: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    pre = [row for row in rows if float(row["sim_mid_s"]) < failure_time_s]
-    outage = [
-        row for row in rows
-        if failure_time_s <= float(row["sim_mid_s"]) < active_time_s
-    ]
-    post = [row for row in rows if float(row["sim_mid_s"]) >= active_time_s]
-    return {
-        "pre_drop": summarize_rows(pre),
-        "outage": summarize_rows(outage),
-        "post_active": summarize_rows(post),
-    }
-
-
-def find_settle(
-    rows: list[dict[str, Any]],
-    active_time_s: float,
-    requested_bps: float,
-    tolerance_fraction: float,
-    sustain_intervals: int,
-) -> dict[str, Any]:
-    lower = requested_bps * (1.0 - tolerance_fraction)
-    upper = requested_bps * (1.0 + tolerance_fraction)
-    candidates = [row for row in rows if float(row["sim_start_s"]) >= active_time_s]
-
-    for idx in range(0, len(candidates) - sustain_intervals + 1):
-        window = candidates[idx:idx + sustain_intervals]
-        if all(lower <= float(row["received_bps"]) <= upper for row in window):
-            settled_sim_time = float(window[0]["sim_start_s"])
-            return {
-                "settled": True,
-                "settled_sim_time_s": settled_sim_time,
-                "settle_time_s": settled_sim_time - active_time_s,
-                "settle_window_start_index": int(window[0]["index"]),
-                "settle_window_end_index": int(window[-1]["index"]),
-                "lower_bps": lower,
-                "upper_bps": upper,
-            }
+    slow_time = slow_route["detected_sim_time_s"]
+    pre_failure = [row for row in rows if float(row["sim_mid_s"]) < failure_time_s]
+    if slow_time is None:
+        dropout = [
+            row for row in rows
+            if failure_time_s <= float(row["sim_mid_s"]) < active_time_s
+        ]
+        slow_rows: list[dict[str, Any]] = []
+    else:
+        dropout = [
+            row for row in rows
+            if failure_time_s <= float(row["sim_mid_s"]) < float(slow_time)
+        ]
+        slow_rows = [
+            row for row in rows
+            if float(slow_time) <= float(row["sim_mid_s"]) < active_time_s
+        ]
+    post_active = [row for row in rows if float(row["sim_mid_s"]) >= active_time_s]
 
     return {
-        "settled": False,
-        "settled_sim_time_s": None,
-        "settle_time_s": None,
-        "settle_window_start_index": None,
-        "settle_window_end_index": None,
-        "lower_bps": lower,
-        "upper_bps": upper,
+        "pre_failure": summarize_rows(pre_failure),
+        "dropout": summarize_rows(dropout),
+        "slow_route": summarize_rows(slow_rows),
+        "post_active": summarize_rows(post_active),
     }
 
 
@@ -379,41 +471,44 @@ def finite_points(times: list[float], values: list[float | None]) -> list[tuple[
 def plot_throughput(
     rows: list[dict[str, Any]],
     requested_bps: float,
-    tolerance_fraction: float,
+    fast_threshold_bps: float,
     failure_time_s: float,
     active_time_s: float,
-    settle: dict[str, Any],
+    slow_route: dict[str, Any],
+    fast_route: dict[str, Any],
     output: Path,
 ) -> None:
+    if "MPLCONFIGDIR" not in os.environ:
+        mpl_config_dir = Path(tempfile.gettempdir()) / "meshsim-matplotlib"
+        mpl_config_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["MPLCONFIGDIR"] = str(mpl_config_dir)
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     times = [float(row["sim_mid_s"]) for row in rows]
     received = [float(row["received_bps"]) for row in rows]
-    lower = requested_bps * (1.0 - tolerance_fraction)
-    upper = requested_bps * (1.0 + tolerance_fraction)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(times, received, marker="o", linewidth=1.2, markersize=3, label="Received bps")
     ax.axhline(requested_bps, color="black", linewidth=1.0, label="Requested throughput")
-    ax.axhspan(lower, upper, color="green", alpha=0.12, label="+-10% target band")
+    ax.axhline(fast_threshold_bps, color="green", linestyle=":", linewidth=1.2, label="90% requested throughput")
 
     markers = [
         (failure_time_s, "Failure"),
+        (slow_route["detected_sim_time_s"], "Slow route"),
         (active_time_s, "Active"),
+        (fast_route["detected_sim_time_s"], "Fast route"),
     ]
-    if settle["settled_sim_time_s"] is not None:
-        markers.append((float(settle["settled_sim_time_s"]), "Settled"))
-
-    ymax = max([requested_bps, upper, *received]) if received else upper
+    ymax = max([requested_bps, fast_threshold_bps, *received]) if received else requested_bps
 
     ax.set_xlabel("Simulation time [s]")
     ax.set_ylabel("Received throughput [bps]")
-    ax.set_title("Access-node fail throughput recovery")
+    ax.set_title("Reroute throughput")
     ax.grid(True, axis="y", alpha=0.3)
-    ax.set_ylim(bottom=0, top=max(ymax * 1.18, upper * 1.18))
+    ax.set_ylim(bottom=0, top=max(ymax * 1.18, requested_bps * 1.18))
     draw_event_markers(ax, markers, list(zip(times, received)))
     ax.legend(loc="best")
     fig.tight_layout()
@@ -424,12 +519,18 @@ def plot_throughput(
 def plot_throughput_latency(
     rows: list[dict[str, Any]],
     requested_bps: float,
-    tolerance_fraction: float,
+    fast_threshold_bps: float,
     failure_time_s: float,
     active_time_s: float,
-    settle: dict[str, Any],
+    slow_route: dict[str, Any],
+    fast_route: dict[str, Any],
     output: Path,
 ) -> None:
+    if "MPLCONFIGDIR" not in os.environ:
+        mpl_config_dir = Path(tempfile.gettempdir()) / "meshsim-matplotlib"
+        mpl_config_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["MPLCONFIGDIR"] = str(mpl_config_dir)
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -450,28 +551,32 @@ def plot_throughput_latency(
     latency_p95_plot = [
         math.nan if value is None else value for value in latency_p95
     ]
-    lower = requested_bps * (1.0 - tolerance_fraction)
-    upper = requested_bps * (1.0 + tolerance_fraction)
 
     markers = [
         (failure_time_s, "Failure"),
+        (slow_route["detected_sim_time_s"], "Slow route"),
         (active_time_s, "Active"),
+        (fast_route["detected_sim_time_s"], "Fast route"),
     ]
-    if settle["settled_sim_time_s"] is not None:
-        markers.append((float(settle["settled_sim_time_s"]), "Settled"))
 
     output.parent.mkdir(parents=True, exist_ok=True)
     fig, (ax_throughput, ax_latency) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
     ax_throughput.plot(times, received, marker="o", linewidth=1.2, markersize=3, label="Received bps")
     ax_throughput.axhline(requested_bps, color="black", linewidth=1.0, label="Requested throughput")
-    ax_throughput.axhspan(lower, upper, color="green", alpha=0.12, label="+-10% target band")
-    throughput_ymax = max([requested_bps, upper, *received]) if received else upper
+    ax_throughput.axhline(
+        fast_threshold_bps,
+        color="green",
+        linestyle=":",
+        linewidth=1.2,
+        label="90% requested throughput",
+    )
+    throughput_ymax = max([requested_bps, fast_threshold_bps, *received]) if received else requested_bps
     ax_throughput.set_xlabel("Simulation time [s]")
     ax_throughput.set_ylabel("Received throughput [bps]")
-    ax_throughput.set_title("Access-node fail throughput recovery")
+    ax_throughput.set_title("Reroute throughput")
     ax_throughput.grid(True, axis="y", alpha=0.3)
-    ax_throughput.set_ylim(bottom=0, top=max(throughput_ymax * 1.18, upper * 1.18))
+    ax_throughput.set_ylim(bottom=0, top=max(throughput_ymax * 1.18, requested_bps * 1.18))
     draw_event_markers(ax_throughput, markers, list(zip(times, received)))
     ax_throughput.legend(loc="best")
 
@@ -498,7 +603,7 @@ def plot_throughput_latency(
     latency_ymax = max(latency_values) if latency_values else 1.0
     ax_latency.set_xlabel("Simulation time [s]")
     ax_latency.set_ylabel("Latency by send window [ms]")
-    ax_latency.set_title("Access-node fail send-window latency")
+    ax_latency.set_title("Reroute send-window latency")
     ax_latency.grid(True, axis="y", alpha=0.3)
     ax_latency.set_ylim(bottom=0, top=max(latency_ymax * 1.18, 1.0))
     draw_event_markers(
@@ -522,6 +627,98 @@ def csv_value(value: Any) -> Any:
     return value
 
 
+def latex_escape(value: Any) -> str:
+    return "".join(LATEX_SPECIAL_CHARS.get(char, char) for char in str(value))
+
+
+def latex_bold(value: Any) -> str:
+    return f"\\textbf{{{latex_escape(value)}}}"
+
+
+def latex_header_label(key: str) -> str:
+    return latex_bold(LATEX_COLUMN_LABELS.get(key, key))
+
+
+def parse_optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def percentile_50(values: list[float]) -> float:
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+
+
+def reroute_time_stats(rows: list[dict[str, Any]], field: str) -> dict[str, float | None]:
+    values = [
+        parsed for parsed in (parse_optional_float(row.get(field)) for row in rows)
+        if parsed is not None
+    ]
+    if not values:
+        return {
+            "min": None,
+            "max": None,
+            "mean": None,
+            "p50": None,
+        }
+    return {
+        "min": min(values),
+        "max": max(values),
+        "mean": sum(values) / len(values),
+        "p50": percentile_50(values),
+    }
+
+
+def latex_table_value(field: str, row: dict[str, Any]) -> str:
+    if field == "reroute_time":
+        return latex_escape(row[field])
+    value = row.get(field)
+    if value is None:
+        return ""
+    return f"{float(value):.1f}"
+
+
+def read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    with path.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def write_latex_table(path: Path, aggregate_rows: list[dict[str, Any]]) -> None:
+    table_rows = []
+    for label, field in REROUTE_TIME_ROWS:
+        row = {"reroute_time": label}
+        row.update(reroute_time_stats(aggregate_rows, field))
+        table_rows.append(row)
+
+    output = [
+        f"\\begin{{tabular}}{{{LATEX_COLUMN_SPEC}}}",
+        "\\rowcolor{gray!30}",
+        " & ".join(latex_header_label(field) for field in LATEX_TABLE_COLUMNS) + r" \\",
+        "\\midrule",
+    ]
+    for index, row in enumerate(table_rows):
+        if index % 2 == 1:
+            output.append(r"\rowcolor{gray!10}")
+        output.append(
+            " & ".join(latex_table_value(field, row) for field in LATEX_TABLE_COLUMNS)
+            + r" \\"
+        )
+    output.extend([r"\bottomrule", r"\end{tabular}"])
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
 def upsert_csv(path: Path, row: dict[str, Any], key_fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
@@ -537,9 +734,9 @@ def upsert_csv(path: Path, row: dict[str, Any], key_fields: list[str]) -> None:
 
     rows.append({field: csv_value(row.get(field)) for field in CSV_FIELDS})
     rows = sorted(rows, key=lambda item: (
-        str(item.get("graph_name", "")),
-        str(item.get("stream", "")),
-        str(item.get("loss", "")),
+        str(item.get("result_set", "")),
+        str(item.get("run_name", "")),
+        str(item.get("run_dir", "")),
     ))
 
     with path.open("w", newline="") as f:
@@ -548,19 +745,16 @@ def upsert_csv(path: Path, row: dict[str, Any], key_fields: list[str]) -> None:
         writer.writerows(rows)
 
 
-def infer_labels(run_dir: Path, args: argparse.Namespace) -> tuple[str, str, str]:
-    graph_name = args.graph_name
-    stream = args.stream
-    loss = args.loss
+def infer_labels(run_dir: Path, args: argparse.Namespace) -> tuple[str, str]:
+    result_set = args.result_set
+    run_name = args.run_name
 
-    if loss is None:
-        loss = run_dir.name
-    if stream is None and run_dir.parent != run_dir:
-        stream = run_dir.parent.name
-    if graph_name is None and run_dir.parent.parent != run_dir.parent:
-        graph_name = run_dir.parent.parent.name
+    if result_set is None and run_dir.parent != run_dir:
+        result_set = run_dir.parent.name
+    if run_name is None:
+        run_name = run_dir.name
 
-    return graph_name or "", stream or "", loss or ""
+    return result_set or "", run_name or ""
 
 
 def analyze(args: argparse.Namespace) -> dict[str, Any]:
@@ -568,10 +762,10 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     sim_sched = load_json(run_dir / "sim_sched.json")
     events = extract_schedule_events(sim_sched)
 
-    actual_failure_time = event_time(events["actual_down"])
-    actual_active_time = event_time(events["actual_up"])
     planned_failure_time = event_time(events["planned_down"])
     planned_active_time = event_time(events["planned_up"])
+    actual_failure_time = event_time(events["actual_down"])
+    actual_active_time = event_time(events["actual_up"])
     nsperf_start_time = event_time(events["actual_nsperf"])
     nsperf_event = event(events["actual_nsperf"])
 
@@ -579,34 +773,41 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
     interval_json = find_interval_json(run_dir, args.interval, args.interval_json)
     interval_data = load_json(interval_json)
     interval_seconds, rows = interval_rows(interval_data, nsperf_start_time)
-    sustain_intervals = max(1, math.ceil(args.sustain_seconds / interval_seconds))
 
-    settle = find_settle(
+    fast_threshold_bps = requested_bps * args.fast_threshold_fraction
+    fast_sustain_intervals = max(1, math.ceil(args.fast_sustain_seconds / interval_seconds))
+    slow_route = find_slow_route(
+        rows=rows,
+        failure_time_s=actual_failure_time,
+        threshold_bps=args.slow_threshold_bps,
+    )
+    fast_route = find_fast_route(
         rows=rows,
         active_time_s=actual_active_time,
-        requested_bps=requested_bps,
-        tolerance_fraction=args.tolerance,
-        sustain_intervals=sustain_intervals,
+        threshold_bps=fast_threshold_bps,
+        sustain_intervals=fast_sustain_intervals,
     )
-    summaries = throughput_summaries(rows, actual_failure_time, actual_active_time)
-    graph_name, stream, loss = infer_labels(run_dir, args)
+    summaries = throughput_summaries(rows, actual_failure_time, actual_active_time, slow_route)
+    result_set, run_name = infer_labels(run_dir, args)
 
     summary = {
-        "schema": "access-node-fail-analysis-v1",
-        "graph_name": graph_name,
-        "stream": stream,
-        "loss": loss,
+        "schema": "reroute-analysis-v1",
+        "result_set": result_set,
+        "run_name": run_name,
         "run_dir": str(run_dir),
         "interval_json": str(interval_json),
-        "access_node": events["access_node"],
+        "stream_id": stream_id_from_interval(interval_json),
+        "failed_node": events["failed_node"],
         "client": nsperf_event["client_name"],
         "server": nsperf_event["server_name"],
         "nsperf_header": nsperf_event["nsperf_header"],
         "requested_bitrate": nsperf_event["bitrate"],
         "requested_bps": requested_bps,
-        "tolerance_fraction": args.tolerance,
-        "sustain_seconds": args.sustain_seconds,
-        "sustain_intervals": sustain_intervals,
+        "slow_threshold_bps": args.slow_threshold_bps,
+        "fast_threshold_fraction": args.fast_threshold_fraction,
+        "fast_threshold_bps": fast_threshold_bps,
+        "fast_sustain_seconds": args.fast_sustain_seconds,
+        "fast_sustain_intervals": fast_sustain_intervals,
         "interval_seconds": interval_seconds,
         "planned": {
             "failure_time_s": planned_failure_time,
@@ -621,37 +822,41 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "active_delay_s": actual_active_time - planned_active_time,
             "outage_duration_s": actual_active_time - actual_failure_time,
         },
-        "settle": settle,
+        "slow_route": slow_route,
+        "fast_route": fast_route,
         "throughput": summaries,
     }
 
-    summary_path = run_dir / "access_node_fail_summary.json"
-    write_json(summary_path, summary)
+    write_json(run_dir / "reroute_summary.json", summary)
     plot_throughput(
         rows=rows,
         requested_bps=requested_bps,
-        tolerance_fraction=args.tolerance,
+        fast_threshold_bps=fast_threshold_bps,
         failure_time_s=actual_failure_time,
         active_time_s=actual_active_time,
-        settle=settle,
-        output=run_dir / "access_node_fail_throughput.png",
+        slow_route=slow_route,
+        fast_route=fast_route,
+        output=run_dir / "reroute_throughput.png",
     )
     plot_throughput_latency(
         rows=rows,
         requested_bps=requested_bps,
-        tolerance_fraction=args.tolerance,
+        fast_threshold_bps=fast_threshold_bps,
         failure_time_s=actual_failure_time,
         active_time_s=actual_active_time,
-        settle=settle,
-        output=run_dir / "access_node_fail_throughput_latency.png",
+        slow_route=slow_route,
+        fast_route=fast_route,
+        output=run_dir / "reroute_throughput_latency.png",
     )
 
     if args.aggregate_csv is not None:
         row = {
-            "graph_name": graph_name,
-            "stream": stream,
-            "loss": loss,
-            "access_node": events["access_node"],
+            "result_set": result_set,
+            "run_name": run_name,
+            "run_dir": str(run_dir),
+            "stream_id": stream_id_from_interval(interval_json),
+            "nsperf_header": nsperf_event["nsperf_header"],
+            "failed_node": events["failed_node"],
             "client": nsperf_event["client_name"],
             "server": nsperf_event["server_name"],
             "requested_bps": requested_bps,
@@ -662,42 +867,71 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "actual_active_time_s": actual_active_time,
             "active_delay_s": actual_active_time - planned_active_time,
             "outage_duration_s": actual_active_time - actual_failure_time,
-            "settled": settle["settled"],
-            "settled_sim_time_s": settle["settled_sim_time_s"],
-            "settle_time_s": settle["settle_time_s"],
-            "tolerance_fraction": args.tolerance,
-            "sustain_seconds": args.sustain_seconds,
-            "sustain_intervals": sustain_intervals,
+            "slow_route_detected": slow_route["detected"],
+            "slow_route_sim_time_s": slow_route["detected_sim_time_s"],
+            "failure_to_slow_route_s": slow_route["failure_to_slow_route_s"],
+            "fast_route_detected": fast_route["detected"],
+            "fast_route_sim_time_s": fast_route["detected_sim_time_s"],
+            "active_to_fast_route_s": fast_route["active_to_fast_route_s"],
+            "slow_threshold_bps": args.slow_threshold_bps,
+            "fast_threshold_fraction": args.fast_threshold_fraction,
+            "fast_threshold_bps": fast_threshold_bps,
+            "fast_sustain_seconds": args.fast_sustain_seconds,
+            "fast_sustain_intervals": fast_sustain_intervals,
             "interval_seconds": interval_seconds,
-            "pre_drop_avg_received_bps": summaries["pre_drop"]["avg_received_bps"],
-            "outage_avg_received_bps": summaries["outage"]["avg_received_bps"],
+            "pre_failure_avg_received_bps": summaries["pre_failure"]["avg_received_bps"],
+            "dropout_avg_received_bps": summaries["dropout"]["avg_received_bps"],
+            "slow_route_avg_received_bps": summaries["slow_route"]["avg_received_bps"],
             "post_active_avg_received_bps": summaries["post_active"]["avg_received_bps"],
-            "pre_drop_interval_count": summaries["pre_drop"]["interval_count"],
-            "outage_interval_count": summaries["outage"]["interval_count"],
+            "pre_failure_interval_count": summaries["pre_failure"]["interval_count"],
+            "dropout_interval_count": summaries["dropout"]["interval_count"],
+            "slow_route_interval_count": summaries["slow_route"]["interval_count"],
             "post_active_interval_count": summaries["post_active"]["interval_count"],
         }
-        upsert_csv(args.aggregate_csv, row, ["graph_name", "stream", "loss"])
+        upsert_csv(args.aggregate_csv, row, ["run_dir"])
+        if args.latex_output is not None:
+            write_latex_table(args.latex_output, read_csv_rows(args.aggregate_csv))
 
     return summary
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("run_dir", type=Path, help="Finalized access-node fail result directory")
+    ap.add_argument("run_dir", type=Path, help="Finalized reroute result directory")
     ap.add_argument("--aggregate-csv", type=Path, help="Aggregate CSV path to upsert")
-    ap.add_argument("--graph-name", help="Graph name label for aggregate output")
-    ap.add_argument("--stream", help="Stream label for aggregate output")
-    ap.add_argument("--loss", help="Loss label for aggregate output")
+    ap.add_argument("--latex-output", type=Path, help="Output LaTeX tabular path")
+    ap.add_argument("--result-set", help="Result set label for aggregate output")
+    ap.add_argument("--run-name", help="Run label for aggregate output")
     ap.add_argument("--interval", default="0.5", help="nsperf interval seconds to use")
     ap.add_argument("--interval-json", type=Path, help="Explicit nsperf interval JSON path")
-    ap.add_argument("--tolerance", type=float, default=0.10, help="Settle tolerance fraction")
-    ap.add_argument("--sustain-seconds", type=float, default=2.0, help="Required in-band duration")
+    ap.add_argument(
+        "--slow-threshold-bps",
+        type=float,
+        default=0.0,
+        help="Slow-route detection requires received_bps greater than this value",
+    )
+    ap.add_argument(
+        "--fast-threshold-fraction",
+        type=float,
+        default=0.90,
+        help="Fast-route detection threshold as a fraction of requested bitrate",
+    )
+    ap.add_argument(
+        "--fast-sustain-seconds",
+        type=float,
+        default=2.0,
+        help="Required sustained duration above fast-route threshold",
+    )
     args = ap.parse_args()
 
-    if args.tolerance < 0:
-        raise ValueError("--tolerance must be >= 0")
-    if args.sustain_seconds <= 0:
-        raise ValueError("--sustain-seconds must be > 0")
+    if args.slow_threshold_bps < 0:
+        raise ValueError("--slow-threshold-bps must be >= 0")
+    if args.fast_threshold_fraction < 0:
+        raise ValueError("--fast-threshold-fraction must be >= 0")
+    if args.fast_sustain_seconds <= 0:
+        raise ValueError("--fast-sustain-seconds must be > 0")
+    if args.latex_output is not None and args.aggregate_csv is None:
+        raise ValueError("--latex-output requires --aggregate-csv")
 
     analyze(args)
 

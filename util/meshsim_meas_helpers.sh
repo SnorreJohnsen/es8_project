@@ -266,10 +266,119 @@ msh_remove_access_node_fail_analysis_tree() {
 		rm -f "$src_dir/access_node_fail_summary.csv" || return $?
 	fi
 
-	find "$src_dir" -type f \( -name access_node_fail_summary.json -o -name access_node_fail_throughput.png \) |
+	find "$src_dir" -type f \( -name access_node_fail_summary.json -o -name access_node_fail_throughput.png -o -name access_node_fail_throughput_latency.png \) |
 		sort -r |
 		while IFS= read -r artifact; do
 			echo "Removing access-node fail analysis artifact: $artifact"
+			rm -f "$artifact" || exit $?
+		done
+}
+
+msh_analyze_reroute() {
+	run_dir="$1"
+	analyze_script="$2"
+	python_exe="${3:-python3}"
+	aggregate_csv="${4:-}"
+	latex_output="${5:-}"
+
+	if [ -z "$run_dir" ] || [ -z "$analyze_script" ]; then
+		echo "usage: msh_analyze_reroute RUN_DIR ANALYZE_SCRIPT [PYTHON_EXE] [AGGREGATE_CSV] [LATEX_OUTPUT]" >&2
+		return 2
+	fi
+	if [ -n "$latex_output" ] && [ -z "$aggregate_csv" ]; then
+		echo "LATEX_OUTPUT requires AGGREGATE_CSV" >&2
+		return 2
+	fi
+	if [ ! -d "$run_dir" ]; then
+		echo "reroute run directory not found: $run_dir" >&2
+		return 1
+	fi
+	if [ ! -f "$analyze_script" ]; then
+		echo "reroute analyzer script not found: $analyze_script" >&2
+		return 1
+	fi
+	if [ ! -f "$run_dir/sim_sched.json" ]; then
+		echo "sim schedule not found: $run_dir/sim_sched.json" >&2
+		return 1
+	fi
+	if [ ! -d "$run_dir/nsperf/streams/intervals" ]; then
+		echo "nsperf interval analysis directory not found: $run_dir/nsperf/streams/intervals" >&2
+		return 1
+	fi
+
+	echo "Analyzing reroute run: $run_dir"
+	if [ -n "$aggregate_csv" ]; then
+		if [ -n "$latex_output" ]; then
+			"$python_exe" "$analyze_script" "$run_dir" \
+				--aggregate-csv "$aggregate_csv" \
+				--latex-output "$latex_output"
+		else
+			"$python_exe" "$analyze_script" "$run_dir" --aggregate-csv "$aggregate_csv"
+		fi
+	else
+		"$python_exe" "$analyze_script" "$run_dir"
+	fi
+}
+
+msh_analyze_reroute_tree() {
+	src_dir="$1"
+	analyze_script="$2"
+	python_exe="${3:-python3}"
+
+	if [ -z "$src_dir" ] || [ -z "$analyze_script" ]; then
+		echo "usage: msh_analyze_reroute_tree SRC_DIR ANALYZE_SCRIPT [PYTHON_EXE]" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+	if [ ! -f "$analyze_script" ]; then
+		echo "reroute analyzer script not found: $analyze_script" >&2
+		return 1
+	fi
+
+	aggregate_csv="$src_dir/reroute_summary.csv"
+	latex_output="$src_dir/reroute_table.tex"
+	find "$src_dir" -type f -name sim_sched.json |
+		sort |
+		while IFS= read -r sched_json; do
+			run_dir=$(dirname "$sched_json")
+			if [ ! -d "$run_dir/nsperf/streams/intervals" ]; then
+				echo "Skipping reroute run without nsperf intervals: $run_dir" >&2
+				continue
+			fi
+
+			msh_analyze_reroute "$run_dir" "$analyze_script" \
+				"$python_exe" "$aggregate_csv" "$latex_output" || exit $?
+		done
+}
+
+msh_remove_reroute_analysis_tree() {
+	src_dir="$1"
+
+	if [ -z "$src_dir" ]; then
+		echo "usage: msh_remove_reroute_analysis_tree SRC_DIR" >&2
+		return 2
+	fi
+	if [ ! -d "$src_dir" ]; then
+		echo "source directory not found: $src_dir" >&2
+		return 1
+	fi
+
+	if [ -f "$src_dir/reroute_summary.csv" ]; then
+		echo "Removing reroute aggregate: $src_dir/reroute_summary.csv"
+		rm -f "$src_dir/reroute_summary.csv" || return $?
+	fi
+	if [ -f "$src_dir/reroute_table.tex" ]; then
+		echo "Removing reroute LaTeX table: $src_dir/reroute_table.tex"
+		rm -f "$src_dir/reroute_table.tex" || return $?
+	fi
+
+	find "$src_dir" -type f \( -name reroute_summary.json -o -name reroute_throughput.png -o -name reroute_throughput_latency.png \) |
+		sort -r |
+		while IFS= read -r artifact; do
+			echo "Removing reroute analysis artifact: $artifact"
 			rm -f "$artifact" || exit $?
 		done
 }

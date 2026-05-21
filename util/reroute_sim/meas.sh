@@ -22,6 +22,7 @@ helpers_script="${HELPERS_SCRIPT:-$script_dir/../meshsim_meas_helpers.sh}"
 emulation_script="${EMULATION_SCRIPT:-/home/aau/meshsim/repo/emulation.py}"
 network_script="${NETWORK_SCRIPT:-/home/aau/meshsim/repo/meshnet-lab/network.py}"
 nsperf_analyze_script="${NSPERF_ANALYZE_SCRIPT:-/home/aau/meshsim/repo/nsperf/tools/analyze.py}"
+analyze_script="${REROUTE_ANALYZE_SCRIPT:-$script_dir/analyze.py}"
 emulation_dir="${EMULATION_DIR:-${PCAP_DIR:-/home/aau/meshsim/output/emulation}}"
 PYTHON="${PYTHON_EXE:-python3}"
 
@@ -46,6 +47,10 @@ if [ ! -f "$sched" ]; then
 	echo "Schedule file does not exist: $sched" >&2
 	exit 1
 fi
+if [ ! -f "$analyze_script" ]; then
+	echo "Reroute analyzer script does not exist: $analyze_script" >&2
+	exit 1
+fi
 
 link_loss="0"
 log_dir="$out_dir/logs"
@@ -54,6 +59,7 @@ mkdir -p "$log_dir"
 echo "Running reroute simulation"
 echo "graph: $graph"
 echo "schedule: $sched"
+echo "analyzer: $analyze_script"
 echo "iterations: $iterations"
 echo "link_loss: $link_loss"
 if [ -n "$nsperf_skip_ms" ]; then
@@ -91,6 +97,9 @@ while [ "$i" -le "$iterations" ]; do
 		"$nsperf_analyze_script" "$PYTHON" "" "$nsperf_skip_ms"
 
 	msh_finalize_emulation_output "$emulation_dir" "$result_dir" "$compress_program"
+
+	msh_analyze_reroute "$result_dir" "$analyze_script" \
+		"$PYTHON" "$out_dir/reroute_summary.csv" "$out_dir/reroute_table.tex"
 
 	completed_simulations=$((completed_simulations + 1))
 	msh_progress_done "$script_start_epoch" "$run_start_epoch" \
