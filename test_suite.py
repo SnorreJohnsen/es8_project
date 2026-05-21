@@ -1,22 +1,59 @@
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 from tqdm import tqdm
 
 # ── Output root ───────────────────────────────────────────────────────────────
-OUTPUT_ROOT = Path("./test_output_stress_beast")
+OUTPUT_ROOT = Path("./test_dropout")
 
 # ── Input directories to analyse ─────────────────────────────────────────────
-INPUT_DIRS = [
-    #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_1000startdelay"),
-    Path(r"C:\Repositeries\ES8-Semester\Project-ES8\stress_beast"),
-    #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_flyvfart"),
-]
+# SCAN_ROOT   : root folder to search under
+# SCAN_SUFFIX : only collect dirs whose name ends with (e.g. "_step")
+# GROUP_BY_SUFFIX : if set, group collected dirs by the ancestor folder whose
+#                   name ends with this suffix (e.g. "_fail" ) dirs merged into one group/run.
+#                   Set to None to treat each found dir as its own input.
+# INPUT_BASE  : strip this prefix when building output subfolder paths.
+#               Set to None to just use the dir name.
+SCAN_ROOT        = Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_test_dropout")
+SCAN_SUFFIX      = "_step"
+GROUP_BY_SUFFIX  = "_fail"
+INPUT_BASE       = Path(r"C:\Repositeries\ES8-Semester\Project-ES8")
 
+def _find_ancestor_part(path: Path, suffix: str) -> str:
+    for part in path.parts:
+        if part.endswith(suffix):
+            return part
+    return "ungrouped"
+
+if SCAN_ROOT is not None:
+    _found = sorted(p for p in SCAN_ROOT.rglob("*") if p.is_dir() and p.name.endswith(SCAN_SUFFIX))
+    if GROUP_BY_SUFFIX is not None:
+        _groups: dict[str, list[Path]] = defaultdict(list)
+        for p in _found:
+            _groups[_find_ancestor_part(p, GROUP_BY_SUFFIX)].append(p)
+        INPUT_GROUPS = dict(_groups)
+    else:
+        INPUT_GROUPS = {p.name: [p] for p in _found}
+else:
+    _manual: list[Path] = [
+        #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_1000startdelay"),
+        #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\stress_beast"),
+        #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\stress_beast_1000ms"),
+        #Path(r"C:\Repositeries\ES8-Semester\nsperf_stress_test_many_streams"),
+        Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_test_dropout"),
+        #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_flyvfart"),
+    ]
+    INPUT_GROUPS = {p.name: [p] for p in _manual}
+
+print("Groups found:")
+for group_name, dirs in INPUT_GROUPS.items():
+    print(f"  {group_name}  ({len(dirs)} dir(s))")
 # ── Axis / filter values to sweep over ───────────────────────────────────────
-#SCHEDULED_THROUGHPUTS = ["100K", "500K", "1M", "2M", "5M"]
-SCHEDULED_THROUGHPUTS = ["1M", "2M", "5M"]
-MESH_SIZES            = ["18", "27", "38", "46"]
+SCHEDULED_THROUGHPUTS = ["5M"]
+MESH_SIZES            = ["18", "27"]
+#SCHEDULED_THROUGHPUTS = ["1M", "2M", "5M"]
+#MESH_SIZES            = ["18", "27", "38", "46"]
 
 # (y_variable, percentile) pairs to generate for each sweep
 Y_SPECS = [
@@ -27,6 +64,8 @@ Y_SPECS = [
     ("latency",                   "95"),
     ("latency",                   "mean"),
     ("jitter",                    "mean"),
+    ("jitter",                    "95"),
+    ("jitter",                    "99"),
 ]
 
 # ── Plot specifications (auto-generated) ──────────────────────────────────────
@@ -42,15 +81,15 @@ for y, perc in Y_SPECS:
             "filters": {"scheduled_throughput": sch_tp},
         })
 
-for y, perc in Y_SPECS:
-    for ms in MESH_SIZES:
-        PLOT_SPECS.append({
-            "percentile": perc,
-            "x": "num_streams",
-            "y": y,
-            "hue": "scheduled_throughput",
-            "filters": {"mesh_size": ms},
-        })
+# for y, perc in Y_SPECS:
+#     for ms in MESH_SIZES:
+#         PLOT_SPECS.append({
+#             "percentile": perc,
+#             "x": "num_streams",
+#             "y": y,
+#             "hue": "scheduled_throughput",
+#             "filters": {"mesh_size": ms},
+#         })
 
 # ── Optional global flags ─────────────────────────────────────────────────────
 VERBOSE = False
@@ -60,10 +99,11 @@ VERBOSE = False
 SCRIPT = Path(__file__).parent / "perf_analyis.py"
 
 
-def build_cmd(input_dir: Path, output_dir: Path, spec: dict) -> list[str]:
-    cmd = [
-        sys.executable, str(SCRIPT),
-        "-i", str(input_dir),
+def build_cmd(group_dirs: list[Path], output_dir: Path, spec: dict) -> list[str]:
+    cmd = [sys.executable, str(SCRIPT)]
+    for d in group_dirs:
+        cmd += ["-i", str(d)]
+    cmd += [
         "-o", str(output_dir),
         "-p", spec["percentile"],
         "-x", spec["x"],
@@ -103,19 +143,18 @@ def _filter_subfolder(spec: dict) -> str:
     return "_".join(parts)
 
 
-def run_spec(input_dir: Path, spec: dict, idx: int, total: int):
-    hue = spec.get("hue")
-    hue_folder = hue if hue else "no_hue"
+def run_spec(group_name: str, group_dirs: list[Path], spec: dict, idx: int, total: int):
+    hue = spec.get("hue") or "no_hue"
     filter_folder = _filter_subfolder(spec)
-    output_dir = OUTPUT_ROOT / input_dir.name / hue_folder / filter_folder
+    output_dir = OUTPUT_ROOT / group_name / hue / filter_folder
     output_dir.mkdir(parents=True, exist_ok=True)
 
     label = spec_label(spec)
-    print(f"\n[{idx}/{total}]  {input_dir.name}")
+    print(f"\n[{idx}/{total}]  {group_name}  ({len(group_dirs)} dir(s))")
     print(f"         {label}")
     print(f"         → {output_dir}")
 
-    cmd = build_cmd(input_dir, output_dir, spec)
+    cmd = build_cmd(group_dirs, output_dir, spec)
     result = subprocess.run(cmd, text=True)
 
     if result.returncode != 0:
@@ -127,25 +166,24 @@ def run_spec(input_dir: Path, spec: dict, idx: int, total: int):
 
 
 if __name__ == "__main__":
-    valid_dirs = [d for d in INPUT_DIRS if d.exists()]
-    skipped = [d for d in INPUT_DIRS if not d.exists()]
+    valid_groups = {
+        name: [d for d in dirs if d.exists()]
+        for name, dirs in INPUT_GROUPS.items()
+    }
+    valid_groups = {name: dirs for name, dirs in valid_groups.items() if dirs}
 
-    if skipped:
-        for d in skipped:
-            print(f"[SKIP] {d} — path does not exist")
-
-    total = len(valid_dirs) * len(PLOT_SPECS)
-    print(f"\nRunning {len(PLOT_SPECS)} spec(s) × {len(valid_dirs)} director(y/ies) = {total} total runs")
+    total = len(valid_groups) * len(PLOT_SPECS)
+    print(f"\nRunning {len(PLOT_SPECS)} spec(s) × {len(valid_groups)} group(s) = {total} total runs")
     print(f"Output root: {OUTPUT_ROOT.resolve()}\n")
 
     failures = 0
-    runs = [(d, s) for d in valid_dirs for s in PLOT_SPECS]
+    runs = [(name, dirs, s) for name, dirs in valid_groups.items() for s in PLOT_SPECS]
 
     with tqdm(runs, desc="Runs", unit="plot", dynamic_ncols=True) as bar:
-        for idx, (input_dir, spec) in enumerate(bar, 1):
+        for idx, (group_name, group_dirs, spec) in enumerate(bar, 1):
             hue = spec.get("hue", "")
-            bar.set_postfix_str(f"{input_dir.name} | {spec['x']} vs {spec['y']} | hue={hue}")
-            ok = run_spec(input_dir, spec, idx, total)
+            bar.set_postfix_str(f"{group_name} | {spec['x']} vs {spec['y']} | hue={hue}")
+            ok = run_spec(group_name, group_dirs, spec, idx, total)
             if not ok:
                 failures += 1
 

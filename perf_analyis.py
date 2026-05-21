@@ -330,7 +330,11 @@ def find_experiment_root(path: Path) -> Path:
 def pairing_files(input: Path) -> list:
     experiments = []
 
-    for stream_dir in input.rglob("nsperf/streams"):
+    stream_dirs = list(input.rglob("nsperf/streams"))
+    if not stream_dirs:
+        stream_dirs = list(input.rglob("nsperf\\streams"))
+
+    for stream_dir in stream_dirs:
         experiment_root = stream_dir.parents[2]
         experiment_naming = stream_dir.parents[1]
 
@@ -407,12 +411,13 @@ def plot_graph(x_axis: list,
     fig, ax = plt.subplots(figsize=picture_size)
 
     if hue is not None:
+        n_hues = len(set(hue))
         sns.scatterplot(
             x=x_axis,
             y=y_axis,
             hue=hue,
             ax=ax,
-            palette=PALLETTE,
+            palette=PALLETTE[:n_hues],
             alpha=0.6
         )
     else:
@@ -466,13 +471,14 @@ def plot_boxplot(
     fig, ax = plt.subplots(figsize=picture_size)
 
     if "hue" in df.columns and df["hue"].notna().any():
+        n_hues = df["hue"].nunique()
         sns.boxplot(
             data=df,
             x="x",
             y="y",
             hue="hue",
             ax=ax,
-            palette=PALLETTE
+            palette=PALLETTE[:n_hues]
         )
     else:
         sns.boxplot(
@@ -530,6 +536,7 @@ def plot_violin(
     if has_hue:
         split = violin_df["hue"].nunique() >= 2
 
+        n_hues = violin_df["hue"].nunique()
         sns.violinplot(
             data=violin_df,
             x="x",
@@ -541,7 +548,7 @@ def plot_violin(
             linewidth=2.5,
             bw_method=.2,
             density_norm="width",
-            palette=PALLETTE,
+            palette=PALLETTE[:n_hues],
             ax=ax,
         )
         for pc in ax.collections:
@@ -776,7 +783,7 @@ def parse_value(v):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool for analysing the NSPERF/IPERF streams from the graphs')
-    parser.add_argument('-i', '--input', type=json_path, required=True, help='The desired directory or file which is be performed analysis on (Json Format IPERF/NSPERF)')
+    parser.add_argument('-i', '--input', type=json_path, required=True, action='append', help='Input directory or file (can be repeated to merge multiple sources)')
     parser.add_argument('-o', '--output', type=Path, help='The desired directory for saving PLOTS')
     parser.add_argument('-p', '--percentile', type=str, required=True, help='Percentile selection: 50, 95, 99, mean, min, max')
     parser.add_argument('-x', '--x_axis', type=str, required=True, help='Variable for X axis')
@@ -791,7 +798,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     filters = args.filter or []
     verbosity = args.verbose
-    input_path = args.input
+    input_paths = args.input
     output_path = args.output or Path("./plots")
     req_client = args.client
     req_server = args.server
@@ -801,7 +808,9 @@ if __name__ == "__main__":
     if req_server is not None:
         req_server = req_server.strip().lower().split(",")
 
-    experiments = pairing_files(input=input_path)
+    experiments = []
+    for ip in input_paths:
+        experiments.extend(pairing_files(input=ip))
     percentile = percentile_refactor(args.percentile)
     experiments = sorted(experiments, key=lambda e: experiment_sort_key(e["name"]))
 
@@ -810,7 +819,7 @@ if __name__ == "__main__":
         {"name": "loss_vs_transmit",         "aliases": ["loss_vs_transmit", "loss_vs_trans"],                                  "nsperf": ["received_bits", "/", "generated_bits", 1],                                                                          "label": "Loss after TX Success",            "unit": "%",    "scale": 100},
         {"name": "throughput",               "aliases": ["throughput", "tp"],                                                   "nsperf": "received_bps",                                                                                                       "label": "Throughput",                  "unit": "Mb/s", "scale": 1e-6},
         {"name": "latency",                  "aliases": ["latency", "lat"],                                                     "nsperf": "host_local_latency_estimate_ns",                                                                                     "label": "Latency",                     "unit": "ms",   "scale": 1e-6, "uses_percentile": True, "log_scale": True},
-        {"name": "jitter",                   "aliases": ["jitter", "jit"],                                                      "nsperf": "host_local_latency_jitter_abs_ns",                                                                                   "label": "Jitter",                      "unit": "ms",   "scale": 1e-6, "uses_percentile": True},
+        {"name": "jitter",                   "aliases": ["jitter", "jit"],                                                      "nsperf": "host_local_latency_jitter_abs_ns",                                                                                   "label": "Jitter",                      "unit": "ms",   "scale": 1e-6, "uses_percentile": True, "log_scale": True},
         {"name": "num_streams",              "aliases": ["num_streams", "num streams"],                                         "nsperf": ["send_start_ns", "send_end_ns"],                                                                                     "label": "Number of Streams",           "unit": "-",    "scale": 1},
         {"name": "transmit_throughput",      "aliases": ["transmit_throughput", "transmit throughput", "transmit_bps", "tr_tp", "tra_tp"], "nsperf": "generated_bps",    "hide_from_title": True,                                                                                     "label": "Transmit Throughput",         "unit": "Mb/s", "scale": 1e-6, "hide_from_title": True},
         {"name": "scheduled_throughput",     "aliases": ["scheduled_throughput", "sch_tp"],                                    "nsperf": ["generated_bps", "/", "send_attempts", "*", "scheduled_packets_logged"],                                             "label": "Scheduled Throughput",        "unit": "Mb/s", "scale": 1e-6},
@@ -842,7 +851,16 @@ if __name__ == "__main__":
 
     print(f"{percentile=}")
 
-    path_width = max(len(f.name) for exp in experiments for f in exp["nsperf"]) + 2
+    if not experiments:
+        print(f"[ERROR] No experiments found in: {[str(p) for p in input_paths]}")
+        print("[ERROR] Check that the directories contain nsperf/streams/*.json files")
+        exit(1)
+
+    empty_nsperf = [e["name"] for e in experiments if not e["nsperf"]]
+    if empty_nsperf:
+        print(f"[WARNING] {len(empty_nsperf)} experiment(s) have no nsperf files: {empty_nsperf[:5]}")
+
+    path_width = max((len(f.name) for exp in experiments for f in exp["nsperf"]), default=20) + 2
 
     graph_reference_path = experiments[0]["graphs"]
     with open(graph_reference_path) as f:
@@ -1200,7 +1218,7 @@ if __name__ == "__main__":
 
     percentile_metrics = [v["name"] for v in variable_map if v.get("uses_percentile")]
 
-    base_name = Path(input_path).name
+    base_name = Path(input_paths[0]).name
 
     axis_labels, _, unit_scales, log_scales = axis_units(axis_names=axis_names, variable_map=variable_map, percentile=percentile)
     axis_keys = ["x_axis", "y_axis"]
