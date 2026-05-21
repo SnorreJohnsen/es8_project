@@ -107,7 +107,7 @@ for graph in $graphs; do
 			msh_finalize_emulation_output "$emulation_dir" "$result_dir" "$compress_program"
 
 			msh_analyze_access_node_fail "$result_dir" "$analyze_script" \
-				"$PYTHON" "$out_dir/access_node_fail_summary.csv"
+				"$PYTHON" "$out_dir/access_node_fail_summary.csv" "$out_dir/access_node_fail_table.tex"
 		done
 	done
 done

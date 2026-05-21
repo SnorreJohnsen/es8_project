@@ -186,9 +186,14 @@ msh_analyze_access_node_fail() {
 	analyze_script="$2"
 	python_exe="${3:-python3}"
 	aggregate_csv="${4:-}"
+	latex_output="${5:-}"
 
 	if [ -z "$run_dir" ] || [ -z "$analyze_script" ]; then
-		echo "usage: msh_analyze_access_node_fail RUN_DIR ANALYZE_SCRIPT [PYTHON_EXE] [AGGREGATE_CSV]" >&2
+		echo "usage: msh_analyze_access_node_fail RUN_DIR ANALYZE_SCRIPT [PYTHON_EXE] [AGGREGATE_CSV] [LATEX_OUTPUT]" >&2
+		return 2
+	fi
+	if [ -n "$latex_output" ] && [ -z "$aggregate_csv" ]; then
+		echo "LATEX_OUTPUT requires AGGREGATE_CSV" >&2
 		return 2
 	fi
 	if [ ! -d "$run_dir" ]; then
@@ -210,7 +215,13 @@ msh_analyze_access_node_fail() {
 
 	echo "Analyzing access-node fail run: $run_dir"
 	if [ -n "$aggregate_csv" ]; then
-		"$python_exe" "$analyze_script" "$run_dir" --aggregate-csv "$aggregate_csv"
+		if [ -n "$latex_output" ]; then
+			"$python_exe" "$analyze_script" "$run_dir" \
+				--aggregate-csv "$aggregate_csv" \
+				--latex-output "$latex_output"
+		else
+			"$python_exe" "$analyze_script" "$run_dir" --aggregate-csv "$aggregate_csv"
+		fi
 	else
 		"$python_exe" "$analyze_script" "$run_dir"
 	fi
@@ -235,6 +246,7 @@ msh_analyze_access_node_fail_tree() {
 	fi
 
 	aggregate_csv="$src_dir/access_node_fail_summary.csv"
+	latex_output="$src_dir/access_node_fail_table.tex"
 	find "$src_dir" -type f -name sim_sched.json |
 		sort |
 		while IFS= read -r sched_json; do
@@ -245,7 +257,7 @@ msh_analyze_access_node_fail_tree() {
 			fi
 
 			msh_analyze_access_node_fail "$run_dir" "$analyze_script" \
-				"$python_exe" "$aggregate_csv" || exit $?
+				"$python_exe" "$aggregate_csv" "$latex_output" || exit $?
 		done
 }
 
@@ -264,6 +276,10 @@ msh_remove_access_node_fail_analysis_tree() {
 	if [ -f "$src_dir/access_node_fail_summary.csv" ]; then
 		echo "Removing access-node fail aggregate: $src_dir/access_node_fail_summary.csv"
 		rm -f "$src_dir/access_node_fail_summary.csv" || return $?
+	fi
+	if [ -f "$src_dir/access_node_fail_table.tex" ]; then
+		echo "Removing access-node fail LaTeX table: $src_dir/access_node_fail_table.tex"
+		rm -f "$src_dir/access_node_fail_table.tex" || return $?
 	fi
 
 	find "$src_dir" -type f \( -name access_node_fail_summary.json -o -name access_node_fail_throughput.png -o -name access_node_fail_throughput_latency.png \) |

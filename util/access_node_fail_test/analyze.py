@@ -39,6 +39,40 @@ CSV_FIELDS = [
     "post_active_interval_count",
 ]
 
+LATEX_SPECIAL_CHARS = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+LATEX_TABLE_COLUMNS = [
+    "access_node_fail_time",
+    "min",
+    "max",
+    "mean",
+    "p50",
+]
+
+LATEX_COLUMN_LABELS = {
+    "access_node_fail_time": "Access-node fail time",
+    "min": "Min [s]",
+    "max": "Max [s]",
+    "mean": "Mean [s]",
+    "p50": "p50 [s]",
+}
+
+LATEX_COLUMN_SPEC = "l | r r r r"
+ACCESS_NODE_FAIL_TIME_ROWS = [
+    ("To recovery", "settle_time_s"),
+]
+
 
 def load_json(path: Path) -> Any:
     with path.open(encoding="utf-8") as f:
@@ -522,6 +556,98 @@ def csv_value(value: Any) -> Any:
     return value
 
 
+def latex_escape(value: Any) -> str:
+    return "".join(LATEX_SPECIAL_CHARS.get(char, char) for char in str(value))
+
+
+def latex_bold(value: Any) -> str:
+    return f"\\textbf{{{latex_escape(value)}}}"
+
+
+def latex_header_label(key: str) -> str:
+    return latex_bold(LATEX_COLUMN_LABELS.get(key, key))
+
+
+def parse_optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def percentile_50(values: list[float]) -> float:
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+
+
+def access_node_fail_time_stats(rows: list[dict[str, Any]], field: str) -> dict[str, float | None]:
+    values = [
+        parsed for parsed in (parse_optional_float(row.get(field)) for row in rows)
+        if parsed is not None
+    ]
+    if not values:
+        return {
+            "min": None,
+            "max": None,
+            "mean": None,
+            "p50": None,
+        }
+    return {
+        "min": min(values),
+        "max": max(values),
+        "mean": sum(values) / len(values),
+        "p50": percentile_50(values),
+    }
+
+
+def latex_table_value(field: str, row: dict[str, Any]) -> str:
+    if field == "access_node_fail_time":
+        return latex_escape(row[field])
+    value = row.get(field)
+    if value is None:
+        return ""
+    return f"{float(value):.1f}"
+
+
+def read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    with path.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def write_latex_table(path: Path, aggregate_rows: list[dict[str, Any]]) -> None:
+    table_rows = []
+    for label, field in ACCESS_NODE_FAIL_TIME_ROWS:
+        row = {"access_node_fail_time": label}
+        row.update(access_node_fail_time_stats(aggregate_rows, field))
+        table_rows.append(row)
+
+    output = [
+        f"\\begin{{tabular}}{{{LATEX_COLUMN_SPEC}}}",
+        "\\rowcolor{gray!30}",
+        " & ".join(latex_header_label(field) for field in LATEX_TABLE_COLUMNS) + r" \\",
+        "\\midrule",
+    ]
+    for index, row in enumerate(table_rows):
+        if index % 2 == 1:
+            output.append(r"\rowcolor{gray!10}")
+        output.append(
+            " & ".join(latex_table_value(field, row) for field in LATEX_TABLE_COLUMNS)
+            + r" \\"
+        )
+    output.extend([r"\bottomrule", r"\end{tabular}"])
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
 def upsert_csv(path: Path, row: dict[str, Any], key_fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
@@ -677,6 +803,8 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "post_active_interval_count": summaries["post_active"]["interval_count"],
         }
         upsert_csv(args.aggregate_csv, row, ["graph_name", "stream", "loss"])
+        if args.latex_output is not None:
+            write_latex_table(args.latex_output, read_csv_rows(args.aggregate_csv))
 
     return summary
 
@@ -685,6 +813,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir", type=Path, help="Finalized access-node fail result directory")
     ap.add_argument("--aggregate-csv", type=Path, help="Aggregate CSV path to upsert")
+    ap.add_argument("--latex-output", type=Path, help="Output LaTeX tabular path")
     ap.add_argument("--graph-name", help="Graph name label for aggregate output")
     ap.add_argument("--stream", help="Stream label for aggregate output")
     ap.add_argument("--loss", help="Loss label for aggregate output")
@@ -698,6 +827,8 @@ def main() -> None:
         raise ValueError("--tolerance must be >= 0")
     if args.sustain_seconds <= 0:
         raise ValueError("--sustain-seconds must be > 0")
+    if args.latex_output is not None and args.aggregate_csv is None:
+        raise ValueError("--latex-output requires --aggregate-csv")
 
     analyze(args)
 
