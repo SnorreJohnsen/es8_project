@@ -589,6 +589,9 @@ def get_all_addrs(graph: dict, extra_ids: list[str]):
             NODE_UPLINK_MACS[node_id] = addrs_json[node_id][uplink_name]
         except:
             pass # skip populating NODE_UPLINK_MACS if node doesn't have uplink
+
+    if verbosity == "verbose":
+        print(f"{NODE_UPLINK_MACS=}")
     with open(node_addrs_json_path, "w") as f:
         json.dump(addrs_json, f)
 
