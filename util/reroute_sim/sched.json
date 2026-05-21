@@ -9,7 +9,7 @@
 				"client_name": "d0",
 				"server_name": "d1",
 				"bitrate": "5M",
-				"duration": "100"
+				"duration": "100s"
 			}
 		},
 		{
