@@ -26,7 +26,17 @@ repo_root = os.path.join(sim_root, "repo")
 sys.path.append(os.path.join(repo_root, 'meshnet-lab/'))
 import network as mn_network
 from network import mtu
-from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals, get_thread_id, exec
+from shared import eprint, globalTerminalGroup, get_remote_mapping, Remote, stop_all_terminals, get_thread_id, exec as shared_exec
+
+def exec(tid, remote, command, get_output=False, ignore_error=False, onResultCallBack=None):
+    return shared_exec(
+        tid,
+        remote if remote is not None else Remote(),
+        command,
+        get_output=get_output,
+        ignore_error=ignore_error,
+        onResultCallBack=onResultCallBack,
+    )
 
 ## Check for dependencies
 ok = True

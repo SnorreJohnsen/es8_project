@@ -6,8 +6,8 @@
 			"time": 10,
 			"event": {
 				"nsperf_header": "reroute",
-				"client_name": "a0",
-				"server_name": "a1",
+				"client_name": "d0",
+				"server_name": "d1",
 				"bitrate": "5M",
 				"duration": "100"
 			}
