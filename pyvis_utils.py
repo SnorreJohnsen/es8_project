@@ -218,7 +218,8 @@ def build_injection(color_bar_title: str,
                     total_time: float,
                     interval: bool = False,
                     time_prev: float = None,
-                    packet_prev: int = None):
+                    packet_prev: int = None,
+                    states_json: bool = False):
     
     # For links
     arr_links = np.array(color_bar_data_links)
@@ -236,15 +237,19 @@ def build_injection(color_bar_title: str,
     q3_nodes = np.percentile(arr_nodes, 75)
     max_nodes = np.max(arr_nodes)
 
+    snapshot_html = ""
+    if states_json is not None:
+        snapshot_html = f"""<div> UP/DOWN snapshot at <b{time:.2f}</b> </div>"""
+
     if interval:
         if time_prev is None or packet_prev is None:
             raise ValueError("time_prev and packet_prev must be provided when interval=True")
         
-        packet_info_html = """
+        packet_info_html = f"""
         <div id="packet-info">
-            <div> Packet interval <b>""" + f"{packet_prev}" + """ - """ + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts </div>
-            <div> Time of interval <b>""" + f"{time_prev:.2f}" + """ - """ + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
-            <div> UP/DOWN snapshot at <b>""" + f"{time:.2f}" + """</b> </div>
+            <div> Packet interval <b>{packet_prev} - {current_pkt}</b> pkts read out of <b>{total_pkts}</b> pkts </div>
+            <div> Time of interval <b>{time_prev:.2f} - {time:.2f}</b> out of <b>{total_time:.2f}</b> total time of instance </div>
+            {snapshot_html}
         </div>
         """
     else:
@@ -365,7 +370,7 @@ def build_injection(color_bar_title: str,
                 <div id="heatmap-bar"></div>
 
                 <div id="heatmap-labels">
-                    <span>""" + f"{format_unit(min_links)}" +"%" + """</span>
+                    <span>""" + f"{format_unit(min_links)}" + "%" + """</span>
                     <span>""" + f"{format_unit(q1_links)}" + "%" + """</span>
                     <span>""" + f"{format_unit(median_links)}" + "%" + """</span>
                     <span>""" + f"{format_unit(q3_links)}" + "%" + """</span>
@@ -424,7 +429,8 @@ def creation_of_pyvis(G,
                       output_file: str,
                       states: tuple = None,
                       browser_html: bool = False,
-                      flag_interval: bool = False):
+                      flag_interval: bool = False,
+                      states_json: bool = False):
     
     precision_number = 1e-7
 
@@ -620,7 +626,8 @@ def creation_of_pyvis(G,
                                         total_time=total_time,
                                         interval=flag_interval,
                                         time_prev=time_prev,
-                                        packet_prev=packet_prev)
+                                        packet_prev=packet_prev,
+                                        states_json=states_json)
         else:
             injection = build_injection(color_bar_title=color_bar_title,
                                         color_bar_data_links=color_bar_data_links,
@@ -696,7 +703,7 @@ def creation_of_pyvis_topology(*,
             node_id,
             label=" ",
             title=" ",
-            size=14,
+            size=10,
             color=color,
             x=x,
             y=y,
@@ -708,22 +715,280 @@ def creation_of_pyvis_topology(*,
     #if show_links:
     link_info = extract_link_metrics(graph_json=graph_data, bidirectional=False)
     for src, dst, link_raw in topo_edges:
-        if 'a' in src:
-            metrics = link_info.get((src, dst), {})
-            phyrate = metrics.get("phyrate_mbps")
-            loss = metrics.get("loss_percent")
+        #if 'a' in src:
+        metrics = link_info.get((src, dst), {})
+        phyrate = metrics.get("phyrate_mbps")
+        loss = metrics.get("loss_percent")
 
-            title = f"{src} → {dst}"
-            if phyrate is not None:
-                title += f"\nphyrate: {phyrate:.2f} Mbps"
-            if loss is not None:
-                title += f"\nloss: {loss:.2f} %"
+        title = f"{src} → {dst}"
+        if phyrate is not None:
+            title += f"\nphyrate: {phyrate:.2f} Mbps"
+        if loss is not None:
+            title += f"\nloss: {loss:.2f} %"
 
-            net.add_edge(src, dst, title=title, width=2, color="rgba(80,80,80,0.7)")
+        edge_pairs = {(src, dst) for src, dst, _ in topo_edges}
+
+        net.add_edge(src, dst, title=title, width=1, color="rgba(80,80,80,0.7)")
 
     net.write_html(output_file)
 
     # Optional simple injection (no heatmap)
+    injection = f"""
+    <script type="text/javascript">
+    window.addEventListener("load", function () {{
+        if (typeof network !== "undefined") {{
+            network.stabilize(800);
+            setTimeout(function () {{
+                network.fit({{ animation: {{ duration: 0 }} }});
+                network.setOptions({{ physics: false }});
+            }}, 100);
+        }}
+    }});
+    </script>
+
+    <style>
+    #topology-info {{
+        position: fixed;
+        top: 20px;
+        left: 30px;
+        background: rgba(255, 255, 255, 0.92);
+        padding: 16px 24px;
+        border-radius: 18px;
+        font-family: Arial;
+        font-size: 46px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        z-index: 9999;
+    }}
+    </style>
+
+    <div id="topology-info">
+        <div><b>Topology snapshot</b></div>
+        <div><b>Mesh Size: {count_nodes} nodes, {count_adapters} adapters</b></div>
+    </div>
+    """
+
+    with open(output_file, "r+", encoding="utf-8") as f:
+        html = f.read()
+        html = html.replace("</body>", injection + "\n</body>")
+        f.seek(0)
+        f.write(html)
+        f.truncate()
+
+    if browser_html:
+        webbrowser.open("file://" + os.path.abspath(output_file))
+
+def creation_of_pyvis_reroute_topology(*,
+                               graph_data: dict,
+                               addr_data: dict,
+                               topo_edges: list,
+                               time: float,
+                               last_rendered_time: float,
+                               output_file: str,
+                               states: dict = None,
+                               browser_html: bool = False,
+                               show_links: bool = False):
+    """
+    Topology-only PyVis: nodes from graph.json positions, edges from graph.json links.
+    Adds curved edges when links visually overlap because nodes are collinear.
+    """
+
+    node_states = states if states else {}
+
+    net = Network(height="100vh", width="100vw", directed=True, bgcolor="white", font_color="black")
+    net.barnes_hut()
+    net.set_options("""var options = { "physics": { "enabled": false } }""")
+
+    # Extract node info
+    node_adapters_info = extract_node_info(graph_json=graph_data, addrs_json=addr_data)
+
+    # Store scaled node positions for overlap detection
+    node_positions = {}
+
+    # Add nodes
+    count_nodes = 0
+    count_adapters = 0
+
+    for node_id, info in node_adapters_info.items():
+        x = info.get("x", 0) / 2
+        y = info.get("y", 0) * 10
+
+        node_positions[node_id] = (x, y)
+
+        mac = info.get("mac")
+
+        if 'n' in node_id:
+            count_nodes += 1
+        if 'a' in node_id:
+            count_adapters += 1
+
+        label, shape, base_color = setting_node_attributes(
+            node_mac=mac,
+            node_id=node_id,
+            node_states=node_states,
+            last_rendered_time=last_rendered_time,
+            time=time,
+            plot_type="topology"
+        )
+
+        title = f"{node_id}"
+        if mac:
+            title += f"\nMAC: {mac}"
+        if info.get("interfaces"):
+            title += "\n\nInterfaces:\n" + "\n".join(
+                [f"{k}: {v}" for k, v in info["interfaces"].items()]
+            )
+
+        net.add_node(
+            node_id,
+            label=" ",
+            title=" ",
+            size=20,
+            color=base_color,
+            x=x,
+            y=y,
+            physics=False,
+            shape=shape
+        )
+
+    # ---------------------------------------------------------
+    # Geometry helpers for detecting visually overlapping edges
+    # ---------------------------------------------------------
+
+    def almost_equal(a, b, eps=1e-9):
+        return abs(a - b) <= eps
+
+    def point_on_segment(px, py, ax, ay, bx, by, eps=1e-9):
+        """
+        Checks if point P lies on segment AB.
+        """
+        cross = (px - ax) * (by - ay) - (py - ay) * (bx - ax)
+
+        if abs(cross) > eps:
+            return False
+
+        return (
+            min(ax, bx) - eps <= px <= max(ax, bx) + eps and
+            min(ay, by) - eps <= py <= max(ay, by) + eps
+        )
+
+    def segments_collinear(ax, ay, bx, by, cx, cy, dx, dy, eps=1e-9):
+        """
+        Checks if segment AB and CD are on the same infinite line.
+        """
+        cross1 = (cx - ax) * (by - ay) - (cy - ay) * (bx - ax)
+        cross2 = (dx - ax) * (by - ay) - (dy - ay) * (bx - ax)
+
+        return abs(cross1) <= eps and abs(cross2) <= eps
+
+    def segments_overlap(ax, ay, bx, by, cx, cy, dx, dy, eps=1e-9):
+        """
+        Checks if two collinear line segments overlap visually.
+        This returns True when they share more than just one endpoint.
+        """
+
+        if not segments_collinear(ax, ay, bx, by, cx, cy, dx, dy, eps):
+            return False
+
+        # Project onto the dominant axis
+        if abs(ax - bx) >= abs(ay - by):
+            a1, a2 = sorted([ax, bx])
+            c1, c2 = sorted([cx, dx])
+        else:
+            a1, a2 = sorted([ay, by])
+            c1, c2 = sorted([cy, dy])
+
+        overlap_start = max(a1, c1)
+        overlap_end = min(a2, c2)
+
+        # Strict overlap length, not just touching at a point
+        return overlap_end - overlap_start > eps
+
+    def edge_length(src, dst):
+        """
+        Length of an edge based on node positions.
+        """
+        x1, y1 = node_positions[src]
+        x2, y2 = node_positions[dst]
+        return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+
+    def edge_visually_overlaps(src, dst, other_src, other_dst):
+        """
+        Checks if edge src->dst visually overlaps other_src->other_dst.
+        """
+
+        if src not in node_positions or dst not in node_positions:
+            return False
+
+        if other_src not in node_positions or other_dst not in node_positions:
+            return False
+
+        # Ignore exact same directed edge comparison
+        if src == other_src and dst == other_dst:
+            return False
+
+        ax, ay = node_positions[src]
+        bx, by = node_positions[dst]
+        cx, cy = node_positions[other_src]
+        dx, dy = node_positions[other_dst]
+
+        return segments_overlap(ax, ay, bx, by, cx, cy, dx, dy)
+
+    # ---------------------------------------------------------
+    # Detect which edges should be curved
+    # ---------------------------------------------------------
+
+    curved_edges = set()
+
+    for src, dst, _ in topo_edges:
+        for other_src, other_dst, _ in topo_edges:
+            if edge_visually_overlaps(src, dst, other_src, other_dst):
+                len_current = edge_length(src, dst)
+                len_other = edge_length(other_src, other_dst)
+
+                # Prefer bending the longer edge, e.g. n0->n2 instead of n0->n1
+                if len_current >= len_other:
+                    curved_edges.add((src, dst))
+
+    # ---------------------------------------------------------
+    # Add edges from graph.json links
+    # ---------------------------------------------------------
+
+    link_info = extract_link_metrics(graph_json=graph_data, bidirectional=False)
+
+    for src, dst, link_raw in topo_edges:
+        metrics = link_info.get((src, dst), {})
+        phyrate = metrics.get("phyrate_mbps")
+        loss = metrics.get("loss_percent")
+
+        title = f"{src} → {dst}"
+        if phyrate is not None:
+            title += f"\nphyrate: {phyrate:.2f} Mbps"
+        if loss is not None:
+            title += f"\nloss: {loss:.2f} %"
+
+        if (src, dst) in curved_edges:
+            smooth = {
+                "enabled": True,
+                "type": "curvedCW",
+                "roundness": 0.2
+            }
+        else:
+            smooth = False
+
+        net.add_edge(
+            src,
+            dst,
+            title=title,
+            width=5,
+            color="rgba(80,80,80,0.7)",
+            smooth=smooth,
+            arrows=""
+        )
+
+    # Write HTML
+    net.write_html(output_file)
+
+    # Inject UI overlay + stabilization
     injection = f"""
     <script type="text/javascript">
     window.addEventListener("load", function () {{

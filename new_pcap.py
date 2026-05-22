@@ -17,6 +17,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from pyvis_utils import (find_mac_path,
                          creation_of_pyvis,
                          creation_of_pyvis_topology,
+                         creation_of_pyvis_reroute_topology,
                          extract_node_info,
                          build_mac_lookup)
 
@@ -563,7 +564,8 @@ def all_link_throughput(*,
                                           output_file=html_file,
                                           states=states,
                                           browser_html = browser_html,
-                                          flag_interval=flag_interval)
+                                          flag_interval=flag_interval,
+                                          states_json=states_json)
                         print("_______________________________________________________________________________")
                         #first_time_tcp_packet = None
                         last_rendered_time = time
@@ -729,7 +731,8 @@ def creation_of_edges_TCP(*,
                                           output_file=html_file,
                                           states=states,
                                           browser_html=browser_html,
-                                          flag_interval=flag_interval)
+                                          flag_interval=flag_interval,
+                                          states_json=states_json)
                         print("_______________________________________________________________________________")
                         first_time_tcp_packet = None
                         last_rendered_time = time
