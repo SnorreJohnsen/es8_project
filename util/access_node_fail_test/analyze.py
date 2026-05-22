@@ -77,6 +77,7 @@ PLOT_PALETTE = ["#4C72B0", "#DC1D33", "#16A944", "#D9D31C", "#E514D0"]
 PLOT_FONT_SIZE = 22
 TITLE_SCALE = 1.8
 AXIS_VALUE_SCALE = 0.8
+THROUGHPUT_PLOT_SCALE = 1_000_000.0
 
 
 def load_json(path: Path) -> Any:
@@ -387,6 +388,7 @@ def draw_event_markers(
             xycoords=transform,
             xytext=(text_x, y_text),
             textcoords=transform,
+            fontsize=PLOT_FONT_SIZE * AXIS_VALUE_SCALE,
             color="red",
             va="center",
             ha=ha,
@@ -415,6 +417,17 @@ def finite_points(times: list[float], values: list[float | None]) -> list[tuple[
     ]
 
 
+def style_plot_axis(ax: Any, title: str, xlabel: str, ylabel: str) -> None:
+    ax.set_xlabel(xlabel, fontsize=PLOT_FONT_SIZE)
+    ax.set_ylabel(ylabel, fontsize=PLOT_FONT_SIZE)
+    ax.set_title(title, fontsize=PLOT_FONT_SIZE * TITLE_SCALE)
+    ax.tick_params(axis="both", labelsize=PLOT_FONT_SIZE * AXIS_VALUE_SCALE)
+
+
+def style_plot_legend(ax: Any) -> None:
+    ax.legend(loc="best", fontsize=PLOT_FONT_SIZE * AXIS_VALUE_SCALE)
+
+
 def plot_throughput(
     rows: list[dict[str, Any]],
     requested_bps: float,
@@ -429,14 +442,15 @@ def plot_throughput(
     import matplotlib.pyplot as plt
 
     times = [float(row["sim_mid_s"]) for row in rows]
-    received = [float(row["received_bps"]) for row in rows]
-    lower = requested_bps * (1.0 - tolerance_fraction)
-    upper = requested_bps * (1.0 + tolerance_fraction)
+    received = [float(row["received_bps"]) / THROUGHPUT_PLOT_SCALE for row in rows]
+    requested_mbps = requested_bps / THROUGHPUT_PLOT_SCALE
+    lower = requested_bps * (1.0 - tolerance_fraction) / THROUGHPUT_PLOT_SCALE
+    upper = requested_bps * (1.0 + tolerance_fraction) / THROUGHPUT_PLOT_SCALE
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(times, received, marker="o", linewidth=1.2, markersize=3, label="Received bps")
-    ax.axhline(requested_bps, color="black", linewidth=1.0, label="Requested throughput")
+    fig, ax = plt.subplots(figsize=(16, 9))
+    ax.plot(times, received, marker="o", linewidth=1.2, markersize=3, label="Received throughput")
+    ax.axhline(requested_mbps, color="black", linewidth=1.0, label="Requested throughput")
     ax.axhspan(lower, upper, color="green", alpha=0.12, label="+-10% target band")
 
     markers = [
@@ -446,15 +460,18 @@ def plot_throughput(
     if settle["settled_sim_time_s"] is not None:
         markers.append((float(settle["settled_sim_time_s"]), "Settled"))
 
-    ymax = max([requested_bps, upper, *received]) if received else upper
+    ymax = max([requested_mbps, upper, *received]) if received else upper
 
-    ax.set_xlabel("Simulation time [s]")
-    ax.set_ylabel("Received throughput [bps]")
-    ax.set_title("Access-node fail throughput recovery")
+    style_plot_axis(
+        ax,
+        "Access-node fail throughput recovery",
+        "Simulation time [s]",
+        "Received throughput [Mb/s]",
+    )
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_ylim(bottom=0, top=max(ymax * 1.18, upper * 1.18))
     draw_event_markers(ax, markers, list(zip(times, received)))
-    ax.legend(loc="best")
+    style_plot_legend(ax)
     fig.tight_layout()
     fig.savefig(output, dpi=150)
     plt.close(fig)
@@ -474,7 +491,7 @@ def plot_throughput_latency(
     import matplotlib.pyplot as plt
 
     times = [float(row["sim_mid_s"]) for row in rows]
-    received = [float(row["received_bps"]) for row in rows]
+    received = [float(row["received_bps"]) / THROUGHPUT_PLOT_SCALE for row in rows]
     latency_mean = [
         None if row["latency_mean_ms"] is None else float(row["latency_mean_ms"])
         for row in rows
@@ -489,8 +506,9 @@ def plot_throughput_latency(
     latency_p95_plot = [
         math.nan if value is None else value for value in latency_p95
     ]
-    lower = requested_bps * (1.0 - tolerance_fraction)
-    upper = requested_bps * (1.0 + tolerance_fraction)
+    requested_mbps = requested_bps / THROUGHPUT_PLOT_SCALE
+    lower = requested_bps * (1.0 - tolerance_fraction) / THROUGHPUT_PLOT_SCALE
+    upper = requested_bps * (1.0 + tolerance_fraction) / THROUGHPUT_PLOT_SCALE
 
     markers = [
         (failure_time_s, "Failure"),
@@ -500,19 +518,22 @@ def plot_throughput_latency(
         markers.append((float(settle["settled_sim_time_s"]), "Settled"))
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig, (ax_throughput, ax_latency) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    fig, (ax_throughput, ax_latency) = plt.subplots(2, 1, figsize=(16, 12), sharex=True)
 
-    ax_throughput.plot(times, received, marker="o", linewidth=1.2, markersize=3, label="Received bps")
-    ax_throughput.axhline(requested_bps, color="black", linewidth=1.0, label="Requested throughput")
+    ax_throughput.plot(times, received, marker="o", linewidth=1.2, markersize=3, label="Received throughput")
+    ax_throughput.axhline(requested_mbps, color="black", linewidth=1.0, label="Requested throughput")
     ax_throughput.axhspan(lower, upper, color="green", alpha=0.12, label="+-10% target band")
-    throughput_ymax = max([requested_bps, upper, *received]) if received else upper
-    ax_throughput.set_xlabel("Simulation time [s]")
-    ax_throughput.set_ylabel("Received throughput [bps]")
-    ax_throughput.set_title("Access-node fail throughput recovery")
+    throughput_ymax = max([requested_mbps, upper, *received]) if received else upper
+    style_plot_axis(
+        ax_throughput,
+        "Access-node fail throughput recovery",
+        "",
+        "Received throughput [Mb/s]",
+    )
     ax_throughput.grid(True, axis="y", alpha=0.3)
     ax_throughput.set_ylim(bottom=0, top=max(throughput_ymax * 1.18, upper * 1.18))
     draw_event_markers(ax_throughput, markers, list(zip(times, received)))
-    ax_throughput.legend(loc="best")
+    style_plot_legend(ax_throughput)
 
     ax_latency.plot(
         times,
@@ -535,9 +556,12 @@ def plot_throughput_latency(
         if value is not None and math.isfinite(float(value))
     ]
     latency_ymax = max(latency_values) if latency_values else 1.0
-    ax_latency.set_xlabel("Simulation time [s]")
-    ax_latency.set_ylabel("Latency by send window [ms]")
-    ax_latency.set_title("Access-node fail send-window latency")
+    style_plot_axis(
+        ax_latency,
+        "Access-node fail send-window latency",
+        "Simulation time [s]",
+        "Latency by send window [ms]",
+    )
     ax_latency.grid(True, axis="y", alpha=0.3)
     ax_latency.set_ylim(bottom=0, top=max(latency_ymax * 1.18, 1.0))
     draw_event_markers(
@@ -548,7 +572,7 @@ def plot_throughput_latency(
             *finite_points(times, latency_p95),
         ],
     )
-    ax_latency.legend(loc="best")
+    style_plot_legend(ax_latency)
 
     fig.tight_layout()
     fig.savefig(output, dpi=150)
