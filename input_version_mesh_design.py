@@ -293,12 +293,12 @@ def process_drone_mesh(*,
                 video_rate= metadata["histogram_high_rate"]
                 cmd_rate= metadata["histogram_low_rate"]
                 plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram_{num_nodes_dropout}_nodes.png",
-                                                title_name=f"{grid_prefix} Video {video_rate} Mbps Histogram \n Dropout = {prefix_dropout_real_perc*100:.2f}% Tolerance = {tolerance} [m]",
+                                                title_name=f"{grid_prefix} Video {video_rate} [Mb/s] Histogram \n Dropout = {prefix_dropout_real_perc*100:.2f}% Tolerance = {tolerance} [m]",
                                                 drone_link_count=total_link_count_dropout,
                                                 iterations=dropout_iters,
                                                 file_folder_path=dir_origin_partial_plots)
                 plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{prefix_dropout_real_perc:.2f}_dropout_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_histogram_{num_nodes_dropout}_nodes.png",
-                                                title_name=f"{grid_prefix} Command {cmd_rate} Mbps Histogram \n Dropout = {prefix_dropout_real_perc*100:.2f}% Tolerance = {tolerance} [m]",
+                                                title_name=f"{grid_prefix} Command {cmd_rate} [Mb/s] Histogram \n Dropout = {prefix_dropout_real_perc*100:.2f}% Tolerance = {tolerance} [m]",
                                                 drone_link_count=total_link_count_dropout_cmd,
                                                 iterations=dropout_iters,
                                                 file_folder_path=dir_origin_partial_plots)
@@ -373,11 +373,11 @@ def process_drone_mesh(*,
             cmd_rate= metadata["histogram_low_rate"]
             # Histogram and drone position plots over full drone mesh
             plot_histogram_drone_links(file_name=f"{grid_prefix}_video_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram_{num_nodes}_nodes.png",
-                                        title_name=f"{grid_prefix} Video {video_rate} Mbps Histogram \n Tolerance = {tolerance} [m]",
+                                        title_name=f"{grid_prefix} Video {video_rate} [Mb/s] Histogram \n Tolerance = {tolerance} [m]",
                                         drone_link_count=link_count_all,
                                         file_folder_path=dir_origin_full_plots)
             plot_histogram_drone_links(file_name=f"{grid_prefix}_command_{tolerance}_tolerance_{data_rate_Mbps}_datarate_Mbps_{bandwidth_Mhz}_bandwidth_Mhz_full_histogram_{num_nodes}_nodes.png",
-                                        title_name=f"{grid_prefix} Command {cmd_rate} Mbps Histogram \n Tolerance = {tolerance} [m]",
+                                        title_name=f"{grid_prefix} Command {cmd_rate} [Mb/s] Histogram \n Tolerance = {tolerance} [m]",
                                         drone_link_count=link_count_all_cmd,
                                         file_folder_path=dir_origin_full_plots)
             
@@ -595,10 +595,10 @@ if __name__ == "__main__":
 
         print()
         if grid == "square":
-            test_grid_meta_prefix = "square"
+            test_grid_meta_prefix = "Square"
             test_grid_func = drone_sq_grid
         elif grid == "triangle":
-            test_grid_meta_prefix = "triangle"
+            test_grid_meta_prefix = "Triangle"
             test_grid_func = drone_triangle_grid
         else:
             print(f"Warning: NOT A GRID TYPE: {grid}\n")

@@ -247,16 +247,16 @@ def build_injection(color_bar_title: str,
         
         packet_info_html = f"""
         <div id="packet-info">
-            <div> Packet interval <b>{packet_prev} - {current_pkt}</b> pkts read out of <b>{total_pkts}</b> pkts </div>
-            <div> Time of interval <b>{time_prev:.2f} - {time:.2f}</b> out of <b>{total_time:.2f}</b> total time of instance </div>
+            <div> Packet interval <b>{packet_prev} - {current_pkt}</b> pkts read out of <b>{total_pkts}</b> pkts.</div>
+            <div> Time interval <b>{time_prev:.2f} - {time:.2f} [s]</b> out of <b>{total_time:.2f} [s]</b> total time of instance.</div>
             {snapshot_html}
         </div>
         """
     else:
         packet_info_html = """
         <div id="packet-info">
-            <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts</div>
-            <div>Time of instance <b>""" + f"{time:.2f}" + """</b> out of <b>""" + f"{total_time:.2f}" + """</b> total time of instance </div>
+            <div><b>""" + f"{current_pkt}" + """</b> pkts read out of <b>""" + f"{total_pkts}" + """</b> pkts.</div>
+            <div>Time instance <b>""" + f"{time:.2f}" + """ [s]</b> out of <b>""" + f"{total_time:.2f}" + """ [s]</b> total time of instance.</div>
         </div>
         """
 
@@ -487,16 +487,16 @@ def creation_of_pyvis(G,
         if plot_type in ('tcp', 'udp'):
             title = f'Transmitted packets: {format_unit(node_value)}' 
         elif plot_type == 'throughput':
-            title = f'Transmitted bits: {format_unit(node_value)}bps'          
-
+            title = f'Transmitted bits: {format_unit(node_value)}[bp/s]'          
+        
         net.add_node(
             node_id,
-            label=label,
-            size=10,
+            label=" ",
+            size=16,
             title=title,
             color=color,
-            x=x/20,
-            y=y/20,
+            x=x/15,
+            y=y/15,
             physics=False,
             shape=shape
         )
@@ -544,7 +544,7 @@ def creation_of_pyvis(G,
             title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {format_unit(data.get('weight'))}",        
             # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
             color= color,               
-            width=3
+            width=5
         )
         elif plot_type == 'udp':
             value = data.get('weight',1)
@@ -557,7 +557,7 @@ def creation_of_pyvis(G,
             title=f"Tranmission time for: First {data.get('first_time')} | Last {data.get('last_time')} |  count: {format_unit(data.get('weight'))}",        
             # title=f"Order of message: {data.get('type')}| Throughput = {data.get('TP')} mbit/s | count: {weight}",
             color=color,
-            width=3
+            width=5
         )
         elif plot_type == "throughput":
             #dt = max(data.get('last_time') - data.get('first_time'), precision_number)  # burst throughput
@@ -592,7 +592,7 @@ def creation_of_pyvis(G,
                     f"link load: {load_text} % "
                 ),
                 color=color,
-                width=3
+                width=5
             )
 
     # Save and open
@@ -607,7 +607,7 @@ def creation_of_pyvis(G,
         color_bar_title = 'UDP packets transmitted on'
         color_bar_data_links = link_values
     elif plot_type == 'throughput':
-        color_bar_title = 'Throughput [bps] on'
+        color_bar_title = 'Throughput [b/s] on'
         #color_bar_data_links = link_values # use for throughput on link
         color_bar_data_links = [0, 25, 50, 75, 100] # use for relative link load
     

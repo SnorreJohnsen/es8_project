@@ -325,7 +325,7 @@ def plot_drone_positions(*,
         alpha = scale_alpha(rate,min_rate,max_rate)
         for node in nodes:
             x, y = node.x, node.y
-            label = f"{rate:.2f} Mbps ({dist:.1f} m)"
+            label = f"{rate:.2f} Mb/s ({dist:.1f} m)"
             circle = plt.Circle(
                 (x, y),
                 dist,
@@ -352,8 +352,8 @@ def plot_drone_positions(*,
     title_text = (
     f"{title_name}\n"
     f"Drones = {len(nodes)}, d = {distance:.2f} [m], dist_comm = {dist_comm:.2f} [m] \n"
-    f"Drone PHYrate [Mbps]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f} \n"
-    f"Device PHYrate [Mbps]: Min = {np.min(device_links_rate):.2f}, Avg = {np.mean(device_links_rate):.2f} | Height = {height_diff:.0f} [m]"
+    f"Drone PHYrate [Mb/s]: Min = {min(phyrates):.2f}, Avg = {mean(phyrates):.2f}, Max = {max(phyrates):.2f} \n"
+    f"Device PHYrate [Mb/s]: Min = {np.min(device_links_rate):.2f}, Avg = {np.mean(device_links_rate):.2f} | Height = {height_diff:.0f} [m]"
     )
 
     ax_drone_pos.set_title(title_text, fontsize=font_size, fontweight='bold', x=0.3,pad=15)  # set a bit to the left and further up
@@ -366,7 +366,7 @@ def plot_drone_positions(*,
     # Create legend handles for the legend only
     for dist, rate, color in sorted_thresh:
         ax_drone_pos.scatter([], [], color=color, alpha=0.3,
-                            label=f"{rate:.2f} Mbps ({dist:.1f} m)")
+                            label=f"{rate:.2f} Mb/s ({dist:.1f} m)")
     ax_drone_pos.legend(
             title="Thresholds",
             loc='lower right',
@@ -489,12 +489,12 @@ def plot_drone_links(*,
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = plt.colorbar(sm, ax=ax, shrink=0.5)
-    cbar.set_label("PHYrate [Mbps]")
+    cbar.set_label("PHYrate [Mb/s]")
 
     title_text = (
     f"{title_name}\n"
     f"Drones = {len(nodes)}, Selected source node: {source_node} \n"
-    f"Showing links with PHYrates above {threshold_phyrate_links} [Mbps]"
+    f"Showing links with PHYrates above {threshold_phyrate_links} [Mb/s]"
     )
     ax.set_title(title_text, fontsize=font_size*2, fontweight='bold')
     ax.set_xlabel("[m]", fontsize=font_size)
@@ -755,12 +755,12 @@ def graph_sensitivity_phyrate(metadata: dict,
         # create plot
         fig, ax1 = plt.subplots(figsize=(16, 9))
 
-        ax1.set_xlabel("Receive Sensitivity (dBm)", fontsize=16)
-        ax1.set_ylabel("PHY Rate (Mbps)", fontsize=16)
+        ax1.set_xlabel("Receive Sensitivity [dBm]", fontsize=16)
+        ax1.set_ylabel("PHY Rate [Mb/s]", fontsize=16)
         ax1.tick_params(axis='both', which='major', labelsize=16)
-        ax1.plot(shannon_receive_sens, data_rates, label="Shannon",color = "lightblue")
-        ax1.plot(sensitivities, data_rates,'x',color = "orange")
-        ax1.step(sensitivities, data_rates, where='post',color="orange", label=f"Datasheet {lookup_table_name}")
+        ax1.plot(shannon_receive_sens, data_rates, label="Shannon",color = "orange")
+        ax1.plot(sensitivities, data_rates,'x',color = "cyan")
+        ax1.step(sensitivities, data_rates, where='post',color="cyan", label=f"Datasheet {lookup_table_name}")
         ax1.plot(fitted_sens, data_rates, color="green", label=f"Modified Shannon {lookup_table_name} Optimal snr_eff: {snr_eff_opt:.2f}, eta: {eta_opt:.2f}, {desired_bandwidth_Mhz} Mhz BW")
         ax1.plot(strict_fitted_sens, data_rates,color="red", label=f"Modified Shannon {lookup_table_name} Strict snr_eff: {snr_eff_strict:.2f}, eta: {eta_strict:.2f}, {desired_bandwidth_Mhz} Mhz BW")
         
@@ -869,12 +869,12 @@ def graph_range_phyrate(metadata: dict,
 
         # store row for table
         rows.append({
-            "PHY Rate (Mbps)": f"{y:.2f}",
-            "Datasheet (m)": f"{x:.2f}",
-            "Optimal (m)": f"{z_opt:.2f}",
-            "Strict (m)": f"{z_strict:.2f}",
-            "Deviation Optimal (m)": f"{deviation_opt:.2f}",
-            "Deviation Strict (m)": f"{deviation_strict:.2f}",
+            "PHY Rate [Mb/s]": f"{y:.2f}",
+            "Datasheet [m]": f"{x:.2f}",
+            "Optimal [m]": f"{z_opt:.2f}",
+            "Strict [m]": f"{z_strict:.2f}",
+            "Deviation Optimal [m]": f"{deviation_opt:.2f}",
+            "Deviation Strict [m]": f"{deviation_strict:.2f}",
         })
  
         metadata[f"{y:.2f}_Mbps_range"] = x
@@ -894,13 +894,13 @@ def graph_range_phyrate(metadata: dict,
 
         fig, ax1 = plt.subplots(figsize=(16, 9))
         plt.xscale('log')  # set x-axis to logarithmic
-        ax1.set_xlabel("Range (m)", fontsize=18)
-        ax1.set_ylabel("PHY Rate (Mbps)", fontsize=18)
+        ax1.set_xlabel("Range [m]", fontsize=18)
+        ax1.set_ylabel("PHY Rate [Mb/s]", fontsize=18)
         ax1.tick_params(axis='both', which='major', labelsize=16)
-        ax1.plot(dist_comms, data_rates,'x',color = "orange")
-        ax1.step(dist_comms, data_rates, where='post', label=f"Datasheet {lookup_table_name}", color = "orange")
-        ax1.plot(dist_comms_mod_shannon_optimal, data_rates, color="green", label=f"Modified shannon {lookup_table_name} with avg deviation of {avg_deviation_opt:.2f} (m) optimal")
-        ax1.plot(dist_comms_mod_shannon_strict, data_rates, color="red", label=f"Modified shannon {lookup_table_name} with avg deviation of {avg_deviation_strict:.2f} (m) strict")
+        ax1.plot(dist_comms, data_rates,'x',color = "cyan")
+        ax1.step(dist_comms, data_rates, where='post', label=f"Datasheet {lookup_table_name}", color = "cyan")
+        ax1.plot(dist_comms_mod_shannon_optimal, data_rates, color="green", label=f"Modified Shannon {lookup_table_name} with avg. deviation of {avg_deviation_opt:.2f} [m] optimal")
+        ax1.plot(dist_comms_mod_shannon_strict, data_rates, color="red", label=f"Modified Shannon {lookup_table_name} with avg. deviation of {avg_deviation_strict:.2f} [m] strict")
         ax1.legend(fontsize=18, loc='upper right')
         file_path_graph = os.path.join(file_folder_path, filename + ".png")
         fig.savefig(file_path_graph,dpi=300, bbox_inches = 'tight')

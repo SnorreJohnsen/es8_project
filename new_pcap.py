@@ -357,7 +357,7 @@ def tracking_of_OGM2_at_source(*,
                                encoding: str,
                                start_time: int = 0,
                                OGM2_orig_mac: str,
-                               time_interval: float = 1,
+                               stop_time: float,
                                eth_src: str = None):
     
     '''
@@ -381,7 +381,6 @@ def tracking_of_OGM2_at_source(*,
     OGM2_node = OGM2_parts[1]
 
     with open(file, "r", encoding=encoding, errors="ignore") as f:
-            stop_time = start_time + time_interval
             throughput = None
             print(f"OGM Original Address at node id: {OGM2_node} with MAC address: {OGM2_orig_mac} | Broadcasted at node id: {src_node} with MAC Adress {eth_src}")
             print("------------------------------------------------------------------------------------------------------------")
@@ -976,9 +975,9 @@ if __name__ == "__main__":
                         tracking_of_OGM2_at_source(addr_data=addr_data, 
                                                 file=analysis_file,
                                                 encoding=encoding,
-                                                start_time=13,
+                                                start_time=start_time,
                                                 OGM2_orig_mac=MAC_orig_node,
-                                                time_interval=20,
+                                                stop_time=stop_time,
                                                 eth_src=MAC_eth_src_node)
 
         if method_type == 'tcp' or method_type == 'udp':
