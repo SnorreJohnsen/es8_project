@@ -73,6 +73,11 @@ ACCESS_NODE_FAIL_TIME_ROWS = [
     ("To recovery", "settle_time_s"),
 ]
 
+PLOT_PALETTE = ["#4C72B0", "#DC1D33", "#16A944", "#D9D31C", "#E514D0"]
+PLOT_FONT_SIZE = 22
+TITLE_SCALE = 1.8
+AXIS_VALUE_SCALE = 0.8
+
 
 def load_json(path: Path) -> Any:
     with path.open(encoding="utf-8") as f:
@@ -648,6 +653,82 @@ def write_latex_table(path: Path, aggregate_rows: list[dict[str, Any]]) -> None:
     path.write_text("\n".join(output) + "\n", encoding="utf-8")
 
 
+def mesh_size_from_graph_name(graph_name: str) -> int | None:
+    match = re.search(r"_(\d+)_nodes$", graph_name)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def is_zero_loss(value: Any) -> bool:
+    parsed = parse_optional_float(value)
+    return parsed is not None and math.isclose(parsed, 0.0, abs_tol=1e-12)
+
+
+def access_node_recovery_plot_rows(aggregate_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    plot_rows = []
+    for row in aggregate_rows:
+        if not is_zero_loss(row.get("loss")):
+            continue
+        mesh_size = mesh_size_from_graph_name(str(row.get("graph_name", "")))
+        recovery_time = parse_optional_float(row.get("settle_time_s"))
+        if mesh_size is None or recovery_time is None:
+            continue
+        plot_rows.append({
+            "mesh_size": mesh_size,
+            "recovery_time_s": recovery_time,
+        })
+    return plot_rows
+
+
+def write_recovery_violin_plot(path: Path, aggregate_rows: list[dict[str, Any]]) -> None:
+    plot_rows = access_node_recovery_plot_rows(aggregate_rows)
+    if not plot_rows:
+        raise ValueError("No loss 0 rows with graph mesh size and settle_time_s found for violin plot")
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    try:
+        import pandas as pd
+        import seaborn as sns
+    except ImportError as exc:
+        raise RuntimeError(
+            "--violin-output requires pandas and seaborn in the selected Python environment"
+        ) from exc
+
+    df = pd.DataFrame(plot_rows)
+    mesh_order = sorted(df["mesh_size"].unique())
+
+    fig, ax = plt.subplots(figsize=(16, 9))
+    sns.violinplot(
+        data=df,
+        x="mesh_size",
+        y="recovery_time_s",
+        order=mesh_order,
+        inner="quart",
+        cut=0,
+        linewidth=2.5,
+        bw_method=.2,
+        density_norm="width",
+        color=PLOT_PALETTE[0],
+        ax=ax,
+    )
+    for collection in ax.collections:
+        collection.set_alpha(0.6)
+
+    fig.suptitle("Access-node fail recovery time", fontsize=PLOT_FONT_SIZE * TITLE_SCALE, y=0.98)
+    ax.set_xlabel("Mesh size", fontsize=PLOT_FONT_SIZE)
+    ax.set_ylabel("Recovery time [s]", fontsize=PLOT_FONT_SIZE)
+    ax.tick_params(axis="both", labelsize=PLOT_FONT_SIZE * AXIS_VALUE_SCALE)
+    ax.grid(True, which="major", alpha=0.3)
+    fig.tight_layout()
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=300)
+    plt.close(fig)
+
+
 def upsert_csv(path: Path, row: dict[str, Any], key_fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
@@ -803,8 +884,11 @@ def analyze(args: argparse.Namespace) -> dict[str, Any]:
             "post_active_interval_count": summaries["post_active"]["interval_count"],
         }
         upsert_csv(args.aggregate_csv, row, ["graph_name", "stream", "loss"])
+        aggregate_rows = read_csv_rows(args.aggregate_csv)
         if args.latex_output is not None:
-            write_latex_table(args.latex_output, read_csv_rows(args.aggregate_csv))
+            write_latex_table(args.latex_output, aggregate_rows)
+        if args.violin_output is not None:
+            write_recovery_violin_plot(args.violin_output, aggregate_rows)
 
     return summary
 
@@ -814,6 +898,7 @@ def main() -> None:
     ap.add_argument("run_dir", type=Path, help="Finalized access-node fail result directory")
     ap.add_argument("--aggregate-csv", type=Path, help="Aggregate CSV path to upsert")
     ap.add_argument("--latex-output", type=Path, help="Output LaTeX tabular path")
+    ap.add_argument("--violin-output", type=Path, help="Output recovery-time violin plot path")
     ap.add_argument("--graph-name", help="Graph name label for aggregate output")
     ap.add_argument("--stream", help="Stream label for aggregate output")
     ap.add_argument("--loss", help="Loss label for aggregate output")
@@ -829,6 +914,8 @@ def main() -> None:
         raise ValueError("--sustain-seconds must be > 0")
     if args.latex_output is not None and args.aggregate_csv is None:
         raise ValueError("--latex-output requires --aggregate-csv")
+    if args.violin_output is not None and args.aggregate_csv is None:
+        raise ValueError("--violin-output requires --aggregate-csv")
 
     analyze(args)
 

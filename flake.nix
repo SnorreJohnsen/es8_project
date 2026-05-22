@@ -16,7 +16,7 @@
             batctl
             iperf3
             (python3.withPackages
-              (ps: with ps; [ numpy matplotlib tqdm scipy pandas pydantic ]))
+              (ps: with ps; [ numpy matplotlib tqdm scipy pandas seaborn pydantic ]))
           ];
         };
       });

@@ -2,6 +2,6 @@ numpy>=2.3
 matplotlib>=3.10
 tqdm>=4.67
 scipy>=1.16
-pandas
+pandas>=2.0
 pydantic>=2.12
-seaborn
+seaborn>=0.13

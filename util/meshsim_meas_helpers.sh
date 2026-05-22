@@ -187,13 +187,18 @@ msh_analyze_access_node_fail() {
 	python_exe="${3:-python3}"
 	aggregate_csv="${4:-}"
 	latex_output="${5:-}"
+	violin_output="${6:-}"
 
 	if [ -z "$run_dir" ] || [ -z "$analyze_script" ]; then
-		echo "usage: msh_analyze_access_node_fail RUN_DIR ANALYZE_SCRIPT [PYTHON_EXE] [AGGREGATE_CSV] [LATEX_OUTPUT]" >&2
+		echo "usage: msh_analyze_access_node_fail RUN_DIR ANALYZE_SCRIPT [PYTHON_EXE] [AGGREGATE_CSV] [LATEX_OUTPUT] [VIOLIN_OUTPUT]" >&2
 		return 2
 	fi
 	if [ -n "$latex_output" ] && [ -z "$aggregate_csv" ]; then
 		echo "LATEX_OUTPUT requires AGGREGATE_CSV" >&2
+		return 2
+	fi
+	if [ -n "$violin_output" ] && [ -z "$aggregate_csv" ]; then
+		echo "VIOLIN_OUTPUT requires AGGREGATE_CSV" >&2
 		return 2
 	fi
 	if [ ! -d "$run_dir" ]; then
@@ -215,13 +220,14 @@ msh_analyze_access_node_fail() {
 
 	echo "Analyzing access-node fail run: $run_dir"
 	if [ -n "$aggregate_csv" ]; then
+		set -- "$run_dir" --aggregate-csv "$aggregate_csv"
 		if [ -n "$latex_output" ]; then
-			"$python_exe" "$analyze_script" "$run_dir" \
-				--aggregate-csv "$aggregate_csv" \
-				--latex-output "$latex_output"
-		else
-			"$python_exe" "$analyze_script" "$run_dir" --aggregate-csv "$aggregate_csv"
+			set -- "$@" --latex-output "$latex_output"
 		fi
+		if [ -n "$violin_output" ]; then
+			set -- "$@" --violin-output "$violin_output"
+		fi
+		"$python_exe" "$analyze_script" "$@"
 	else
 		"$python_exe" "$analyze_script" "$run_dir"
 	fi
@@ -247,6 +253,7 @@ msh_analyze_access_node_fail_tree() {
 
 	aggregate_csv="$src_dir/access_node_fail_summary.csv"
 	latex_output="$src_dir/access_node_fail_table.tex"
+	violin_output="$src_dir/access_node_fail_recovery_violinplot.png"
 	find "$src_dir" -type f -name sim_sched.json |
 		sort |
 		while IFS= read -r sched_json; do
@@ -257,7 +264,7 @@ msh_analyze_access_node_fail_tree() {
 			fi
 
 			msh_analyze_access_node_fail "$run_dir" "$analyze_script" \
-				"$python_exe" "$aggregate_csv" "$latex_output" || exit $?
+				"$python_exe" "$aggregate_csv" "$latex_output" "$violin_output" || exit $?
 		done
 }
 
@@ -280,6 +287,10 @@ msh_remove_access_node_fail_analysis_tree() {
 	if [ -f "$src_dir/access_node_fail_table.tex" ]; then
 		echo "Removing access-node fail LaTeX table: $src_dir/access_node_fail_table.tex"
 		rm -f "$src_dir/access_node_fail_table.tex" || return $?
+	fi
+	if [ -f "$src_dir/access_node_fail_recovery_violinplot.png" ]; then
+		echo "Removing access-node fail violin plot: $src_dir/access_node_fail_recovery_violinplot.png"
+		rm -f "$src_dir/access_node_fail_recovery_violinplot.png" || return $?
 	fi
 
 	find "$src_dir" -type f \( -name access_node_fail_summary.json -o -name access_node_fail_throughput.png -o -name access_node_fail_throughput_latency.png \) |
