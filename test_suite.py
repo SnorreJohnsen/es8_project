@@ -62,42 +62,44 @@ for group_name, dirs in INPUT_GROUPS.items():
 SCHEDULED_THROUGHPUTS = ["1M", "2M", "5M"]
 MESH_SIZES            = ["18", "27", "38", "46"]
 
-# (y_variable, percentile) pairs to generate for each sweep
+# (y_variable, percentile, hue) triples
+# hue = "meshsize"            → fix scheduled_throughput, sweep over SCHEDULED_THROUGHPUTS
+# hue = "scheduled_throughput" → fix mesh_size,           sweep over MESH_SIZES
 Y_SPECS = [
-    ("loss_vs_transmit",          "95"),
-    ("loss_vs_scheduled",         "95"),
-    ("scheduled_vs_transmit_loss","95"),
-    ("throughput",                "95"),
-    ("latency",                   "99"),
-    ("latency",                   "95"),
-    ("latency",                   "mean"),
-    ("jitter",                    "mean"),
-    ("jitter",                    "95"),
-    ("jitter",                    "99"),
+    #("loss_vs_transmit",           "95",  "meshsize"),
+    ("loss_vs_scheduled",          "95",  "meshsize"),
+    #("scheduled_vs_transmit_loss", "95",  "meshsize"),
+    ("throughput",                 "95",  "meshsize"),
+    ("latency",                    "99",  "scheduled_throughput"),
+    ("latency",                    "95",  "scheduled_throughput"),
+    #("latency",                    "mean","scheduled_throughput"),
+    #("jitter",                     "mean","scheduled_throughput"),
+    ("jitter",                     "95",  "scheduled_throughput"),
+    ("jitter",                     "99",  "scheduled_throughput"),
 ]
 
 # ── Plot specifications (auto-generated) ──────────────────────────────────────
 PLOT_SPECS = []
 
-for y, perc in Y_SPECS:
-    for sch_tp in SCHEDULED_THROUGHPUTS:
-        PLOT_SPECS.append({
-            "percentile": perc,
-            "x": "num_streams",
-            "y": y,
-            "hue": "meshsize",
-            "filters": {"scheduled_throughput": sch_tp},
-        })
-
-for y, perc in Y_SPECS:
-    for ms in MESH_SIZES:
-        PLOT_SPECS.append({
-            "percentile": perc,
-            "x": "num_streams",
-            "y": y,
-            "hue": "scheduled_throughput",
-            "filters": {"mesh_size": ms},
-        })
+for y, perc, hue in Y_SPECS:
+    if hue == "meshsize":
+        for sch_tp in SCHEDULED_THROUGHPUTS:
+            PLOT_SPECS.append({
+                "percentile": perc,
+                "x": "num_streams",
+                "y": y,
+                "hue": "meshsize",
+                "filters": {"scheduled_throughput": sch_tp},
+            })
+    elif hue == "scheduled_throughput":# scheduled_throughput
+        for ms in MESH_SIZES:
+            PLOT_SPECS.append({
+                "percentile": perc,
+                "x": "num_streams",
+                "y": y,
+                "hue": "scheduled_throughput",
+                "filters": {"mesh_size": ms},
+            })
 
 # ── Optional global flags ─────────────────────────────────────────────────────
 VERBOSE    = False
