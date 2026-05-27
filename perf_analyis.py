@@ -20,6 +20,8 @@ TITLE_SCALE = 1.8
 UNDERTITLE_SCALE = 1.3
 AXIS_VALUE_SCALE = 0.8
 PALLETTE = ["#4C72B0", "#DC1D33","#16A944","#D9D31C","#E514D0"]
+# Colours for theoretical hop-count overlay (kept distinct from PALLETTE)
+THEORY_COLORS = ["#e41a1c", "#ff7f00", "#4daf4a", "#984ea3", "#a65628", "#f781bf"]
 
 def extract_percentile_data(dict_name: str, file_data: dict, percentile: str) -> dict:
     data = file_data.get(dict_name, {})
@@ -406,7 +408,8 @@ def plot_graph(x_axis: list,
                hue=None,
                hue_label: str = None,
                log_scale_x: bool = False,
-               log_scale_y: bool = False):
+               log_scale_y: bool = False,
+               theory_hops: int = 0):
 
     fig, ax = plt.subplots(figsize=picture_size)
 
@@ -425,17 +428,49 @@ def plot_graph(x_axis: list,
             x=x_axis,
             y=y_axis,
             ax=ax,
-            color=PALLETTE[0]
+            color=PALLETTE[0],
+            alpha=0.6
         )
 
-    ax.legend(
-            title=hue_label or axis_labels[2],
-            loc="best",
-            fontsize=fontsize * AXIS_VALUE_SCALE,
-            title_fontsize=fontsize,
-            frameon=True,
-        )
-    
+    # Theoretical hop-count overlay (assumes x is link_loss in %)
+    theory_handles = []
+    if theory_hops > 0:
+        x_sorted = sorted(set(x_axis))
+        for hop in range(1, theory_hops + 1):
+            color = THEORY_COLORS[(hop - 1) % len(THEORY_COLORS)]
+            theory_y = [(1 - (1 - x / 100) ** hop) * 100 for x in x_sorted]
+            (line,) = ax.plot(
+                x_sorted, theory_y,
+                linestyle="--", color=color, linewidth=2.5,
+                marker="o", markersize=6, zorder=5,
+                label=f"{hop} hop{'s' if hop > 1 else ''}",
+            )
+            theory_handles.append(line)
+
+    data_handles, data_labels = ax.get_legend_handles_labels()
+    # Separate seaborn data handles from theory handles
+    seaborn_handles = [h for h, l in zip(data_handles, data_labels)
+                       if not l.endswith("hop") and not l.endswith("hops")]
+    seaborn_labels  = [l for l in data_labels
+                       if not l.endswith("hop") and not l.endswith("hops")]
+
+    legend_kw = dict(fontsize=fontsize * AXIS_VALUE_SCALE,
+                     title_fontsize=fontsize, frameon=True)
+    if theory_handles and seaborn_handles:
+        leg1 = ax.legend(seaborn_handles, seaborn_labels,
+                         title=hue_label or (axis_labels[2] if len(axis_labels) > 2 else ""),
+                         loc="upper left", **legend_kw)
+        ax.add_artist(leg1)
+        ax.legend(theory_handles, [h.get_label() for h in theory_handles],
+                  title="Theoretical loss", loc="upper right", **legend_kw)
+    elif theory_handles:
+        ax.legend(theory_handles, [h.get_label() for h in theory_handles],
+                  title="Theoretical loss", loc="best", **legend_kw)
+    elif seaborn_handles:
+        ax.legend(seaborn_handles, seaborn_labels,
+                  title=hue_label or (axis_labels[2] if len(axis_labels) > 2 else ""),
+                  loc="best", **legend_kw)
+
     fig.suptitle(titlename, fontsize=fontsize * TITLE_SCALE, y=0.98)
     ax.set_title(sub_title, fontsize=fontsize * UNDERTITLE_SCALE, pad=10)
     if log_scale_x:
@@ -524,6 +559,7 @@ def plot_violin(
     picture_size: tuple = (16, 9),
     log_scale_y: bool = False,
     hue_label: str = None,
+    theory_hops: int = 0,
 ):
 
     fig, ax = plt.subplots(figsize=picture_size)
@@ -535,7 +571,6 @@ def plot_violin(
 
     if has_hue:
         split = violin_df["hue"].nunique() >= 2
-
         n_hues = violin_df["hue"].nunique()
         sns.violinplot(
             data=violin_df,
@@ -567,13 +602,46 @@ def plot_violin(
             ax=ax,
         )
 
-    ax.legend(
-            title=hue_label or axis_labels[2],
-            loc="best",
-            fontsize=fontsize * AXIS_VALUE_SCALE,
-            title_fontsize=fontsize,
-            frameon=True,
-        )
+    # Theoretical hop-count overlay
+    # Violin x-axis is categorical: sorted unique x values map to positions 0, 1, 2, …
+    theory_handles = []
+    if theory_hops > 0:
+        x_categories = sorted(violin_df["x"].unique())
+        positions = list(range(len(x_categories)))
+        for hop in range(2, theory_hops + 1):
+            color = THEORY_COLORS[(hop - 1) % len(THEORY_COLORS)]
+            theory_y = [(1 - (1 - x / 100) ** hop) * 100 for x in x_categories]
+            (line,) = ax.plot(
+                positions, theory_y,
+                linestyle="--", color=color, linewidth=2.5,
+                marker="o", markersize=6, zorder=5,
+                label=f"{hop} hop{'s' if hop > 1 else ''}",
+            )
+            theory_handles.append(line)
+
+    # Build legend(s)
+    seaborn_handles, seaborn_labels = ax.get_legend_handles_labels()
+    seaborn_handles = [h for h, l in zip(seaborn_handles, seaborn_labels)
+                       if not l.endswith("hop") and not l.endswith("hops")]
+    seaborn_labels  = [l for l in seaborn_labels
+                       if not l.endswith("hop") and not l.endswith("hops")]
+
+    legend_kw = dict(fontsize=fontsize * AXIS_VALUE_SCALE,
+                     title_fontsize=fontsize, frameon=True)
+    if theory_handles and seaborn_handles:
+        leg1 = ax.legend(seaborn_handles, seaborn_labels,
+                         title=hue_label or (axis_labels[2] if len(axis_labels) > 2 else ""),
+                         loc="best", **legend_kw)
+        ax.add_artist(leg1)
+        ax.legend(theory_handles, [h.get_label() for h in theory_handles],
+                  title="Theoretical loss", loc="best", **legend_kw)
+    elif theory_handles:
+        ax.legend(theory_handles, [h.get_label() for h in theory_handles],
+                  title="Theoretical loss", loc="best", **legend_kw)
+    elif seaborn_handles:
+        ax.legend(seaborn_handles, seaborn_labels,
+                  title=hue_label or (axis_labels[2] if len(axis_labels) > 2 else ""),
+                  loc="best", **legend_kw)
 
     if log_scale_y:
         ax.set_yscale("log")
@@ -604,7 +672,7 @@ def axis_units(axis_names: list, variable_map: list[dict], percentile: str = Non
         info = next((v for v in variable_map if v["name"] == name), None)
         if info:
             if perc_str and info.get("uses_percentile"):
-                labels.append(f"{info['label']} [{info['unit']}] (percentile = {perc_str})")
+                labels.append(f"{info['label']} [{info['unit']}] ({perc_str})")
             else:
                 labels.append(f"{info['label']} [{info['unit']}]")
             unit_strings.append(f"[{info['unit']}]")
@@ -728,9 +796,7 @@ def plot_titling(
 
     has_percentile = any(name in percentile_metrics for name in axis_names)
 
-    if has_percentile:
-        percentile_str = percentile.split("_")[0]
-        title_parts.append(f"Percentile: {percentile_str}")
+    _ = has_percentile  # percentile shown on axis label, not in title
 
     if constants:
         for constant in constants:
@@ -794,6 +860,11 @@ if __name__ == "__main__":
     parser.add_argument('--hue', type=str, help='Optional grouping variable for seaborn hue')
     parser.add_argument('-v', '--verbose', action="store_true", help='set verbosity')
     parser.add_argument("-f", "--filter", action="append", help="Filter format: key=value (can be repeated)")
+    parser.add_argument("--title", type=str, default=None, help="Override the plot title (default: auto-generated)")
+    parser.add_argument("--theory-hops", type=int, default=0, metavar="N",
+                        help="Overlay theoretical hop-count packet-loss curves for 1..N hops (assumes x=link_loss %%)")
+    parser.add_argument("--plot-type", type=str, default="all",
+                        help="Which plot(s) to generate: scatter, box, violin, or all (default: all). Comma-separated for multiple, e.g. violin,box")
 
     args = parser.parse_args()
     filters = args.filter or []
@@ -802,6 +873,12 @@ if __name__ == "__main__":
     output_path = args.output or Path("./plots")
     req_client = args.client
     req_server = args.server
+    custom_title = args.title
+    theory_hops  = args.theory_hops
+    _requested_plots = {p.strip().lower() for p in args.plot_type.split(",")}
+    do_scatter = "all" in _requested_plots or "scatter" in _requested_plots
+    do_box     = "all" in _requested_plots or "box"     in _requested_plots
+    do_violin  = "all" in _requested_plots or "violin"  in _requested_plots
 
     if req_client is not None:
         req_client = req_client.strip().lower().split(",")
@@ -939,6 +1016,7 @@ if __name__ == "__main__":
 
                 interval_step, json_file_data, end_time = nsperf_interval_set(f)
                 data, ids = sorting_data_nsperf(file_data=json_file_data, interval_step=interval_step, percentile=percentile, max_window=None)
+                print(data)
 
                 if interval_step is None:
                     axis_values = []
@@ -1260,25 +1338,27 @@ if __name__ == "__main__":
     log_y = log_scales[1] if len(log_scales) > 1 else False
     hue_legend = textwrap.fill(axis_labels[2], width=14) if len(axis_labels) > 2 else None
 
-    plot_graph(
-        x_axis=scaled_x_values,
-        y_axis=scaled_y_values,
-        axis_labels=axis_labels,
-        hue=(
-            scaled_hue_values
-            if any(v is not None for v in scaled_hue_values)
-            else None
-        ),
-        hue_label=hue_legend,
-        fontsize=FONT_SIZE,
-        picture_size=(16, 9),
-        file_path=output_path / "data_points",
-        titlename="Stress Test - 10 Iterations",              #f" DATA points {plot_title}",
-        sub_title=plot_under_title,
-        file_name=f"{plot_file_name}.png",
-        log_scale_x=log_x,
-        log_scale_y=log_y,
-    )
+    if do_scatter:
+        plot_graph(
+            x_axis=scaled_x_values,
+            y_axis=scaled_y_values,
+            axis_labels=axis_labels,
+            hue=(
+                scaled_hue_values
+                if any(v is not None for v in scaled_hue_values)
+                else None
+            ),
+            hue_label=hue_legend,
+            fontsize=FONT_SIZE,
+            picture_size=(16, 9),
+            file_path=output_path / "data_points",
+            titlename=custom_title or plot_title,
+            sub_title=plot_under_title,
+            file_name=f"{plot_file_name}.png",
+            log_scale_x=log_x,
+            log_scale_y=log_y,
+            theory_hops=theory_hops,
+        )
 
     if axis_names[0] not in ("link_loss", "num_streams"):
         bin_values = bin_splitting(scaled_x_values)
@@ -1293,31 +1373,34 @@ if __name__ == "__main__":
         for x, y in zip(scaled_x_values, scaled_y_values):
             box_data[x].append(y)
 
-    plot_boxplot(
-        df=violin_df,
-        axis_labels=axis_labels,
-        fontsize=FONT_SIZE,
-        picture_size=(16, 9),
-        file_path=output_path / "boxplot",
-        file_name=f"{plot_file_name}.png",
-        titlename="Stress Test - 10 Iterations",              #f"BOXPLOT {plot_title}",
-        sub_title=plot_under_title,
-        log_scale_y=log_y,
-        hue_label=hue_legend,
-    )
+    if do_box:
+        plot_boxplot(
+            df=violin_df,
+            axis_labels=axis_labels,
+            fontsize=FONT_SIZE,
+            picture_size=(16, 9),
+            file_path=output_path / "boxplot",
+            file_name=f"{plot_file_name}.png",
+            titlename=custom_title or plot_title,
+            sub_title=plot_under_title,
+            log_scale_y=log_y,
+            hue_label=hue_legend,
+        )
 
-    plot_violin(
-        violin_df=violin_df,
-        axis_labels=axis_labels,
-        titlename="Stress Test - 10 Iterations",      #f" Violin {plot_title}",
-        fontsize=FONT_SIZE,
-        picture_size=(16, 9),
-        file_path=output_path / "violin",
-        file_name=f"{plot_file_name}.png",
-        sub_title=plot_under_title,
-        log_scale_y=log_y,
-        hue_label=hue_legend,
-    )
+    if do_violin:
+        plot_violin(
+            violin_df=violin_df,
+            axis_labels=axis_labels,
+            titlename=custom_title or plot_title,
+            fontsize=FONT_SIZE,
+            picture_size=(16, 9),
+            file_path=output_path / "violin",
+            file_name=f"{plot_file_name}.png",
+            sub_title=plot_under_title,
+            log_scale_y=log_y,
+            hue_label=hue_legend,
+            theory_hops=theory_hops,
+        )
     if verbosity:
         for name in percentile_metrics:
             if name in axis_names:

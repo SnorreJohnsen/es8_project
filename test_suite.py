@@ -5,17 +5,18 @@ from pathlib import Path
 from tqdm import tqdm
 
 # ── Output root ───────────────────────────────────────────────────────────────
-OUTPUT_ROOT = Path("./test_dropout")
+OUTPUT_ROOT = Path("./test_drop_brother")
 
 # ── Input directories to analyse ─────────────────────────────────────────────
 # SCAN_ROOT   : root folder to search under
-# SCAN_SUFFIX : only collect dirs whose name ends with (e.g. "_step")
+# SCAN_SUFFIX : only collect dirs whose name ends with this (e.g. "_step")
 # GROUP_BY_SUFFIX : if set, group collected dirs by the ancestor folder whose
-#                   name ends with this suffix (e.g. "_fail" ) dirs merged into one group/run.
+#                   name ends with this suffix (e.g. "_fail" → one group per
+#                   unique fail value, all its step dirs merged into one run).
 #                   Set to None to treat each found dir as its own input.
 # INPUT_BASE  : strip this prefix when building output subfolder paths.
 #               Set to None to just use the dir name.
-SCAN_ROOT        = Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_test_dropout")
+SCAN_ROOT        = Path(r"C:\Repositeries\ES8-Semester\Project-ES8\drop_final_stripped")
 SCAN_SUFFIX      = "_step"
 GROUP_BY_SUFFIX  = "_fail"
 INPUT_BASE       = Path(r"C:\Repositeries\ES8-Semester\Project-ES8")
@@ -27,10 +28,16 @@ def _find_ancestor_part(path: Path, suffix: str) -> str:
     return "ungrouped"
 
 if SCAN_ROOT is not None:
-    _found = sorted(p for p in SCAN_ROOT.rglob("*") if p.is_dir() and p.name.endswith(SCAN_SUFFIX))
+    print(f"Scanning {SCAN_ROOT} for *{SCAN_SUFFIX} dirs...")
+    _all_dirs = list(SCAN_ROOT.rglob("*"))
+    _found = sorted(
+        p for p in tqdm(_all_dirs, desc="Scanning", unit="dir", dynamic_ncols=True)
+        if p.is_dir() and p.name.endswith(SCAN_SUFFIX)
+    )
+    print(f"  Found {len(_found)} dir(s) ending in '{SCAN_SUFFIX}'")
     if GROUP_BY_SUFFIX is not None:
         _groups: dict[str, list[Path]] = defaultdict(list)
-        for p in _found:
+        for p in tqdm(_found, desc=f"Grouping by *{GROUP_BY_SUFFIX}", unit="dir", dynamic_ncols=True):
             _groups[_find_ancestor_part(p, GROUP_BY_SUFFIX)].append(p)
         INPUT_GROUPS = dict(_groups)
     else:
@@ -40,8 +47,8 @@ else:
         #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_1000startdelay"),
         #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\stress_beast"),
         #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\stress_beast_1000ms"),
-        #Path(r"C:\Repositeries\ES8-Semester\nsperf_stress_test_many_streams"),
-        Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_test_dropout"),
+        Path(r"C:\Repositeries\ES8-Semester\nsperf_stress_test_many_streams"),
+        #Path(r"C:\Repositeries\ES8-Semester\nsperf_stress_test_dropout"),
         #Path(r"C:\Repositeries\ES8-Semester\Project-ES8\nsperf_stress_flyvfart"),
     ]
     INPUT_GROUPS = {p.name: [p] for p in _manual}
@@ -50,10 +57,10 @@ print("Groups found:")
 for group_name, dirs in INPUT_GROUPS.items():
     print(f"  {group_name}  ({len(dirs)} dir(s))")
 # ── Axis / filter values to sweep over ───────────────────────────────────────
-SCHEDULED_THROUGHPUTS = ["5M"]
-MESH_SIZES            = ["18", "27"]
-#SCHEDULED_THROUGHPUTS = ["1M", "2M", "5M"]
-#MESH_SIZES            = ["18", "27", "38", "46"]
+#SCHEDULED_THROUGHPUTS = ["5M"]
+#MESH_SIZES            = ["18", "27","38"]
+SCHEDULED_THROUGHPUTS = ["1M", "2M", "5M"]
+MESH_SIZES            = ["18", "27", "38", "46"]
 
 # (y_variable, percentile) pairs to generate for each sweep
 Y_SPECS = [
@@ -61,6 +68,7 @@ Y_SPECS = [
     ("loss_vs_scheduled",         "95"),
     ("scheduled_vs_transmit_loss","95"),
     ("throughput",                "95"),
+    ("latency",                   "99"),
     ("latency",                   "95"),
     ("latency",                   "mean"),
     ("jitter",                    "mean"),
@@ -81,25 +89,42 @@ for y, perc in Y_SPECS:
             "filters": {"scheduled_throughput": sch_tp},
         })
 
-# for y, perc in Y_SPECS:
-#     for ms in MESH_SIZES:
-#         PLOT_SPECS.append({
-#             "percentile": perc,
-#             "x": "num_streams",
-#             "y": y,
-#             "hue": "scheduled_throughput",
-#             "filters": {"mesh_size": ms},
-#         })
+for y, perc in Y_SPECS:
+    for ms in MESH_SIZES:
+        PLOT_SPECS.append({
+            "percentile": perc,
+            "x": "num_streams",
+            "y": y,
+            "hue": "scheduled_throughput",
+            "filters": {"mesh_size": ms},
+        })
 
 # ── Optional global flags ─────────────────────────────────────────────────────
-VERBOSE = False
+VERBOSE    = False
+PLOT_TYPE  = "violin"   # scatter | box | violin | all  (comma-separated for multiple)
+BASE_TITLE = "Drop Test - 5 Iterations"  # prepended to every plot title
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 SCRIPT = Path(__file__).parent / "perf_analyis.py"
 
 
-def build_cmd(group_dirs: list[Path], output_dir: Path, spec: dict) -> list[str]:
+def _group_title(group_name: str) -> str:
+    """Build a plot title from the group name.
+
+    If the group name ends with GROUP_BY_SUFFIX (e.g. '0.015_fail') the
+    failure probability is extracted and rendered as a mathtext subscript:
+        Dropout Stress Test  |  P_failure = 0.015
+    Otherwise (no grouping / ungrouped dir) just return BASE_TITLE.
+    """
+    if GROUP_BY_SUFFIX and group_name.endswith(GROUP_BY_SUFFIX):
+        fail_val   = group_name[: -len(GROUP_BY_SUFFIX)].rstrip("_")
+        fail_label = rf"$p_{{\mathrm{{failure}}}}$ = {fail_val}"
+        return f"{BASE_TITLE}  |  {fail_label}"
+    return BASE_TITLE
+
+
+def build_cmd(group_dirs: list[Path], output_dir: Path, spec: dict, group_name: str = "") -> list[str]:
     cmd = [sys.executable, str(SCRIPT)]
     for d in group_dirs:
         cmd += ["-i", str(d)]
@@ -117,6 +142,11 @@ def build_cmd(group_dirs: list[Path], output_dir: Path, spec: dict) -> list[str]
         cmd += ["-s", spec["server"]]
     for k, v in spec.get("filters", {}).items():
         cmd += ["-f", f"{k}={v}"]
+    title = spec.get("title") or (group_name and _group_title(group_name))
+    if title:
+        cmd += ["--title", title]
+    if PLOT_TYPE and PLOT_TYPE != "all":
+        cmd += ["--plot-type", PLOT_TYPE]
     if VERBOSE:
         cmd += ["-v"]
     return cmd
@@ -154,7 +184,7 @@ def run_spec(group_name: str, group_dirs: list[Path], spec: dict, idx: int, tota
     print(f"         {label}")
     print(f"         → {output_dir}")
 
-    cmd = build_cmd(group_dirs, output_dir, spec)
+    cmd = build_cmd(group_dirs, output_dir, spec, group_name)
     result = subprocess.run(cmd, text=True)
 
     if result.returncode != 0:
