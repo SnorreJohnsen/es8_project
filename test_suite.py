@@ -63,8 +63,8 @@ SCHEDULED_THROUGHPUTS = ["1M", "2M", "5M"]
 MESH_SIZES            = ["18", "27", "38", "46"]
 
 # (y_variable, percentile, hue) triples
-# hue = "meshsize"            → fix scheduled_throughput, sweep over SCHEDULED_THROUGHPUTS
-# hue = "scheduled_throughput" → fix mesh_size,           sweep over MESH_SIZES
+# hue = "meshsize"            fix scheduled_throughput, sweep over SCHEDULED_THROUGHPUTS
+# hue = "scheduled_throughput"  fix mesh_size,           sweep over MESH_SIZES
 Y_SPECS = [
     #("loss_vs_transmit",           "95",  "meshsize"),
     ("loss_vs_scheduled",          "95",  "meshsize"),
@@ -78,7 +78,7 @@ Y_SPECS = [
     ("jitter",                     "99",  "scheduled_throughput"),
 ]
 
-# ── Plot specifications (auto-generated) ──────────────────────────────────────
+# ── Plot specifications ──────────────────────────────────────
 PLOT_SPECS = []
 
 for y, perc, hue in Y_SPECS:
